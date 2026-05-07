@@ -210,8 +210,8 @@ class APIServer {
     if (this.server) {
       const srv = this.server;
       this.server = null;
-      srv.close((err) => {
-        if (callback) callback(err);
+      srv.close(() => {
+        if (callback) callback();
       });
     } else if (callback) {
       callback();

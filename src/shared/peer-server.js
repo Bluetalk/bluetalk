@@ -605,6 +605,7 @@ class PeerServer extends EventEmitter {
       });
 
       let settled = false;
+      let pendingPromise = null;
 
       const finishReject = (err) => {
         if (settled) return;
@@ -716,6 +717,11 @@ class PeerServer extends EventEmitter {
         req.destroy(new Error('Connection timed out'));
       });
       req.end();
+
+      // Store reference to this promise for cleanup handlers
+      pendingPromise = this._pendingConnections.get(
+        descriptor.peerId || candidates.map((c) => `${c.host}:${c.port}`).sort().join('|')
+      );
     });
   }
 
@@ -1024,12 +1030,18 @@ class PeerServer extends EventEmitter {
 
   hostFile(fileMeta) {
     const fileId = crypto.randomBytes(6).toString('hex');
+    let data;
+    try {
+      data = Buffer.from(fileMeta.data, 'base64');
+    } catch (e) {
+      throw new Error('Invalid base64 file data');
+    }
     this.hostedFiles.set(fileId, {
       id: fileId,
       name: fileMeta.name,
       size: fileMeta.size,
       type: fileMeta.type,
-      data: Buffer.from(fileMeta.data, 'base64'),
+      data,
       createdAt: Date.now(),
     });
 

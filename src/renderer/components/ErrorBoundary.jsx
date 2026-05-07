@@ -12,7 +12,7 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    if (import.meta.env?.DEV) {
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
       console.error('ErrorBoundary', error, info);
     }
   }

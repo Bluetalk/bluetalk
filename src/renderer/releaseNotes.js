@@ -3,6 +3,17 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.10': {
+    title: "What's new in BlueTalk 1.1.10",
+    items: [
+      'Fixed reference error in peer connection cleanup where pendingPromise was used before initialization.',
+      'Fixed non-existent autoUpdater properties (quitAndInstallCalled, installDirectory) that could cause errors.',
+      'Fixed stale message cache after deleting messages or chats.',
+      'Fixed API server stop callback to match Node.js server.close signature.',
+      'Fixed import.meta.env access in ErrorBoundary for compatibility.',
+      'Added validation for invalid base64 file data in hostFile.',
+    ],
+  },
   '1.1.7': {
     title: "What's new in BlueTalk 1.1.7",
     items: [

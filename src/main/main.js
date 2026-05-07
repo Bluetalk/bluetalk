@@ -255,10 +255,6 @@ function configureAutoUpdater() {
   autoUpdater.autoDownload = prefs.autoDownloadUpdates;
   // On Windows we use a custom quit handler; don't let electron-updater auto-install
   autoUpdater.autoInstallOnAppQuit = process.platform !== 'win32';
-  // Assisted NSIS (oneClick: false) needs /D for silent updates or the wizard asks for a path.
-  if (process.platform === 'win32' && app.isPackaged) {
-    autoUpdater.installDirectory = path.dirname(process.execPath);
-  }
   autoUpdater.disableWebInstaller = true;
   patchUpdateState();
   return true;
@@ -376,7 +372,6 @@ function installPendingUpdateOnQuit(_event, exitCode) {
   const prefs = getUpdaterPreferences();
   if (!prefs.autoUpdateEnabled) return;
   if (updateState.status !== 'downloaded') return;
-  if (autoUpdater.quitAndInstallCalled) return;
 
   try {
     // Use quitAndInstall for proper update installation on quit

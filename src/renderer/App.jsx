@@ -1134,6 +1134,7 @@ export default function App() {
     setMessages((prev) => {
       const list = prev[peerId] || [];
       const updated = list.filter((m) => m.messageId !== messageId);
+      messageCacheRef.current = { ...messageCacheRef.current, [peerId]: updated };
       return { ...prev, [peerId]: updated };
     });
 
@@ -1173,6 +1174,7 @@ export default function App() {
     setMessages((prev) => {
       const updated = { ...prev };
       delete updated[peerId];
+      messageCacheRef.current = updated;
       return updated;
     });
     setChatMeta((prev) => {
