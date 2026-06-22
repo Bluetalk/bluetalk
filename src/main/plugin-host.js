@@ -5,6 +5,10 @@ const path = require('path');
 const vm = require('vm');
 const { app, Notification } = require('electron');
 
+const MAX_PLUGIN_FILES = 250;
+const MAX_PLUGIN_BYTES = 25 * 1024 * 1024;
+const RESERVED_IDS = new Set(['__proto__', 'prototype', 'constructor']);
+
 /**
  * PluginHost — loads user plugins from `<userData>/plugins/<id>/`.
  *
@@ -55,12 +59,30 @@ const ALLOWED_EVENTS = [
 ];
 
 function safeId(raw) {
-  return String(raw || '')
+  const id = String(raw || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_.-]/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 64);
+  return RESERVED_IDS.has(id) ? '' : id;
+}
+
+function resolvePluginEntry(dir, requested, fallback) {
+  const relative = String(requested || fallback).replace(/\\/g, '/');
+  if (!relative || path.posix.isAbsolute(relative) || relative.split('/').some((part) => part === '..')) return '';
+  const resolved = path.resolve(dir, relative);
+  const rel = path.relative(path.resolve(dir), resolved);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || path.extname(resolved).toLowerCase() !== '.js') return '';
+  return resolved;
+}
+
+function resolvePluginPayloadPath(root, value) {
+  const relative = String(value || '').replace(/\\/g, '/');
+  if (!relative || path.posix.isAbsolute(relative) || relative.split('/').some((part) => !part || part === '..')) return '';
+  const resolved = path.resolve(root, relative);
+  const rel = path.relative(path.resolve(root), resolved);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? resolved : '';
 }
 
 function readJsonSafe(filePath) {
@@ -169,7 +191,7 @@ class PluginHost extends EventEmitter {
     const dir = path.join(this.pluginsDir, id);
     const manifestPath = path.join(dir, 'manifest.json');
     const manifest = readJsonSafe(manifestPath);
-    if (!manifest || !manifest.id) {
+    if (!manifest || !manifest.id || safeId(manifest.id) !== id) {
       console.warn(`[PluginHost] ${id}: missing or invalid manifest.json`);
       return;
     }
@@ -179,14 +201,21 @@ class PluginHost extends EventEmitter {
     const shouldEnable =
       Object.prototype.hasOwnProperty.call(enabledMap, id)
         ? Boolean(enabledMap[id])
-        : manifest.autoEnable !== false;
+        : manifest.autoEnable === true;
 
-    const uiFile = path.join(dir, manifest.ui || 'ui.js');
+    const uiFile = resolvePluginEntry(dir, manifest.ui, 'ui.js');
+    const mainFile = resolvePluginEntry(dir, manifest.main, 'main.js');
+    if (!uiFile || !mainFile) {
+      console.warn(`[PluginHost] ${id}: plugin entry path escapes its folder or is not JavaScript`);
+      return;
+    }
     const ui = fs.existsSync(uiFile) ? await readFileSafe(uiFile) : '';
 
     if (existing) {
       existing.manifest = manifest;
       existing.ui = ui;
+      existing.uiFile = uiFile;
+      existing.mainFile = mainFile;
       if (existing.enabled !== shouldEnable) {
         if (shouldEnable) {
           await this._activate(existing);
@@ -202,6 +231,8 @@ class PluginHost extends EventEmitter {
       dir,
       enabled: false,
       ui,
+      uiFile,
+      mainFile,
       eventListeners: new Map(),
       commands: new Map(),
       disposers: new Set(),
@@ -217,8 +248,7 @@ class PluginHost extends EventEmitter {
 
   async _activate(record) {
     if (record.enabled) return;
-    const { manifest, dir } = record;
-    const mainFile = path.join(dir, manifest.main || 'main.js');
+    const { manifest, mainFile } = record;
     record.lastError = '';
     record.enabled = true;
 
@@ -536,7 +566,7 @@ class PluginHost extends EventEmitter {
         id,
         manifest: { ...record.manifest },
         enabled: record.enabled,
-        hasMain: fs.existsSync(path.join(record.dir, record.manifest.main || 'main.js')),
+        hasMain: Boolean(record.mainFile && fs.existsSync(record.mainFile)),
         hasUi: Boolean(record.ui),
         ui: record.ui || '',
         dir: record.dir,
@@ -592,39 +622,58 @@ class PluginHost extends EventEmitter {
     }
   }
 
-  async installFromDirectory(sourceDir) {
+  async installFromDirectory(sourceDir, options = {}) {
     const src = path.resolve(sourceDir);
     const manifest = readJsonSafe(path.join(src, 'manifest.json'));
     if (!manifest || !manifest.id) {
       throw new Error('Missing or invalid manifest.json');
     }
     const id = safeId(manifest.id);
-    if (!id) throw new Error('Invalid plugin id');
+    if (!id || id !== String(manifest.id).trim().toLowerCase()) throw new Error('Invalid plugin id');
+    if (!resolvePluginEntry(src, manifest.main, 'main.js') || !resolvePluginEntry(src, manifest.ui, 'ui.js')) {
+      throw new Error('Plugin entry path must stay inside the plugin folder and point to JavaScript');
+    }
     const target = path.join(this.pluginsDir, id);
+    if (path.resolve(target) === src) throw new Error('Cannot install a plugin from its destination folder');
+    if (typeof options.initialEnabled === 'boolean') {
+      this.setEnabled(id, options.initialEnabled);
+    }
     await fsp.rm(target, { recursive: true, force: true });
-    await copyDir(src, target);
+    await copyDir(src, target, { files: 0, bytes: 0 });
     await this._loadOne(id);
     return this.getPlugin(id);
   }
 
-  async installFromPayload({ id, files }) {
+  async installFromPayload({ id, files }, options = {}) {
     const pluginId = safeId(id);
     if (!pluginId) throw new Error('Invalid plugin id');
     if (!files || typeof files !== 'object') throw new Error('No files provided');
+    const entries = Object.entries(files);
+    if (entries.length > MAX_PLUGIN_FILES) throw new Error('Plugin contains too many files');
     const target = path.join(this.pluginsDir, pluginId);
+    if (typeof options.initialEnabled === 'boolean') this.setEnabled(pluginId, options.initialEnabled);
     await fsp.rm(target, { recursive: true, force: true });
     await fsp.mkdir(target, { recursive: true });
-    for (const [relPath, contents] of Object.entries(files)) {
-      const normalized = String(relPath).replace(/\\/g, '/');
-      if (normalized.includes('..')) continue;
-      const dest = path.join(target, normalized);
+    let totalBytes = 0;
+    for (const [relPath, contents] of entries) {
+      const dest = resolvePluginPayloadPath(target, relPath);
+      if (!dest) throw new Error('Invalid plugin file path');
       await fsp.mkdir(path.dirname(dest), { recursive: true });
       if (typeof contents === 'string') {
+        totalBytes += Buffer.byteLength(contents);
+        if (totalBytes > MAX_PLUGIN_BYTES) throw new Error('Plugin exceeds the 25 MB limit');
         await fsp.writeFile(dest, contents, 'utf-8');
       } else if (contents && contents.base64) {
-        await fsp.writeFile(dest, Buffer.from(contents.base64, 'base64'));
+        const data = Buffer.from(contents.base64, 'base64');
+        totalBytes += data.length;
+        if (totalBytes > MAX_PLUGIN_BYTES) throw new Error('Plugin exceeds the 25 MB limit');
+        await fsp.writeFile(dest, data);
+      } else {
+        throw new Error('Invalid plugin file contents');
       }
     }
+    const manifest = readJsonSafe(path.join(target, 'manifest.json'));
+    if (!manifest || safeId(manifest.id) !== pluginId) throw new Error('Plugin manifest id does not match');
     await this._loadOne(pluginId);
     return this.getPlugin(pluginId);
   }
@@ -661,16 +710,23 @@ class PluginHost extends EventEmitter {
   }
 }
 
-async function copyDir(src, dest) {
+async function copyDir(src, dest, state) {
   await fsp.mkdir(dest, { recursive: true });
   const entries = await fsp.readdir(src, { withFileTypes: true });
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      await copyDir(srcPath, destPath);
+      await copyDir(srcPath, destPath, state);
     } else if (entry.isFile()) {
+      const stat = await fsp.stat(srcPath);
+      state.files += 1;
+      state.bytes += stat.size;
+      if (state.files > MAX_PLUGIN_FILES) throw new Error('Plugin contains too many files');
+      if (state.bytes > MAX_PLUGIN_BYTES) throw new Error('Plugin exceeds the 25 MB limit');
       await fsp.copyFile(srcPath, destPath);
+    } else {
+      throw new Error('Plugin folders may not contain symbolic links or special files');
     }
   }
 }

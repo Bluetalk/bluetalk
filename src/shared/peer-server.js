@@ -3,6 +3,7 @@ const http = require('http');
 const dgram = require('dgram');
 const crypto = require('crypto');
 const os = require('os');
+const { WebSocket, WebSocketServer } = require('ws');
 
 /**
  * PeerServer - P2P networking layer
@@ -31,16 +32,42 @@ const PORT_CANDIDATES = [
 
 const MAX_LISTEN_PORTS = 4;
 /** Data URLs for avatars can exceed 200k chars (see ProfileMenu MAX_AVATAR_BYTES); keep handshake/profile sync usable. */
-const MAX_PROFILE_PICTURE_DATA_URL_CHARS = 2 * 1024 * 1024;
+const MAX_PROFILE_PICTURE_DATA_URL_CHARS = 520 * 1024;
 /** Reject absurd frames to avoid OOM (chat attachments are large but not multi‑GB over this JSON transport). */
 /** Large chat attachments (base64 JSON). 512 MiB cap per assembled WS text frame. */
-const MAX_WEBSOCKET_PAYLOAD_BYTES = 512 * 1024 * 1024;
+const MAX_WEBSOCKET_PAYLOAD_BYTES = 24 * 1024 * 1024;
+const MAX_WEBSOCKET_BUFFERED_BYTES = 8 * 1024 * 1024;
+const CONNECTION_BATCH_SIZE = 4;
 const DISCOVERY_PORT = 41234;
 const DISCOVERY_INTERVAL = 5000;
 const DISCOVERY_MAGIC = 'BLUETALK_V2';
 const CONNECTION_TIMEOUT_MS = 3000;
 const HANDSHAKE_TIMEOUT_MS = 5000;
 const TCP_KEEP_ALIVE_DELAY_MS = 15000;
+const HEARTBEAT_INTERVAL_MS = 25000;
+const HEARTBEAT_TIMEOUT_MS = 75000;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30000;
+const MAX_HOSTED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_HOSTED_FILES = 20;
+const MAX_TOTAL_HOSTED_FILE_BYTES = 64 * 1024 * 1024;
+const FILE_REQUEST_TIMEOUT_MS = 30000;
+
+function safeDownloadName(value) {
+  const name = String(value || 'file').replace(/[\r\n"\\/]/g, '_').trim();
+  return (name || 'file').slice(0, 180);
+}
+
+function safeContentType(value) {
+  const type = String(value || '').toLowerCase().trim();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(type)
+    ? type
+    : 'application/octet-stream';
+}
+
+function isValidPeerId(value) {
+  return typeof value === 'string' && /^bt-[A-Za-z0-9_-]{1,64}$/.test(value);
+}
 
 /**
  * Normalize user-entered peer addresses (trim, strip /bt/ws paths, accept http/ws URLs).
@@ -111,7 +138,16 @@ class PeerServer extends EventEmitter {
     this._discoveryTimer = null;
     this._pendingConnections = new Map();
     this._activeConnectionAttempts = new Set();
+    this._heartbeatTimer = null;
+    this._reconnectTimers = new Map();
+    this._reconnectAttempts = new Map();
     this._stopped = false;
+    this._webSocketServer = new WebSocketServer({
+      noServer: true,
+      clientTracking: false,
+      perMessageDeflate: false,
+      maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES,
+    });
 
     if (!store.get('peerId')) {
       store.set('peerId', this.id);
@@ -220,6 +256,7 @@ class PeerServer extends EventEmitter {
     this.store.set('settings.peerPorts', this.ports);
     console.log(`[PeerServer] Listening on ports ${this.ports.join(', ')}`);
     this._startDiscovery();
+    this._startHeartbeat();
   }
 
   async _startListeningServers() {
@@ -275,20 +312,33 @@ class PeerServer extends EventEmitter {
 
   _createHTTPServer() {
     const server = http.createServer((req, res) => {
-      if (req.url === '/bt/info') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(this.getInfo()));
+      if (req.method === 'GET' && req.url === '/bt/info') {
+        const info = this.getInfo();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        res.end(JSON.stringify({ id: info.id, name: info.name, port: info.port, ports: info.ports }));
         return;
       }
 
-      if (req.url?.startsWith('/bt/files/')) {
-        const fileId = req.url.split('/bt/files/')[1];
+      if (req.method === 'GET' && req.url?.startsWith('/bt/files/')) {
+        const fileId = req.url.slice('/bt/files/'.length).split(/[?#]/, 1)[0];
+        if (!/^[a-f0-9]{24}$/.test(fileId)) {
+          res.writeHead(404);
+          res.end('File not found');
+          return;
+        }
         const file = this.hostedFiles.get(fileId);
         if (file) {
+          const name = safeDownloadName(file.name);
           res.writeHead(200, {
-            'Content-Type': file.type || 'application/octet-stream',
-            'Content-Disposition': `attachment; filename="${file.name}"`,
+            'Content-Type': safeContentType(file.type),
+            'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
             'Content-Length': file.data.length,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
           });
           res.end(file.data);
           return;
@@ -298,8 +348,8 @@ class PeerServer extends EventEmitter {
         return;
       }
 
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('OK');
+      res.writeHead(404, { 'Content-Type': 'text/plain', 'X-Content-Type-Options': 'nosniff' });
+      res.end('Not found');
     });
 
     server.on('upgrade', (req, socket, head) => {
@@ -307,7 +357,9 @@ class PeerServer extends EventEmitter {
         socket.destroy();
         return;
       }
-      this._handleWebSocketUpgrade(req, socket, head);
+      this._webSocketServer.handleUpgrade(req, socket, head, (webSocket) => {
+        this._handleWebSocketConnection(webSocket, req);
+      });
     });
 
     return server;
@@ -379,6 +431,7 @@ class PeerServer extends EventEmitter {
           const data = JSON.parse(msg.toString());
           if (data.magic !== DISCOVERY_MAGIC) return;
           if (data.id === this.id) return;
+          if (!isValidPeerId(data.id)) return;
 
           const discoveredPeer = this._rememberDiscoveredPeer(data, rinfo);
 
@@ -386,7 +439,7 @@ class PeerServer extends EventEmitter {
             this._broadcastPresence([this._normalizeAddress(rinfo.address)], { response: true });
           }
 
-          if (this.peers.has(discoveredPeer.id)) {
+          if (this._getActivePeer(discoveredPeer.id)) {
             return;
           }
 
@@ -429,7 +482,7 @@ class PeerServer extends EventEmitter {
   refreshDiscovery() {
     this._broadcastPresence();
     for (const id of this.discoveredPeers.keys()) {
-      if (!id || id === this.id || this.peers.has(id)) continue;
+      if (!id || id === this.id || this._getActivePeer(id)) continue;
       const snapshot = this.discoveredPeers.get(id);
       if (!snapshot) continue;
       void this.connectTo(snapshot).catch(() => {});
@@ -497,18 +550,27 @@ class PeerServer extends EventEmitter {
     }
 
     if (target && typeof target === 'object') {
+      const requestedPeerId = target.id || target.peerId;
+      if (requestedPeerId && !isValidPeerId(requestedPeerId)) throw new Error('Invalid peer identity');
+      const primaryAddress = target.host || target.address || target.sourceAddress || '';
+      let parsed = { host: '', addresses: [], ports: [] };
+      if (typeof primaryAddress === 'string' && primaryAddress.trim()) {
+        try {
+          parsed = this._createConnectionDescriptor(normalizeConnectAddress(primaryAddress));
+        } catch {
+          parsed = { host: this._normalizeAddress(primaryAddress), addresses: [], ports: [] };
+        }
+      }
       return {
-        peerId: target.id || target.peerId,
+        peerId: requestedPeerId,
         name: target.name,
-        host: this._normalizeAddress(target.host || target.address || target.sourceAddress || ''),
-        address: this._normalizeAddress(target.address || target.host || target.sourceAddress || ''),
+        host: parsed.host,
+        address: parsed.host,
         addresses: this._uniqueStrings([
-          target.host,
-          target.address,
-          target.sourceAddress,
-          ...(target.addresses || []),
+          ...(parsed.addresses || []),
+          ...(Array.isArray(target.addresses) ? target.addresses : []),
         ].map((address) => this._normalizeAddress(address))),
-        ports: this._normalizePortList(target.ports, target.port, target.primaryPort),
+        ports: this._normalizePortList(target.ports, target.port, target.primaryPort, parsed.ports),
       };
     }
 
@@ -555,8 +617,11 @@ class PeerServer extends EventEmitter {
     const normalized = typeof target === 'string' ? normalizeConnectAddress(target) : target;
     const descriptor = this._createConnectionDescriptor(normalized);
 
-    if (descriptor.peerId && this.peers.has(descriptor.peerId)) {
-      return this.peers.get(descriptor.peerId).info;
+    if (descriptor.peerId) {
+      const activePeer = this._getActivePeer(descriptor.peerId);
+      if (activePeer) {
+        return activePeer.info;
+      }
     }
 
     const candidates = this._createConnectionCandidates(descriptor);
@@ -581,23 +646,200 @@ class PeerServer extends EventEmitter {
 
   async _connectUsingCandidates(descriptor, candidates) {
     let lastError = null;
+    const operation = { attempts: new Set() };
+    const cancelOutstanding = () => {
+      for (const attempt of [...operation.attempts]) {
+        try {
+          attempt.cancel();
+        } catch {}
+      }
+    };
 
-    for (const candidate of candidates) {
+    for (let offset = 0; offset < candidates.length; offset += CONNECTION_BATCH_SIZE) {
       if (this._stopped) {
+        cancelOutstanding();
         throw new Error('Peer server is stopped');
       }
-      if (descriptor.peerId && this.peers.has(descriptor.peerId)) {
-        return this.peers.get(descriptor.peerId).info;
+      if (descriptor.peerId) {
+        const activePeer = this._getActivePeer(descriptor.peerId);
+        if (activePeer) {
+          cancelOutstanding();
+          return activePeer.info;
+        }
       }
 
+      const batch = candidates.slice(offset, offset + CONNECTION_BATCH_SIZE);
       try {
-        return await this._connectToCandidate(candidate, descriptor);
+        const info = await Promise.any(
+          batch.map((candidate) => this._connectToCandidateWs(candidate, descriptor, operation))
+        );
+        cancelOutstanding();
+        return info;
       } catch (err) {
-        lastError = err;
+        const errors = err instanceof AggregateError ? err.errors : [err];
+        lastError = errors.find((item) => item?.message !== 'Connection attempt cancelled') || errors[0] || err;
       }
     }
 
+    cancelOutstanding();
     throw lastError || new Error('Connection failed');
+  }
+
+  _connectToCandidateWs(candidate, descriptor, operation) {
+    return new Promise((resolve, reject) => {
+      const host = candidate.host.includes(':') && !candidate.host.startsWith('[')
+        ? `[${candidate.host}]`
+        : candidate.host;
+      const socket = new WebSocket(`ws://${host}:${candidate.port}/bt/ws`, {
+        handshakeTimeout: CONNECTION_TIMEOUT_MS,
+        maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES,
+        perMessageDeflate: false,
+      });
+      let settled = false;
+      let handshakeComplete = false;
+      let handshakeTimer = null;
+      let peerId = descriptor.peerId || null;
+
+      const attempt = {
+        cancel: () => {
+          if (settled) return;
+          const error = new Error('Connection attempt cancelled');
+          finishReject(error);
+          try {
+            socket.terminate();
+          } catch {}
+        },
+      };
+      this._activeConnectionAttempts.add(attempt);
+      operation?.attempts?.add(attempt);
+
+      const finish = () => {
+        if (handshakeTimer) clearTimeout(handshakeTimer);
+        handshakeTimer = null;
+        this._activeConnectionAttempts.delete(attempt);
+        operation?.attempts?.delete(attempt);
+      };
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        finish();
+        reject(error);
+      };
+      const finishResolve = (value) => {
+        if (settled) return;
+        settled = true;
+        finish();
+        resolve(value);
+      };
+
+      socket.once('open', () => {
+        socket._socket?.setTimeout(0);
+        socket._socket?.setKeepAlive(true, TCP_KEEP_ALIVE_DELAY_MS);
+        handshakeTimer = setTimeout(() => {
+          finishReject(new Error('Peer handshake timed out'));
+          socket.terminate();
+        }, HANDSHAKE_TIMEOUT_MS);
+
+        if (!this._wsSend(socket, JSON.stringify({
+          type: 'handshake',
+          peerId: this.id,
+          name: this._getDisplayName(),
+          port: this.port,
+          ports: this.ports,
+          addresses: this.getLocalAddresses(),
+          heartbeatVersion: 1,
+          ...this._getProfileFields(),
+        }))) {
+          finishReject(new Error('Could not send peer handshake'));
+          socket.terminate();
+        }
+      });
+
+      socket.on('message', (raw, isBinary) => {
+        if (isBinary) {
+          if (!settled) finishReject(new Error('Peer sent a binary handshake'));
+          socket.close(1003, 'Text messages only');
+          return;
+        }
+        try {
+          const data = JSON.parse(raw.toString('utf8'));
+          if (data.type === 'handshake-ack') {
+            if (handshakeComplete) return;
+            const acknowledgedPeerId = typeof data.peerId === 'string' ? data.peerId.trim() : '';
+            if (!isValidPeerId(acknowledgedPeerId) || acknowledgedPeerId === this.id) {
+              throw new Error('Invalid peer identity');
+            }
+            if (descriptor.peerId && descriptor.peerId !== acknowledgedPeerId) {
+              throw new Error('Peer identity does not match discovery record');
+            }
+            peerId = acknowledgedPeerId;
+
+            const existing = this._getActivePeer(peerId);
+            const preferredDirection = this._preferredConnectionDirection(peerId);
+            if (this._shouldRejectNewConnection(existing, preferredDirection, 'outgoing')) {
+              socket.terminate();
+              finishResolve(existing.info);
+              return;
+            }
+            if (existing && !this._isPeerResponsive(existing)) {
+              this.disconnectPeer(peerId);
+            }
+
+            const info = {
+              id: peerId,
+              name: typeof data.name === 'string' ? data.name.slice(0, 100) : descriptor.name || 'Unknown',
+              address: this._normalizeAddress(candidate.host),
+              port: Number(data.port) || candidate.port,
+              ports: this._normalizePortList(data.ports, data.port, candidate.port),
+              connectedAt: Date.now(),
+              bio: typeof data.bio === 'string' ? data.bio.slice(0, 500) : '',
+              profilePicture:
+                typeof data.profilePicture === 'string'
+                  ? data.profilePicture.slice(0, MAX_PROFILE_PICTURE_DATA_URL_CHARS)
+                  : '',
+              supportsHeartbeat: Number(data.heartbeatVersion) >= 1,
+            };
+
+            handshakeComplete = true;
+            this._registerPeerConnection(peerId, socket, info, 'outgoing');
+            this._mergePeerDiscovery(peerId, info);
+            this.emit('peer:connected', info);
+            finishResolve(info);
+            return;
+          }
+
+          if (!handshakeComplete) throw new Error('Expected peer handshake acknowledgement');
+          if (peerId && this._handlePeerKeepalive(peerId, socket, data)) return;
+          if (data.type === 'message') {
+            if (this._getActivePeer(peerId)) this.emit('peer:message', { ...data, from: peerId });
+          } else if (data.type === 'file-offer') {
+            if (this._getActivePeer(peerId)) this.emit('peer:file-offered', { ...data, from: peerId });
+          }
+        } catch (error) {
+          if (!settled) finishReject(error);
+          socket.close(1007, 'Invalid message');
+        }
+      });
+
+      const cleanup = () => {
+        if (!settled) {
+          const replacement = peerId ? this.peers.get(peerId) : null;
+          if (replacement?.socket && replacement.socket !== socket) finishResolve(replacement.info);
+          else finishReject(new Error('Connection closed before handshake completed'));
+        }
+        if (!peerId) return;
+        const currentPeer = this.peers.get(peerId);
+        if (currentPeer?.socket !== socket) return;
+        this.peers.delete(peerId);
+        this.emit('peer:disconnected', peerId);
+        this._scheduleReconnect(peerId);
+      };
+
+      socket.once('close', cleanup);
+      socket.once('error', (error) => {
+        if (!settled) finishReject(error);
+      });
+    });
   }
 
   _connectToCandidate(candidate, descriptor) {
@@ -716,12 +958,15 @@ class PeerServer extends EventEmitter {
                 }
                 peerId = acknowledgedPeerId;
 
-                const existing = this.peers.get(peerId);
+                const existing = this._getActivePeer(peerId);
                 const preferredDirection = this._preferredConnectionDirection(peerId);
-                if (existing && (preferredDirection !== 'outgoing' || existing.direction === 'outgoing')) {
+                if (this._shouldRejectNewConnection(existing, preferredDirection, 'outgoing')) {
                   socket.destroy();
                   finishResolve(existing.info);
                   return;
+                }
+                if (existing && !this._isPeerResponsive(existing)) {
+                  this.disconnectPeer(peerId);
                 }
 
                 const info = {
@@ -745,15 +990,19 @@ class PeerServer extends EventEmitter {
                 return;
               }
 
+              if (peerId && this._handlePeerKeepalive(peerId, socket, data)) {
+                return;
+              }
+
               if (data.type === 'message') {
-                if (!peerId || !this.peers.has(peerId)) return;
-                this.emit('peer:message', { from: peerId, ...data });
+                if (!peerId || !this._getActivePeer(peerId)) return;
+                this.emit('peer:message', { ...data, from: peerId });
                 return;
               }
 
               if (data.type === 'file-offer') {
-                if (!peerId || !this.peers.has(peerId)) return;
-                this.emit('peer:file-offered', { from: peerId, ...data });
+                if (!peerId || !this._getActivePeer(peerId)) return;
+                this.emit('peer:file-offered', { ...data, from: peerId });
               }
             } catch (e) {
               console.error('[PeerServer] Parse error:', e.message);
@@ -799,14 +1048,267 @@ class PeerServer extends EventEmitter {
     return this.id.localeCompare(peerId) < 0 ? 'outgoing' : 'incoming';
   }
 
+  _isPeerSocketAlive(peerEntry) {
+    if (!peerEntry?.socket) return false;
+    const socket = peerEntry.socket;
+    if (typeof socket.readyState === 'number') {
+      return socket.readyState === WebSocket.OPEN;
+    }
+    return !socket.destroyed && socket.writable;
+  }
+
+  _isPeerResponsive(peerEntry) {
+    if (!this._isPeerSocketAlive(peerEntry)) return false;
+    if (peerEntry.info?.supportsHeartbeat !== true) return true;
+    const now = Date.now();
+    const lastPong = peerEntry.lastPongAt || 0;
+    const lastPing = peerEntry.lastPingSentAt || 0;
+    if (lastPing > lastPong + 5000) return false;
+    if (now - lastPong > HEARTBEAT_INTERVAL_MS) return false;
+    return true;
+  }
+
+  _shouldRejectNewConnection(existing, preferredDirection, connectionDirection) {
+    if (!existing) return false;
+    const wouldRejectByDirection = preferredDirection !== connectionDirection
+      || existing.direction === connectionDirection;
+    if (!wouldRejectByDirection) return false;
+    return this._isPeerResponsive(existing);
+  }
+
+  _pruneDeadPeer(peerId) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return false;
+    if (this._isPeerSocketAlive(peer)) return false;
+    try {
+      if (typeof peer.socket.terminate === 'function') peer.socket.terminate();
+      else peer.socket.destroy();
+    } catch {}
+    this.peers.delete(peerId);
+    this.emit('peer:disconnected', peerId);
+    return true;
+  }
+
+  _getActivePeer(peerId) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return null;
+    if (!this._isPeerSocketAlive(peer)) {
+      this._pruneDeadPeer(peerId);
+      return null;
+    }
+    return peer;
+  }
+
+  _handlePeerKeepalive(peerId, socket, data) {
+    if (data.type === 'bye') {
+      if (peerId) {
+        const currentPeer = this.peers.get(peerId);
+        if (currentPeer?.socket === socket) {
+          this.disconnectPeer(peerId);
+        }
+      }
+      return true;
+    }
+    if (data.type === 'ping') {
+      this._wsSend(socket, JSON.stringify({ type: 'pong', ts: data.ts || Date.now() }));
+      return true;
+    }
+    if (data.type === 'pong') {
+      const peer = this.peers.get(peerId);
+      if (peer?.socket === socket) {
+        peer.lastPongAt = Date.now();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  _startHeartbeat() {
+    if (this._heartbeatTimer) return;
+    this._heartbeatTimer = setInterval(() => this._heartbeatTick(), HEARTBEAT_INTERVAL_MS);
+  }
+
+  _heartbeatTick() {
+    if (this._stopped) return;
+    const now = Date.now();
+    for (const peerId of [...this.peers.keys()]) {
+      const peer = this._getActivePeer(peerId);
+      if (!peer) continue;
+      if (peer.info?.supportsHeartbeat !== true) continue;
+      if (now - (peer.lastPongAt || peer.info.connectedAt || 0) > HEARTBEAT_TIMEOUT_MS) {
+        console.warn(`[PeerServer] Heartbeat timeout for ${peerId}`);
+        this.disconnectPeer(peerId, { reconnect: true });
+        continue;
+      }
+      peer.lastPingSentAt = now;
+      this._wsSend(peer.socket, JSON.stringify({ type: 'ping', ts: now }));
+    }
+  }
+
   _registerPeerConnection(peerId, socket, info, direction) {
     const previous = this.peers.get(peerId);
-    this.peers.set(peerId, { socket, info, direction });
+    this.peers.set(peerId, { socket, info, direction, lastPongAt: Date.now() });
+    this._clearReconnect(peerId);
     if (previous?.socket && previous.socket !== socket) {
       try {
-        previous.socket.destroy();
+        if (typeof previous.socket.terminate === 'function') previous.socket.terminate();
+        else previous.socket.destroy();
       } catch {}
     }
+  }
+
+  _getReconnectTarget(peerId) {
+    const contacts = this.store.get('contacts', []);
+    const contact = Array.isArray(contacts) ? contacts.find((item) => item?.id === peerId) : null;
+    if (contact?.blocked === true) return null;
+    const discovered = this.discoveredPeers.get(peerId);
+    const address = typeof contact?.address === 'string' ? contact.address.trim() : '';
+    if (!address && !discovered) return null;
+    return {
+      id: peerId,
+      name: contact?.nickname || contact?.name || discovered?.name,
+      address: address || discovered?.sourceAddress || discovered?.address,
+      addresses: discovered?.addresses || [],
+      ports: discovered?.ports || [],
+      port: discovered?.primaryPort || 0,
+    };
+  }
+
+  _clearReconnect(peerId) {
+    const timer = this._reconnectTimers.get(peerId);
+    if (timer) clearTimeout(timer);
+    this._reconnectTimers.delete(peerId);
+    this._reconnectAttempts.delete(peerId);
+  }
+
+  _scheduleReconnect(peerId) {
+    if (this._stopped || !peerId || this._reconnectTimers.has(peerId) || this._getActivePeer(peerId)) return;
+    const target = this._getReconnectTarget(peerId);
+    if (!target) return;
+    const attempt = (this._reconnectAttempts.get(peerId) || 0) + 1;
+    this._reconnectAttempts.set(peerId, attempt);
+    const exponential = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** Math.min(attempt - 1, 5)));
+    const delay = exponential + Math.floor(Math.random() * Math.min(1000, exponential / 4));
+    const timer = setTimeout(async () => {
+      this._reconnectTimers.delete(peerId);
+      if (this._stopped || this._getActivePeer(peerId)) return;
+      try {
+        await this.connectTo(target);
+        this._clearReconnect(peerId);
+      } catch {
+        this._scheduleReconnect(peerId);
+      }
+    }, delay);
+    timer.unref?.();
+    this._reconnectTimers.set(peerId, timer);
+  }
+
+  _handleWebSocketConnection(socket) {
+    if (this._stopped) {
+      socket.terminate();
+      return;
+    }
+
+    let peerId = null;
+    let handshakeComplete = false;
+    socket._socket?.setTimeout(0);
+    socket._socket?.setKeepAlive(true, TCP_KEEP_ALIVE_DELAY_MS);
+    const handshakeTimer = setTimeout(() => {
+      if (!handshakeComplete) socket.terminate();
+    }, HANDSHAKE_TIMEOUT_MS);
+
+    socket.on('message', (raw, isBinary) => {
+      if (isBinary) {
+        socket.close(1003, 'Text messages only');
+        return;
+      }
+      try {
+        const data = JSON.parse(raw.toString('utf8'));
+        if (data.type === 'handshake') {
+          if (handshakeComplete) return;
+          const incomingPeerId = typeof data.peerId === 'string' ? data.peerId.trim() : '';
+          if (!isValidPeerId(incomingPeerId) || incomingPeerId === this.id) {
+            socket.close(1008, 'Invalid peer identity');
+            return;
+          }
+          peerId = incomingPeerId;
+
+          const existing = this._getActivePeer(peerId);
+          const preferredDirection = this._preferredConnectionDirection(peerId);
+          if (this._shouldRejectNewConnection(existing, preferredDirection, 'incoming')) {
+            socket.terminate();
+            return;
+          }
+          if (existing && !this._isPeerResponsive(existing)) this.disconnectPeer(peerId);
+
+          const remoteAddress = this._normalizeAddress(socket._socket?.remoteAddress || '');
+          const info = {
+            id: peerId,
+            name: typeof data.name === 'string' ? data.name.slice(0, 100) : 'Unknown',
+            address: remoteAddress,
+            port: Number(data.port) || 0,
+            ports: this._normalizePortList(data.ports, data.port),
+            connectedAt: Date.now(),
+            bio: typeof data.bio === 'string' ? data.bio.slice(0, 500) : '',
+            profilePicture:
+              typeof data.profilePicture === 'string'
+                ? data.profilePicture.slice(0, MAX_PROFILE_PICTURE_DATA_URL_CHARS)
+                : '',
+            supportsHeartbeat: Number(data.heartbeatVersion) >= 1,
+          };
+
+          this._registerPeerConnection(peerId, socket, info, 'incoming');
+          this._mergePeerDiscovery(peerId, {
+            ...info,
+            addresses: this._uniqueStrings([
+              remoteAddress,
+              ...(Array.isArray(data.addresses) ? data.addresses : []),
+            ]),
+          });
+          if (!this._wsSend(socket, JSON.stringify({
+            type: 'handshake-ack',
+            peerId: this.id,
+            name: this._getDisplayName(),
+            port: this.port,
+            ports: this.ports,
+            addresses: this.getLocalAddresses(),
+            heartbeatVersion: 1,
+            ...this._getProfileFields(),
+          }))) {
+            socket.terminate();
+            return;
+          }
+          handshakeComplete = true;
+          clearTimeout(handshakeTimer);
+          this.emit('peer:connected', info);
+          return;
+        }
+
+        if (!handshakeComplete || !peerId) {
+          socket.close(1008, 'Handshake required');
+          return;
+        }
+        if (this._handlePeerKeepalive(peerId, socket, data)) return;
+        if (data.type === 'message') this.emit('peer:message', { ...data, from: peerId });
+        else if (data.type === 'file-offer') this.emit('peer:file-offered', { ...data, from: peerId });
+      } catch {
+        socket.close(1007, 'Invalid message');
+      }
+    });
+
+    const cleanup = () => {
+      clearTimeout(handshakeTimer);
+      if (!peerId) return;
+      const currentPeer = this.peers.get(peerId);
+      if (currentPeer?.socket !== socket) return;
+      this.peers.delete(peerId);
+      this.emit('peer:disconnected', peerId);
+      this._scheduleReconnect(peerId);
+    };
+    socket.once('close', cleanup);
+    socket.on('error', () => {
+      /* close event owns peer cleanup */
+    });
   }
 
   // --- WebSocket handling ---
@@ -861,11 +1363,14 @@ class PeerServer extends EventEmitter {
           }
           peerId = incomingPeerId;
 
-          const existing = this.peers.get(peerId);
+          const existing = this._getActivePeer(peerId);
           const preferredDirection = this._preferredConnectionDirection(peerId);
-          if (existing && (preferredDirection !== 'incoming' || existing.direction === 'incoming')) {
+          if (this._shouldRejectNewConnection(existing, preferredDirection, 'incoming')) {
             socket.destroy();
             return;
+          }
+          if (existing && !this._isPeerResponsive(existing)) {
+            this.disconnectPeer(peerId);
           }
 
           const remoteAddress = this._normalizeAddress(socket.remoteAddress);
@@ -905,12 +1410,14 @@ class PeerServer extends EventEmitter {
           handshakeComplete = true;
           clearTimeout(handshakeTimer);
           this.emit('peer:connected', info);
+        } else if (peerId && this._handlePeerKeepalive(peerId, socket, data)) {
+          /* keepalive */
         } else if (data.type === 'message') {
           if (!handshakeComplete || !peerId) return;
-          this.emit('peer:message', { from: peerId, ...data });
+          this.emit('peer:message', { ...data, from: peerId });
         } else if (data.type === 'file-offer') {
           if (!handshakeComplete || !peerId) return;
-          this.emit('peer:file-offered', { from: peerId, ...data });
+          this.emit('peer:file-offered', { ...data, from: peerId });
         }
       } catch (e) {
         console.error('[PeerServer] Parse error:', e.message);
@@ -1100,6 +1607,17 @@ class PeerServer extends EventEmitter {
 
   _wsSend(socket, data) {
     try {
+      if (typeof socket?.send === 'function' && typeof socket.readyState === 'number') {
+        if (socket.readyState !== WebSocket.OPEN) return false;
+        const bytes = Buffer.byteLength(String(data));
+        if (bytes > MAX_WEBSOCKET_PAYLOAD_BYTES || socket.bufferedAmount > MAX_WEBSOCKET_BUFFERED_BYTES) {
+          return false;
+        }
+        socket.send(data, { binary: false }, (error) => {
+          if (error && socket.readyState === WebSocket.OPEN) socket.terminate();
+        });
+        return true;
+      }
       if (!socket || socket.destroyed || !socket.writable) return false;
       const frame = this._encodeFrame(data, { mask: socket._bluetalkMaskOutgoing === true });
       if (frame.length > MAX_WEBSOCKET_PAYLOAD_BYTES + 14) {
@@ -1115,12 +1633,12 @@ class PeerServer extends EventEmitter {
   }
 
   sendTo(peerId, data) {
-    const peer = this.peers.get(peerId);
-    if (!peer || !peer.socket) return false;
+    const peer = this._getActivePeer(peerId);
+    if (!peer) return false;
     const ts = typeof data?.timestamp === 'number' && Number.isFinite(data.timestamp) ? data.timestamp : Date.now();
     const payload = JSON.stringify({
-      type: 'message',
       ...data,
+      type: 'message',
       timestamp: ts,
     });
     const sent = this._wsSend(peer.socket, payload);
@@ -1133,12 +1651,14 @@ class PeerServer extends EventEmitter {
   broadcast(data) {
     const ts = typeof data?.timestamp === 'number' && Number.isFinite(data.timestamp) ? data.timestamp : Date.now();
     const payload = JSON.stringify({
-      type: 'message',
       ...data,
+      type: 'message',
       timestamp: ts,
     });
     const results = [];
-    for (const [id, peer] of this.peers) {
+    for (const id of [...this.peers.keys()]) {
+      const peer = this._getActivePeer(id);
+      if (!peer) continue;
       const sent = this._wsSend(peer.socket, payload);
       if (!sent) {
         this._cleanupDeadPeer(id);
@@ -1152,39 +1672,58 @@ class PeerServer extends EventEmitter {
     const peer = this.peers.get(peerId);
     if (peer) {
       try {
-        peer.socket.destroy();
+        if (typeof peer.socket.terminate === 'function') peer.socket.terminate();
+        else peer.socket.destroy();
       } catch {}
       this.peers.delete(peerId);
       this.emit('peer:disconnected', peerId);
+      this._scheduleReconnect(peerId);
     }
   }
 
-  disconnectPeer(peerId) {
+  disconnectPeer(peerId, options = {}) {
     const peer = this.peers.get(peerId);
     if (peer) {
       this._sendWebSocketClose(peer.socket);
-      peer.socket.destroy();
+      if (typeof peer.socket.terminate === 'function') peer.socket.terminate();
+      else peer.socket.destroy();
       const currentPeer = this.peers.get(peerId);
       if (currentPeer?.socket === peer.socket) {
         this.peers.delete(peerId);
       }
       this.emit('peer:disconnected', peerId);
+      if (options.reconnect === true) this._scheduleReconnect(peerId);
+      else this._clearReconnect(peerId);
     }
   }
 
   hostFile(fileMeta) {
-    const fileId = crypto.randomBytes(6).toString('hex');
+    if (!fileMeta || typeof fileMeta.data !== 'string') throw new Error('Invalid file data');
+    const normalizedBase64 = fileMeta.data.replace(/\s+/g, '');
+    if (!normalizedBase64 || normalizedBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64)) {
+      throw new Error('Invalid base64 file data');
+    }
+    const fileId = crypto.randomBytes(12).toString('hex');
     let data;
     try {
-      data = Buffer.from(fileMeta.data, 'base64');
+      data = Buffer.from(normalizedBase64, 'base64');
     } catch (e) {
       throw new Error('Invalid base64 file data');
     }
+    if (data.length > MAX_HOSTED_FILE_BYTES) throw new Error('Hosted file exceeds the 8 MB limit');
+    while (
+      this.hostedFiles.size >= MAX_HOSTED_FILES
+      || [...this.hostedFiles.values()].reduce((total, file) => total + file.data.length, 0) + data.length > MAX_TOTAL_HOSTED_FILE_BYTES
+    ) {
+      const oldestId = this.hostedFiles.keys().next().value;
+      if (!oldestId) break;
+      this.hostedFiles.delete(oldestId);
+    }
     this.hostedFiles.set(fileId, {
       id: fileId,
-      name: fileMeta.name,
-      size: fileMeta.size,
-      type: fileMeta.type,
+      name: safeDownloadName(fileMeta.name),
+      size: data.length,
+      type: safeContentType(fileMeta.type),
       data,
       createdAt: Date.now(),
     });
@@ -1216,32 +1755,58 @@ class PeerServer extends EventEmitter {
   }
 
   async requestFile(peerId, fileId) {
-    const peer = this.peers.get(peerId);
+    const peer = this._getActivePeer(peerId);
     if (!peer) throw new Error('Peer not connected');
     const port = peer.info.port;
     const host = peer.info.address;
 
+    if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) throw new Error('Invalid file id');
+
     return new Promise((resolve, reject) => {
-      http.get(`http://${host}:${port}/bt/files/${fileId}`, (res) => {
+      let settled = false;
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      const request = http.get({ host, port, path: `/bt/files/${fileId}` }, (res) => {
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`Peer returned HTTP ${res.statusCode}`));
+          res.resume();
+          finishReject(new Error(`Peer returned HTTP ${res.statusCode}`));
+          return;
+        }
+        const declaredLength = Number(res.headers['content-length']) || 0;
+        if (declaredLength > MAX_HOSTED_FILE_BYTES) {
+          request.destroy(new Error('Peer file exceeds the 8 MB limit'));
           return;
         }
         const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
+        let received = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (received > MAX_HOSTED_FILE_BYTES) {
+            request.destroy(new Error('Peer file exceeds the 8 MB limit'));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on('end', () => {
+          if (settled) return;
           const data = Buffer.concat(chunks);
           const info = {
             fileId,
             data: data.toString('base64'),
-            name: res.headers['content-disposition']?.match(/filename="(.+)"/)?.[1] || 'file',
-            type: res.headers['content-type'],
+            name: safeDownloadName(res.headers['content-disposition']?.match(/filename="([^"]+)"/)?.[1] || 'file'),
+            type: safeContentType(res.headers['content-type']),
             size: data.length,
           };
+          settled = true;
           this.emit('peer:file-received', info);
           resolve(info);
         });
-      }).on('error', reject);
+      });
+      request.setTimeout(FILE_REQUEST_TIMEOUT_MS, () => request.destroy(new Error('File request timed out')));
+      request.on('error', finishReject);
     });
   }
 
@@ -1261,7 +1826,9 @@ class PeerServer extends EventEmitter {
 
   getPeers() {
     const peers = [];
-    for (const [id, peer] of this.peers) {
+    for (const [id] of this.peers) {
+      const peer = this._getActivePeer(id);
+      if (!peer) continue;
       peers.push({
         id,
         ...peer.info,
@@ -1279,8 +1846,10 @@ class PeerServer extends EventEmitter {
     // Disconnect all peers before clearing state
     for (const [id, peer] of this.peers) {
       try {
+        this._wsSend(peer.socket, JSON.stringify({ type: 'bye' }));
         this._sendWebSocketClose(peer.socket);
-        peer.socket.destroy();
+        if (typeof peer.socket.terminate === 'function') peer.socket.terminate();
+        else peer.socket.destroy();
       } catch {}
     }
     this.peers.clear();
@@ -1295,6 +1864,12 @@ class PeerServer extends EventEmitter {
 
   _sendWebSocketClose(socket) {
     try {
+      if (typeof socket?.close === 'function' && typeof socket.readyState === 'number') {
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.close(1000, 'Closing');
+        }
+        return;
+      }
       if (!socket || socket.destroyed || !socket.writable) return;
       const closeFrame = this._encodeFrame('', {
         opcode: 0x08,
@@ -1311,8 +1886,12 @@ class PeerServer extends EventEmitter {
     const contacts = this.store.get('contacts', []);
     if (!Array.isArray(contacts)) return;
     for (const contact of contacts) {
-      if (!contact?.address || typeof contact.address !== 'string') continue;
-      void this.connectTo(contact.address).catch(() => {});
+      if (!contact?.id || !contact?.address || typeof contact.address !== 'string' || contact.blocked === true) continue;
+      if (this._getActivePeer(contact.id)) continue;
+      this._clearReconnect(contact.id);
+      void this.connectTo({ id: contact.id, address: contact.address }).catch(() => {
+        this._scheduleReconnect(contact.id);
+      });
     }
   }
 
@@ -1332,6 +1911,10 @@ class PeerServer extends EventEmitter {
 
   stop() {
     this._stopped = true;
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
     if (this._discoveryTimer) {
       clearInterval(this._discoveryTimer);
       this._discoveryTimer = null;
@@ -1345,8 +1928,10 @@ class PeerServer extends EventEmitter {
     }
     for (const [, peer] of this.peers) {
       try {
+        this._wsSend(peer.socket, JSON.stringify({ type: 'bye' }));
         this._sendWebSocketClose(peer.socket);
-        peer.socket.destroy();
+        if (typeof peer.socket.terminate === 'function') peer.socket.terminate();
+        else peer.socket.destroy();
       } catch {}
     }
     this.peers.clear();
@@ -1356,6 +1941,9 @@ class PeerServer extends EventEmitter {
       } catch {}
     }
     this._activeConnectionAttempts.clear();
+    for (const timer of this._reconnectTimers.values()) clearTimeout(timer);
+    this._reconnectTimers.clear();
+    this._reconnectAttempts.clear();
     for (const server of this.servers) {
       try {
         server.removeAllListeners();

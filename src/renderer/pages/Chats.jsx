@@ -18,25 +18,50 @@ import {
   Film,
   MessageSquare,
   Music,
-  Paperclip,
   Pencil,
   Pin,
   PinOff,
   FileBarChart,
+  Plus,
+  Plug,
   Save,
   Search,
   SendHorizontal,
+  Smile,
   Trash2,
   Bell,
+  UserRound,
   X,
   MoreVertical,
+  Reply,
+  Forward,
+  CheckSquare,
+  ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
+import StickerPicker from '../components/StickerPicker';
+import StickerMessage from '../components/StickerMessage';
 import VerticalResizeHandle from '../components/VerticalResizeHandle';
 import { getEffectiveFlag, isContactNotificationMuted } from '../featureFlags';
+import { pluginRuntime } from '../plugins/pluginRuntime';
 
 const CHAT_ICON_STROKE = 1.75;
+
+function resolveLucideIcon(name) {
+  if (!name || typeof name !== 'string') return Plug;
+  return {
+    Plug,
+    Plus,
+    Smile,
+    File,
+    FileImage,
+    FileText,
+    Film,
+    Music,
+    MessageSquare,
+  }[name] || Plug;
+}
 
 const MUTE_1H_MS = 60 * 60 * 1000;
 const MUTE_8H_MS = 8 * MUTE_1H_MS;
@@ -75,9 +100,9 @@ function selfDeliveryLabel(m) {
   return { text: '', pending: false };
 }
 
-/** Ausgehende Nachrichten gesperrt: nur wenn du diesen Kontakt blockiert hast (Peer-Block → Senden versuchen, bis Zustellung klappt). */
+/** Ausgehende Nachrichten gesperrt: eigener Block, Block durch Peer oder gelöschter Chat. */
 function contactOutgoingBlocked(contact) {
-  return Boolean(contact?.blocked);
+  return Boolean(contact?.blocked || contact?.blockedByPeer || contact?.chatDeletedByPeer);
 }
 
 function formatSize(bytes) {
@@ -85,6 +110,18 @@ function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function downloadJsonFile(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function downloadBase64AsFile(fileName, base64) {
@@ -123,17 +160,76 @@ function PeerAvatar({ pictureUrl, name, size = 36, className = '' }) {
   );
 }
 
-const MAX_CHAT_FILE_SIZE_GB = 15;
-const MAX_CHAT_FILE_SIZE_BYTES = MAX_CHAT_FILE_SIZE_GB * 1024 * 1024 * 1024;
+const MAX_CHAT_FILE_SIZE_MB = 8;
+const MAX_CHAT_FILE_SIZE_BYTES = MAX_CHAT_FILE_SIZE_MB * 1024 * 1024;
 const CHAT_BATCH_SIZE = 24;
 
 const CHAT_LIST_WIDTH_DEFAULT = 300;
 const CHAT_LIST_WIDTH_MIN = 220;
 const CHAT_LIST_WIDTH_MAX = 560;
 
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 40;
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 400;
+
+function getComposerTextareaMaxHeight() {
+  if (typeof window === 'undefined') return COMPOSER_TEXTAREA_MAX_HEIGHT;
+  return Math.min(COMPOSER_TEXTAREA_MAX_HEIGHT, Math.floor(window.innerHeight * 0.45));
+}
+
+function normalizeChatMarkdown(text) {
+  return String(text || '').replace(/(?<!\n)\n(?!\n)/g, '  \n');
+}
+
+function getMessagePreviewText(message) {
+  if (!message) return '';
+  if (message.kind === 'sticker') return 'Sticker';
+  if (message.kind === 'file') return `📎 ${message.fileName || message.content || 'Anhang'}`;
+  if (message.kind === 'contact-share') {
+    const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
+    return `Kontakt: ${name}`;
+  }
+  if (message.kind === 'poker-invite') return `Poker: ${message.tableName || 'Einladung'}`;
+  const content = String(message.content || '').trim();
+  if (!content) return 'Nachricht';
+  return content.length > 120 ? `${content.slice(0, 117)}…` : content;
+}
+
+function buildForwardPayload(message) {
+  if (!message) return { kind: 'chat', content: '' };
+  if (message.kind === 'sticker' && message.fileData) {
+    return {
+      kind: 'sticker',
+      content: message.content || 'Sticker',
+      stickerId: message.stickerId,
+      packId: message.packId,
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      fileType: message.fileType,
+      fileData: message.fileData,
+    };
+  }
+  if (message.kind === 'file' && message.fileData) {
+    return {
+      kind: 'file',
+      content: message.content || message.fileName || 'Anhang',
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      fileType: message.fileType,
+      fileData: message.fileData,
+    };
+  }
+  const preview = getMessagePreviewText(message);
+  return { kind: 'chat', content: `↪ Weitergeleitet:\n${preview}` };
+}
+
 function getLastPreview(message) {
   if (!message) return 'No messages';
+  if (message.kind === 'sticker') return `${message.from === 'self' ? 'Du: ' : ''}Sticker`;
   if (message.kind === 'file') return `File: ${message.fileName || message.content || 'Attachment'}`;
+  if (message.kind === 'contact-share') {
+    const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
+    return `${message.from === 'self' ? 'Du: ' : ''}Kontakt: ${name}`;
+  }
   if (message.kind === 'poker-invite') {
     return `${message.from === 'self' ? 'Du: ' : ''}Poker: ${message.tableName || 'Einladung'}`;
   }
@@ -333,12 +429,21 @@ function getFileCategory(mime, fileName) {
 /** Bild-Only-Nachrichten: ohne Sprechblasen-Hintergrund, direkt im Verlauf */
 function isBareMediaMessage(message) {
   if (!message) return false;
+  if (message.kind === 'sticker') {
+    return Boolean(message.fileData || message.localPreviewUrl);
+  }
   if (message.kind === 'file') {
     const mime = message.fileType || 'application/octet-stream';
     if (getFileCategory(mime, message.fileName) !== 'image') return false;
     return Boolean(getImageUrl(message));
   }
   return Boolean(getImageUrl(message));
+}
+
+/** Rich-Embeds (Poker, Kontakt, …): ohne Sprechblasen-Karte */
+function isChatEmbedMessage(message) {
+  if (!message) return false;
+  return message.kind === 'poker-invite' || message.kind === 'contact-share';
 }
 
 function FileTypeIcon({ mime, fileName, size = 22 }) {
@@ -518,8 +623,38 @@ function MarkdownBody({ text }) {
             ),
         }}
       >
-        {text}
+        {normalizeChatMarkdown(text)}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+function ContactShareMessage({ message, onConnect, isConnected }) {
+  const shared = message.sharedContact || {};
+  const name = shared.displayName || shared.name || shared.id || 'Kontakt';
+  const address = (shared.address || '').trim();
+  return (
+    <div className="contact-share-card" role="group" aria-label="Geteilter Kontakt">
+      <div className="contact-share-card-head">
+        <PeerAvatar pictureUrl={shared.profilePicture} name={name} size={44} />
+        <div className="min-w-0">
+          <div className="contact-share-card-title">{name}</div>
+          {shared.id && shared.id !== name ? (
+            <div className="contact-share-card-meta font-mono text-xs">{shared.id}</div>
+          ) : null}
+          {shared.bio ? <div className="contact-share-card-bio">{shared.bio}</div> : null}
+          {address ? <div className="contact-share-card-meta font-mono text-xs">{address}</div> : null}
+        </div>
+      </div>
+      {address && !isConnected ? (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => onConnect?.(address, shared.id)}
+        >
+          Verbinden
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -527,42 +662,255 @@ function MarkdownBody({ text }) {
 function PokerInviteMessage({ message }) {
   const navigate = useNavigate();
   const tableName = message.tableName || 'Poker-Tisch';
+  const settings = message.pokerSettings || {};
   const summary = message.pokerSettingsSummary || message.content || '';
+  const smallBlind = Number(settings.smallBlind) || 10;
+  const bigBlind = Number(settings.bigBlind) || 20;
+  const maxPlayers = Number(settings.maxPlayers) || 6;
+  const startingChips = Number(settings.startingChips) || 2000;
+
+  const joinTable = () => {
+    try {
+      sessionStorage.setItem(
+        'bt.poker.pendingJoin',
+        JSON.stringify({
+          hostPeerId: message.hostPeerId,
+          tableId: message.tableId,
+          tableName,
+          pokerSettings: settings,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    navigate(`/plugin/${encodeURIComponent('poker:table')}`);
+    void window.bluetalk?.poker?.openGameWindow?.();
+  };
+
   return (
     <div className="poker-invite-card" role="group" aria-label="Poker-Einladung">
       <div className="poker-invite-card-head">
         <span className="poker-invite-card-icon" aria-hidden>
           ♠
         </span>
-        <div>
+        <div className="poker-invite-card-copy">
+          <div className="poker-invite-card-kicker">Texas Hold&apos;em</div>
           <div className="poker-invite-card-title">{tableName}</div>
           {summary ? <div className="poker-invite-card-meta">{summary}</div> : null}
         </div>
       </div>
-      <p className="poker-invite-card-hint">Einladung zum gemeinsamen Texas Hold&apos;em (Peer-to-Peer).</p>
+      <dl className="poker-invite-card-stats">
+        <div>
+          <dt>Blinds</dt>
+          <dd>{smallBlind}/{bigBlind}</dd>
+        </div>
+        <div>
+          <dt>Plätze</dt>
+          <dd>max. {maxPlayers}</dd>
+        </div>
+        <div>
+          <dt>Start</dt>
+          <dd>{startingChips.toLocaleString('de-DE')} Chips</dd>
+        </div>
+      </dl>
+      <p className="poker-invite-card-hint">Peer-to-Peer am Tisch — du musst mit dem Host verbunden sein.</p>
       <button
         type="button"
-        className="btn btn-secondary btn-sm poker-invite-card-btn"
-        onClick={() => {
-          try {
-            sessionStorage.setItem(
-              'bt.poker.pendingJoin',
-              JSON.stringify({
-                hostPeerId: message.hostPeerId,
-                tableId: message.tableId,
-                tableName,
-                pokerSettings: message.pokerSettings || {},
-              })
-            );
-          } catch {
-            /* ignore */
-          }
-          navigate(`/plugin/${encodeURIComponent('poker:table')}`);
-        }}
+        className="poker-invite-card-btn"
+        onClick={joinTable}
       >
         Tisch beitreten
       </button>
     </div>
+  );
+}
+
+function MessageReplyQuote({ replyTo, isSelf }) {
+  if (!replyTo) return null;
+  return (
+    <div className={`msg-reply-quote${isSelf ? ' msg-reply-quote--self' : ''}`}>
+      <span className="msg-reply-quote-sender">{replyTo.sender || 'Nachricht'}</span>
+      <span className="msg-reply-quote-text">{replyTo.preview || ''}</span>
+    </div>
+  );
+}
+
+function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const hideTimerRef = useRef(null);
+  const triggerRef = useRef(null);
+  const flyoutRef = useRef(null);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const r = trigger.getBoundingClientRect();
+    const flyoutWidth = 272;
+    const pad = 8;
+    const overlap = 4;
+    let left = r.right - overlap;
+    if (left + flyoutWidth > window.innerWidth - pad) {
+      left = r.left - flyoutWidth + overlap;
+    }
+    left = Math.min(left, window.innerWidth - flyoutWidth - pad);
+    left = Math.max(pad, left);
+    setPosition({ top: r.top, left });
+  }, []);
+
+  const showSubmenu = useCallback(() => {
+    clearHideTimer();
+    updatePosition();
+    setOpen(true);
+  }, [clearHideTimer, updatePosition]);
+
+  const hideSubmenu = useCallback(() => {
+    clearHideTimer();
+    hideTimerRef.current = window.setTimeout(() => setOpen(false), 140);
+  }, [clearHideTimer]);
+
+  useLayoutEffect(() => {
+    if (!open || !flyoutRef.current) return;
+    const panel = flyoutRef.current;
+    const pr = panel.getBoundingClientRect();
+    const pad = 8;
+    if (pr.bottom > window.innerHeight - pad) {
+      setPosition((prev) => ({
+        ...prev,
+        top: Math.max(pad, prev.top - (pr.bottom - window.innerHeight + pad)),
+      }));
+    }
+  }, [open, children]);
+
+  useEffect(() => () => clearHideTimer(), [clearHideTimer]);
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        className={[
+          'chat-list-context-menu-item',
+          'chat-list-context-menu-item--submenu-trigger',
+          open && 'chat-list-context-menu-item--submenu-open',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onMouseEnter={showSubmenu}
+        onMouseLeave={hideSubmenu}
+      >
+        <Icon size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        {label}
+        <ChevronRight size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden className="chat-list-context-menu-chevron" />
+      </div>
+      {open
+        ? createPortal(
+            <div
+              ref={flyoutRef}
+              className="chat-list-context-menu chat-list-context-menu-flyout-panel animate-scale"
+              role="menu"
+              style={{
+                position: 'fixed',
+                top: position.top,
+                left: position.left,
+                zIndex: 1260,
+                minWidth: 260,
+                maxHeight: 'min(420px, calc(100vh - 24px))',
+                overflowY: 'auto',
+              }}
+              onMouseEnter={clearHideTimer}
+              onMouseLeave={hideSubmenu}
+            >
+              {children}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+}
+
+function NotificationMuteMenuItems({ contact, contactId, onDone, applyNotificationMute }) {
+  return (
+    <>
+      {isContactNotificationMuted(contact) ? (
+        <button
+          type="button"
+          className="chat-list-context-menu-item"
+          role="menuitem"
+          onClick={() => {
+            applyNotificationMute(contactId, 'off');
+            onDone?.();
+          }}
+        >
+          <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          Mitteilungen ein
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="chat-list-context-menu-item"
+        role="menuitem"
+        onClick={() => {
+          applyNotificationMute(contactId, '1h');
+          onDone?.();
+        }}
+      >
+        <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        1 Std. Mitteilungen stumm
+      </button>
+      <button
+        type="button"
+        className="chat-list-context-menu-item"
+        role="menuitem"
+        onClick={() => {
+          applyNotificationMute(contactId, '8h');
+          onDone?.();
+        }}
+      >
+        <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        8 Std. Mitteilungen stumm
+      </button>
+      <button
+        type="button"
+        className="chat-list-context-menu-item"
+        role="menuitem"
+        onClick={() => {
+          applyNotificationMute(contactId, '24h');
+          onDone?.();
+        }}
+      >
+        <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        24 Std. Mitteilungen stumm
+      </button>
+      <button
+        type="button"
+        className="chat-list-context-menu-item"
+        role="menuitem"
+        onClick={() => {
+          applyNotificationMute(contactId, 'manual');
+          onDone?.();
+        }}
+      >
+        <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        Mitteilungen stumm bis manuell ein
+      </button>
+      {notificationMuteSelectValue(contact) === 'timed' &&
+      typeof contact?.notifyMutedUntil === 'number' ? (
+        <div className="chat-header-peer-menu-hint text-xs text-muted">
+          Stumm bis {formatMuteExpiry(contact.notifyMutedUntil)}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -580,13 +928,21 @@ function ChatMessage({ message, onExpandImage }) {
     };
 
     return (
-      <button type="button" className="msg-inline-image-link" onClick={open}>
-        <img src={imageUrl} alt="Geteiltes Bild" className="msg-inline-image" />
-      </button>
+      <>
+        <MessageReplyQuote replyTo={message.replyTo} isSelf={message.from === 'self'} />
+        <button type="button" className="msg-inline-image-link" onClick={open}>
+          <img src={imageUrl} alt="Geteiltes Bild" className="msg-inline-image" />
+        </button>
+      </>
     );
   }
 
-  return <MarkdownBody text={message.content} />;
+  return (
+    <>
+      <MessageReplyQuote replyTo={message.replyTo} isSelf={message.from === 'self'} />
+      <MarkdownBody text={message.content} />
+    </>
+  );
 }
 
 function MediaLightbox({ open, src, alt, canSave, onClose, onSave }) {
@@ -695,6 +1051,21 @@ export default function ChatsPage() {
   const chatActionsMenuBtnRef = useRef(null);
   const chatActionsMenuPanelRef = useRef(null);
 
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
+  const [attachMenuPosition, setAttachMenuPosition] = useState({ bottom: 0, left: 0 });
+  const attachMenuBtnRef = useRef(null);
+  const attachMenuPanelRef = useRef(null);
+  const [composerAttachments, setComposerAttachments] = useState(() => pluginRuntime.listComposerAttachments());
+
+  const [messageContextMenu, setMessageContextMenu] = useState(null);
+  const messageContextMenuRef = useRef(null);
+  const [replyToMessage, setReplyToMessage] = useState(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState(() => new Set());
+  const [forwardDialog, setForwardDialog] = useState(null);
+  const [forwardingMessages, setForwardingMessages] = useState(false);
+
   const resizableUi = getEffectiveFlag(settings, 'resizableUi');
   const storedChatList = settings.uiResize?.chatList;
   const chatListCommitted =
@@ -764,6 +1135,7 @@ export default function ChatsPage() {
 
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
+  const mediaInputRef = useRef(null);
   const textareaRef = useRef(null);
   const lastReadSentRef = useRef({});
   const listContextMenuRef = useRef(null);
@@ -864,7 +1236,20 @@ export default function ChatsPage() {
 
   useEffect(() => {
     setChatActionsMenuOpen(false);
+    setAttachMenuOpen(false);
+    setMessageContextMenu(null);
+    setReplyToMessage(null);
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
   }, [selectedPeerId]);
+
+  useEffect(() => {
+    const off = pluginRuntime.onComposerAttachmentsChanged((items) => {
+      setComposerAttachments(items);
+    });
+    setComposerAttachments(pluginRuntime.listComposerAttachments());
+    return off;
+  }, []);
 
   useLayoutEffect(() => {
     if (!chatActionsMenuOpen || !chatActionsMenuBtnRef.current) return;
@@ -873,6 +1258,77 @@ export default function ChatsPage() {
     const left = Math.min(Math.max(8, r.right - menuWidth), window.innerWidth - menuWidth - 8);
     setChatMenuPosition({ top: r.bottom + 6, left });
   }, [chatActionsMenuOpen]);
+
+  const closeMessageContextMenu = useCallback(() => setMessageContextMenu(null), []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const startSelectionMode = useCallback(() => {
+    setChatActionsMenuOpen(false);
+    setMessageContextMenu(null);
+    setSelectionMode(true);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const toggleSelectedMessage = useCallback((messageId) => {
+    if (!messageId) return;
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
+  const openMessageContextMenu = useCallback((e, message) => {
+    if (selectionMode) return;
+    if (!message?.messageId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pad = 8;
+    const mw = 220;
+    const mh = 180;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + mw > window.innerWidth - pad) x = Math.max(pad, window.innerWidth - mw - pad);
+    if (y + mh > window.innerHeight - pad) y = Math.max(pad, window.innerHeight - mh - pad);
+    if (x < pad) x = pad;
+    if (y < pad) y = pad;
+    setMessageContextMenu({ message, x, y });
+  }, [selectionMode]);
+
+  useEffect(() => {
+    if (!messageContextMenu) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeMessageContextMenu();
+    };
+    document.addEventListener('keydown', onKey);
+    let onDown = null;
+    const id = window.setTimeout(() => {
+      onDown = (e) => {
+        if (messageContextMenuRef.current?.contains(e.target)) return;
+        closeMessageContextMenu();
+      };
+      document.addEventListener('mousedown', onDown);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('keydown', onKey);
+      if (onDown) document.removeEventListener('mousedown', onDown);
+    };
+  }, [messageContextMenu, closeMessageContextMenu]);
+
+  useEffect(() => {
+    if (!selectionMode) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') exitSelectionMode();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectionMode, exitSelectionMode]);
 
   useEffect(() => {
     if (!chatActionsMenuOpen) return undefined;
@@ -896,6 +1352,37 @@ export default function ChatsPage() {
       if (onDown) document.removeEventListener('mousedown', onDown);
     };
   }, [chatActionsMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!attachMenuOpen || !attachMenuBtnRef.current) return;
+    const r = attachMenuBtnRef.current.getBoundingClientRect();
+    const menuWidth = 248;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - menuWidth - 8);
+    setAttachMenuPosition({ bottom: window.innerHeight - r.top + 8, left });
+  }, [attachMenuOpen]);
+
+  useEffect(() => {
+    if (!attachMenuOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setAttachMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    let onDown = null;
+    const id = window.setTimeout(() => {
+      onDown = (e) => {
+        const t = e.target;
+        if (attachMenuBtnRef.current?.contains(t)) return;
+        if (attachMenuPanelRef.current?.contains(t)) return;
+        setAttachMenuOpen(false);
+      };
+      document.addEventListener('mousedown', onDown);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('keydown', onKey);
+      if (onDown) document.removeEventListener('mousedown', onDown);
+    };
+  }, [attachMenuOpen]);
 
   const msgs = selectedPeer ? messages[selectedPeer.id] || [] : [];
   const readUpToId = selectedPeer ? peerReadReceipts[selectedPeer.id] : null;
@@ -930,12 +1417,126 @@ export default function ChatsPage() {
       }
     };
     void attempt();
-    const id = setInterval(attempt, 3000);
+    window.addEventListener('online', attempt);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      window.removeEventListener('online', attempt);
     };
   }, [showOfflineComposerReconnect, offlineReconnectAddress, connectToAddress]);
+
+  const closeAttachMenu = useCallback(() => {
+    setAttachMenuOpen(false);
+    setStickerPickerOpen(false);
+  }, []);
+
+  const openStickerPicker = useCallback(() => {
+    setAttachMenuOpen(false);
+    setStickerPickerOpen(true);
+  }, []);
+
+  const composerDisabled = Boolean(
+    !selectedPeer
+      || contactOutgoingBlocked(selectedPeer?.contact)
+      || showOfflineComposerReconnect
+  );
+
+  const sendSticker = useCallback(async (payload) => {
+    if (!selectedPeer || composerDisabled) return;
+    setSendingFile(true);
+    setFileTransfer({ stage: 'sending', percent: 60, detail: 'Sticker wird gesendet…' });
+    try {
+      const mime = payload.fileType || 'image/png';
+      const withPreview = {
+        ...payload,
+        localPreviewUrl: payload.fileData ? `data:${mime};base64,${payload.fileData}` : undefined,
+      };
+      const ok = await sendMessage(selectedPeer.id, withPreview);
+      if (!ok) {
+        toast({ variant: 'error', title: 'Sticker nicht gesendet' });
+      }
+    } finally {
+      setSendingFile(false);
+      setFileTransfer(null);
+    }
+  }, [selectedPeer, composerDisabled, sendMessage, toast]);
+
+  const openFilePicker = useCallback((accept) => {
+    closeAttachMenu();
+    const input = accept === 'media' ? mediaInputRef.current : fileInputRef.current;
+    if (!input) return;
+    input.click();
+  }, [closeAttachMenu]);
+
+  const shareOwnContact = useCallback(async () => {
+    if (!selectedPeer || !window.bluetalk) return;
+    closeAttachMenu();
+    try {
+      const info = await window.bluetalk.peer.getInfo();
+      const address =
+        info?.endpoints?.[0]
+        || (info?.addresses?.[0] && info?.port ? `${info.addresses[0]}:${info.port}` : '');
+      const ok = await sendMessage(selectedPeer.id, {
+        kind: 'contact-share',
+        sharedContact: {
+          id: info?.id,
+          displayName: settings.displayName,
+          bio: settings.bio || '',
+          profilePicture: settings.profilePicture || '',
+          address,
+        },
+      });
+      if (ok) {
+        toast({ variant: 'success', title: 'Kontakt geteilt' });
+      } else {
+        toast({ variant: 'error', title: 'Kontakt nicht gesendet', message: 'Peer ist evtl. offline oder blockiert.' });
+      }
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Kontakt nicht gesendet',
+        message: err?.message || 'Unbekannter Fehler.',
+      });
+    }
+  }, [selectedPeer, closeAttachMenu, sendMessage, settings.displayName, settings.bio, settings.profilePicture, toast]);
+
+  const connectFromSharedContact = useCallback(async (address, peerId) => {
+    if (!address?.trim()) return;
+    try {
+      const peerInfo = await connectToAddress(address.trim());
+      if (peerId) setSelectedPeerId(peerId);
+      else if (peerInfo?.id) setSelectedPeerId(peerInfo.id);
+      toast({ variant: 'success', title: 'Verbunden' });
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Verbindung fehlgeschlagen',
+        message: err?.message || 'Unbekannter Fehler.',
+      });
+    }
+  }, [connectToAddress, toast]);
+
+  const runPluginComposerAttachment = useCallback(async (item) => {
+    if (!selectedPeer || !item?.onSelect) return;
+    closeAttachMenu();
+    try {
+      await item.onSelect({
+        peerId: selectedPeer.id,
+        closeMenu: closeAttachMenu,
+        sendMessage,
+        toast,
+        settings,
+        contacts,
+        peers,
+        connectToAddress,
+      });
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Anhang fehlgeschlagen',
+        message: err?.message || 'Unbekannter Fehler.',
+      });
+    }
+  }, [selectedPeer, closeAttachMenu, sendMessage, toast, settings, contacts, peers, connectToAddress]);
 
   useEffect(() => {
     if (selectedPeerId && !chatList.find((chat) => chat.id === selectedPeerId)) {
@@ -1014,13 +1615,19 @@ export default function ChatsPage() {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const max = 220;
-    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    const max = getComposerTextareaMaxHeight();
+    el.style.height = `${Math.max(COMPOSER_TEXTAREA_MIN_HEIGHT, Math.min(el.scrollHeight, max))}px`;
   }, []);
 
   useLayoutEffect(() => {
     adjustTextareaHeight();
   }, [input, adjustTextareaHeight]);
+
+  useEffect(() => {
+    const onResize = () => adjustTextareaHeight();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [adjustTextareaHeight]);
 
   useEffect(() => {
     if (!mediaLightbox) return;
@@ -1113,11 +1720,99 @@ export default function ChatsPage() {
     if (!peerId || !messageId) return;
     const ok = await deleteMessage(peerId, messageId);
     if (ok) {
-      toast({ variant: 'success', title: 'Message deleted' });
+      toast({ variant: 'success', title: 'Nachricht gelöscht' });
     } else {
-      toast({ variant: 'error', title: 'Could not delete message' });
+      toast({ variant: 'error', title: 'Nachricht konnte nicht gelöscht werden' });
     }
   };
+
+  const handleReplyToMessage = useCallback((message) => {
+    if (!message) return;
+    setReplyToMessage(message);
+    closeMessageContextMenu();
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [closeMessageContextMenu]);
+
+  const openForwardDialog = useCallback((items) => {
+    const list = Array.isArray(items) ? items.filter((m) => m?.messageId) : [];
+    if (!list.length || !selectedPeer) return;
+    closeMessageContextMenu();
+    exitSelectionMode();
+    setForwardDialog({ messages: list, sourcePeerId: selectedPeer.id });
+  }, [selectedPeer, closeMessageContextMenu, exitSelectionMode]);
+
+  const forwardableChats = useMemo(
+    () =>
+      mainChatList.filter(
+        (chat) =>
+          chat.id !== selectedPeer?.id
+          && !chat.contact?.blocked
+          && !chat.contact?.blockedByPeer
+      ),
+    [mainChatList, selectedPeer?.id]
+  );
+
+  const confirmForwardToPeer = async (targetPeerId) => {
+    if (!forwardDialog?.messages?.length || !targetPeerId || forwardingMessages) return;
+    setForwardingMessages(true);
+    try {
+      let sent = 0;
+      for (const message of forwardDialog.messages) {
+        const ok = await sendMessage(targetPeerId, buildForwardPayload(message));
+        if (ok) sent += 1;
+      }
+      setForwardDialog(null);
+      if (sent === forwardDialog.messages.length) {
+        toast({
+          variant: 'success',
+          title: sent === 1 ? 'Nachricht weitergeleitet' : `${sent} Nachrichten weitergeleitet`,
+        });
+      } else if (sent > 0) {
+        toast({
+          variant: 'warning',
+          title: 'Teilweise weitergeleitet',
+          message: `${sent} von ${forwardDialog.messages.length} Nachrichten gesendet.`,
+        });
+      } else {
+        toast({ variant: 'error', title: 'Weiterleitung fehlgeschlagen' });
+      }
+    } finally {
+      setForwardingMessages(false);
+    }
+  };
+
+  const deleteSelectedMessages = async () => {
+    if (!selectedPeer || selectedMessageIds.size === 0) return;
+    const ids = [...selectedMessageIds];
+    let deleted = 0;
+    for (const messageId of ids) {
+      const ok = await deleteMessage(selectedPeer.id, messageId);
+      if (ok) deleted += 1;
+    }
+    exitSelectionMode();
+    if (deleted === ids.length) {
+      toast({
+        variant: 'success',
+        title: deleted === 1 ? 'Nachricht gelöscht' : `${deleted} Nachrichten gelöscht`,
+      });
+    } else if (deleted > 0) {
+      toast({
+        variant: 'warning',
+        title: 'Teilweise gelöscht',
+        message: `${deleted} von ${ids.length} Nachrichten entfernt.`,
+      });
+    } else {
+      toast({ variant: 'error', title: 'Löschen fehlgeschlagen' });
+    }
+  };
+
+  const forwardSelectedMessages = () => {
+    if (!selectedPeer || selectedMessageIds.size === 0) return;
+    const selected = msgs.filter((m) => m.messageId && selectedMessageIds.has(m.messageId));
+    openForwardDialog(selected);
+  };
+
+  const selectedCount = selectedMessageIds.size;
 
   const send = () => {
     if (!selectedPeer) return;
@@ -1133,8 +1828,20 @@ export default function ChatsPage() {
     if (input.trim()) {
       const text = input.trim();
       setInput('');
-      // sendMessage is already optimistic (shows message instantly)
-      sendMessage(peerId, { kind: 'chat', content: text }).then((ok) => {
+      const payload = { kind: 'chat', content: text };
+      if (replyToMessage) {
+        payload.replyTo = {
+          messageId: replyToMessage.messageId,
+          sender:
+            replyToMessage.from === 'self'
+              ? settings.displayName || 'Du'
+              : replyToMessage.sender || selectedPeer.displayName,
+          preview: getMessagePreviewText(replyToMessage),
+          timestamp: replyToMessage.timestamp,
+        };
+        setReplyToMessage(null);
+      }
+      sendMessage(peerId, payload).then((ok) => {
         if (!ok) {
           toast({ variant: 'error', title: 'Message not sent', message: 'Peer is probably offline.' });
         }
@@ -1202,7 +1909,7 @@ export default function ChatsPage() {
     if (!file) return;
 
     if (file.size > MAX_CHAT_FILE_SIZE_BYTES) {
-      const msg = `Max file size in chat is ${MAX_CHAT_FILE_SIZE_GB} GB.`;
+      const msg = `Max file size in chat is ${MAX_CHAT_FILE_SIZE_MB} MB.`;
       setWarning(msg);
       toast({ variant: 'warning', title: 'File too large', message: msg });
       return;
@@ -1311,6 +2018,32 @@ export default function ChatsPage() {
       setDeleteTargetPeerId(null);
     } finally {
       setDeletingChat(false);
+    }
+  };
+
+  const exportPeerChat = async (chat) => {
+    if (!chat?.id || !window.bluetalk) return;
+    try {
+      const total = chat.messageCount || 0;
+      const batch = await window.bluetalk.messages.getBatch(chat.id, {
+        skip: 0,
+        limit: Math.max(total, 1),
+      });
+      const safeName = (chat.displayName || chat.id).replace(/[^\w\-]+/g, '_').slice(0, 48);
+      downloadJsonFile(`bluetalk-${safeName}-${Date.now()}.json`, {
+        exportedAt: new Date().toISOString(),
+        peerId: chat.id,
+        displayName: chat.displayName,
+        messages: batch.messages || [],
+        messageCount: batch.total || 0,
+      });
+      toast({ variant: 'success', title: 'Chat exportiert', message: 'Der Verlauf wurde als JSON gespeichert.' });
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Export fehlgeschlagen',
+        message: err?.message || 'Unbekannter Fehler.',
+      });
     }
   };
 
@@ -1530,12 +2263,14 @@ export default function ChatsPage() {
                     <div className="text-sm text-muted chat-header-meta">
                       <span>
                         {selectedPeer.contact?.blocked
-                          ? 'Blocked'
+                          ? 'Blockiert'
                           : selectedPeer.contact?.blockedByPeer
                             ? 'Du wurdest blockiert'
-                            : selectedPeer.offline
-                              ? 'Offline'
-                              : 'Online'}
+                            : selectedPeer.contact?.chatDeletedByPeer
+                              ? 'Chat gelöscht'
+                              : selectedPeer.offline
+                                ? 'Offline'
+                                : 'Online'}
                         {selectedPeer.contact?.nickname && selectedPeer.baseName !== selectedPeer.contact.nickname
                           ? ` · ${selectedPeer.baseName}`
                           : ''}
@@ -1550,6 +2285,38 @@ export default function ChatsPage() {
                   </div>
                 </button>
                 <div className="chat-header-actions">
+                  {selectionMode ? (
+                    <div className="chat-selection-bar">
+                      <span className="chat-selection-count">
+                        {selectedCount === 0 ? 'Nachrichten auswählen' : `${selectedCount} ausgewählt`}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={selectedCount === 0}
+                        onClick={forwardSelectedMessages}
+                      >
+                        <Forward size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                        Weiterleiten
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={selectedCount === 0}
+                        onClick={() => void deleteSelectedMessages()}
+                      >
+                        <Trash2 size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                        Löschen
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={exitSelectionMode}
+                      >
+                        Aus
+                      </button>
+                    </div>
+                  ) : (
                   <button
                     type="button"
                     className="btn btn-secondary btn-icon"
@@ -1562,7 +2329,8 @@ export default function ChatsPage() {
                   >
                     <MoreVertical size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                   </button>
-                  {chatActionsMenuOpen &&
+                  )}
+                  {chatActionsMenuOpen && !selectionMode &&
                     createPortal(
                       <div
                         ref={chatActionsMenuPanelRef}
@@ -1607,74 +2375,14 @@ export default function ChatsPage() {
                       </button>
                       {contactNotificationMuteOn && !selectedPeer.contact?.blocked ? (
                         <>
-                          {isContactNotificationMuted(selectedPeer.contact) ? (
-                            <button
-                              type="button"
-                              className="chat-list-context-menu-item"
-                              role="menuitem"
-                              onClick={() => {
-                                applyNotificationMute(selectedPeer.id, 'off');
-                                setChatActionsMenuOpen(false);
-                              }}
-                            >
-                              <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                              Mitteilungen ein
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="chat-list-context-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              applyNotificationMute(selectedPeer.id, '1h');
-                              setChatActionsMenuOpen(false);
-                            }}
-                          >
-                            <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                            1 Std. Mitteilungen stumm
-                          </button>
-                          <button
-                            type="button"
-                            className="chat-list-context-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              applyNotificationMute(selectedPeer.id, '8h');
-                              setChatActionsMenuOpen(false);
-                            }}
-                          >
-                            <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                            8 Std. Mitteilungen stumm
-                          </button>
-                          <button
-                            type="button"
-                            className="chat-list-context-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              applyNotificationMute(selectedPeer.id, '24h');
-                              setChatActionsMenuOpen(false);
-                            }}
-                          >
-                            <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                            24 Std. Mitteilungen stumm
-                          </button>
-                          <button
-                            type="button"
-                            className="chat-list-context-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              applyNotificationMute(selectedPeer.id, 'manual');
-                              setChatActionsMenuOpen(false);
-                            }}
-                          >
-                            <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                            Mitteilungen stumm bis manuell ein
-                          </button>
-                          {notificationMuteSelectValue(selectedPeer.contact) === 'timed' &&
-                          typeof selectedPeer.contact?.notifyMutedUntil === 'number' ? (
-                            <div className="chat-header-peer-menu-hint text-xs text-muted">
-                              Stumm bis {formatMuteExpiry(selectedPeer.contact.notifyMutedUntil)}
-                            </div>
-                          ) : null}
+                          <ContextMenuHoverSubmenu label="Mitteilungen" icon={Bell}>
+                            <NotificationMuteMenuItems
+                              contact={selectedPeer.contact}
+                              contactId={selectedPeer.id}
+                              applyNotificationMute={applyNotificationMute}
+                              onDone={() => setChatActionsMenuOpen(false)}
+                            />
+                          </ContextMenuHoverSubmenu>
                           <div className="chat-list-context-menu-sep" role="separator" />
                         </>
                       ) : null}
@@ -1715,6 +2423,15 @@ export default function ChatsPage() {
                         type="button"
                         className="chat-list-context-menu-item"
                         role="menuitem"
+                        onClick={startSelectionMode}
+                      >
+                        <CheckSquare size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                        Auswahl
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-list-context-menu-item"
+                        role="menuitem"
                         onClick={() => {
                           void copyPeerIdFromMenu(selectedPeer.id);
                           setChatActionsMenuOpen(false);
@@ -1747,10 +2464,37 @@ export default function ChatsPage() {
                 )}
                 {!selectedPeer.contact?.blocked && selectedPeer.contact?.blockedByPeer && (
                   <div className="chat-warning" role="status">
-                    Du wurdest zuletzt beim Senden blockiert. Wenn der Kontakt die Sperre aufhebt, gehen Nachrichten
-                    wieder durch – einfach erneut senden.
+                    Du wurdest blockiert. Du kannst keine Nachrichten senden, bis der Kontakt dich wieder entblockt.
                   </div>
                 )}
+                {!selectedPeer.contact?.blocked &&
+                  !selectedPeer.contact?.blockedByPeer &&
+                  selectedPeer.contact?.chatDeletedByPeer && (
+                    <div className="chat-warning" role="status">
+                      <p style={{ margin: 0 }}>
+                        {selectedPeer.displayName} hat den Chat gelöscht. Dein lokaler Verlauf bleibt erhalten, bis du
+                        ihn exportierst oder löschst.
+                      </p>
+                      <div className="flex gap-2 flex-wrap" style={{ marginTop: 10 }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => void exportPeerChat(selectedPeer)}
+                        >
+                          <Save size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Exportieren
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => openDeleteForPeer(selectedPeer.id)}
+                        >
+                          <Trash2 size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Chat löschen
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 {contactNotificationMuteOn &&
                   !selectedPeer.contact?.blocked &&
                   isContactNotificationMuted(selectedPeer.contact) && (
@@ -1810,22 +2554,53 @@ export default function ChatsPage() {
                   const bubbleName = isSelf ? (settings.displayName || 'You') : (m.sender || selectedPeer.displayName);
                   const bubblePic = isSelf ? settings.profilePicture : selectedPeer.profilePicture;
                   const bareMedia = isBareMediaMessage(m);
+                  const embedMessage = isChatEmbedMessage(m);
+                  const outsideBubble = bareMedia || embedMessage;
                   const delivery = selfDeliveryLabel(m);
                   const seen = isSelf && readUpToId && m.messageId && readUpToId === m.messageId ? 'Seen' : '';
+                  const isSelected = Boolean(m.messageId && selectedMessageIds.has(m.messageId));
                   return (
                     <div
                       key={m.messageId || `${m.timestamp || i}-${m.from || 'msg'}-${i}`}
-                      className={['msg-row', isSelf ? 'msg-row-self' : 'msg-row-other', bareMedia && 'msg-row--bare']
+                      className={[
+                        'msg-row',
+                        isSelf ? 'msg-row-self' : 'msg-row-other',
+                        outsideBubble && 'msg-row--bare',
+                        embedMessage && 'msg-row--embed',
+                        selectionMode && 'msg-row--selectable',
+                        isSelected && 'msg-row--selected',
+                      ]
                         .filter(Boolean)
                         .join(' ')}
+                      onClick={
+                        selectionMode && m.messageId
+                          ? () => toggleSelectedMessage(m.messageId)
+                          : undefined
+                      }
                     >
-                      <PeerAvatar pictureUrl={bubblePic} name={bubbleName} size={28} className="msg-avatar" />
+                      {selectionMode && m.messageId ? (
+                        <label className="msg-select-check" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectedMessage(m.messageId)}
+                            aria-label="Nachricht auswählen"
+                          />
+                        </label>
+                      ) : null}
+                      {!selectionMode ? (
+                        <PeerAvatar pictureUrl={bubblePic} name={bubbleName} size={28} className="msg-avatar" />
+                      ) : null}
                       <div
-                        className={['msg', isSelf ? 'msg-self' : 'msg-other', bareMedia && 'msg--bare-media', 'animate-in']
+                        className={['msg', isSelf ? 'msg-self' : 'msg-other', bareMedia && 'msg--bare-media', embedMessage && 'msg--embed', 'animate-in']
                           .filter(Boolean)
                           .join(' ')}
+                        onContextMenu={selectionMode ? undefined : (e) => openMessageContextMenu(e, m)}
                       >
-                        {!isSelf && <div className="msg-sender">{m.sender || m.from}</div>}
+                        {!isSelf && !selectionMode && <div className="msg-sender">{m.sender || m.from}</div>}
+                        {m.replyTo && m.kind !== 'chat' ? (
+                          <MessageReplyQuote replyTo={m.replyTo} isSelf={isSelf} />
+                        ) : null}
                         {m.kind === 'file' ? (
                           <FileMessage
                             message={m}
@@ -1833,8 +2608,16 @@ export default function ChatsPage() {
                             onExpandImage={setMediaLightbox}
                             onSaveToDisk={saveFileMessage}
                           />
+                        ) : m.kind === 'sticker' ? (
+                          <StickerMessage message={m} onExpandImage={setMediaLightbox} />
                         ) : m.kind === 'poker-invite' ? (
                           <PokerInviteMessage message={m} />
+                        ) : m.kind === 'contact-share' ? (
+                          <ContactShareMessage
+                            message={m}
+                            isConnected={Boolean(peers.find((p) => p.id === (m.sharedContact?.id || m.from)))}
+                            onConnect={connectFromSharedContact}
+                          />
                         ) : (
                           <ChatMessage message={m} onExpandImage={setMediaLightbox} />
                         )}
@@ -1849,16 +2632,6 @@ export default function ChatsPage() {
                             <span className="msg-delivery">{[delivery.text, seen].filter(Boolean).join(' · ')}</span>
                           ) : null}
                         </div>
-                        {m.messageId && (
-                          <button
-                            type="button"
-                            className="msg-delete-btn"
-                            title="Delete message"
-                            onClick={() => handleDeleteMessage(selectedPeer.id, m.messageId)}
-                          >
-                            <Trash2 size={13} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                          </button>
-                        )}
                       </div>
                     </div>
                   );
@@ -1881,6 +2654,29 @@ export default function ChatsPage() {
                           : 'Offline — keine gespeicherte Adresse für diesen Peer.'}
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {replyToMessage && (
+                  <div className="chat-reply-bar">
+                    <div className="chat-reply-bar-body">
+                      <span className="chat-reply-bar-label">
+                        Antwort an{' '}
+                        {replyToMessage.from === 'self'
+                          ? settings.displayName || 'Du'
+                          : replyToMessage.sender || selectedPeer.displayName}
+                      </span>
+                      <span className="chat-reply-bar-preview">{getMessagePreviewText(replyToMessage)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon chat-reply-bar-close"
+                      onClick={() => setReplyToMessage(null)}
+                      aria-label="Antwort abbrechen"
+                      title="Antwort abbrechen"
+                    >
+                      <X size={16} strokeWidth={CHAT_ICON_STROKE} />
+                    </button>
                   </div>
                 )}
 
@@ -1934,29 +2730,117 @@ export default function ChatsPage() {
                     hidden
                     ref={fileInputRef}
                     onChange={handleFilePicked}
-                    disabled={
-                      readingFile
-                      || sendingFile
-                      || !selectedPeer
-                      || contactOutgoingBlocked(selectedPeer.contact)
-                      || showOfflineComposerReconnect
-                    }
+                    disabled={composerDisabled || readingFile || sendingFile}
+                  />
+                  <input
+                    type="file"
+                    hidden
+                    ref={mediaInputRef}
+                    accept="image/*,video/*"
+                    onChange={handleFilePicked}
+                    disabled={composerDisabled || readingFile || sendingFile}
                   />
                   <button
+                    type="button"
                     className="btn btn-secondary btn-icon"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={
-                      readingFile
-                      || sendingFile
-                      || !selectedPeer
-                      || contactOutgoingBlocked(selectedPeer.contact)
-                      || showOfflineComposerReconnect
-                    }
-                    title="Datei anhängen"
+                    ref={attachMenuBtnRef}
+                    aria-label="Anhang hinzufügen"
+                    aria-expanded={attachMenuOpen}
+                    aria-haspopup="menu"
+                    onClick={() => setAttachMenuOpen((o) => !o)}
+                    disabled={composerDisabled || readingFile || sendingFile}
+                    title="Anhang hinzufügen"
                     style={{ height: 40, width: 40 }}
                   >
-                    <Paperclip size={17} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                    <Plus size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                   </button>
+                  {attachMenuOpen &&
+                    createPortal(
+                      <div
+                        ref={attachMenuPanelRef}
+                        className="chat-list-context-menu chat-composer-attach-menu animate-scale"
+                        role="menu"
+                        style={{
+                          position: 'fixed',
+                          bottom: attachMenuPosition.bottom,
+                          left: attachMenuPosition.left,
+                          zIndex: 1250,
+                          minWidth: 248,
+                          maxHeight: 'min(360px, calc(100vh - 24px))',
+                          overflowY: 'auto',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="chat-list-context-menu-item"
+                          role="menuitem"
+                          onClick={() => openStickerPicker()}
+                        >
+                          <Smile size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Sticker
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-list-context-menu-item"
+                          role="menuitem"
+                          onClick={() => openFilePicker('file')}
+                        >
+                          <File size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Datei
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-list-context-menu-item"
+                          role="menuitem"
+                          onClick={() => openFilePicker('media')}
+                        >
+                          <FileImage size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Bild / Video
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-list-context-menu-item"
+                          role="menuitem"
+                          onClick={() => void shareOwnContact()}
+                        >
+                          <UserRound size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                          Kontakt teilen
+                        </button>
+                        {composerAttachments.length > 0 ? (
+                          <>
+                            <div className="chat-list-context-menu-sep" role="separator" />
+                            {composerAttachments.map((item) => {
+                              const Icon = resolveLucideIcon(item.icon);
+                              return (
+                                <button
+                                  key={item.attachmentId}
+                                  type="button"
+                                  className="chat-list-context-menu-item"
+                                  role="menuitem"
+                                  onClick={() => void runPluginComposerAttachment(item)}
+                                >
+                                  <Icon size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                                  {item.label}
+                                </button>
+                              );
+                            })}
+                          </>
+                        ) : null}
+                      </div>,
+                      document.body
+                    )}
+                  <StickerPicker
+                    open={stickerPickerOpen}
+                    anchorRef={attachMenuBtnRef}
+                    onClose={() => setStickerPickerOpen(false)}
+                    onSelect={(payload) => void sendSticker(payload)}
+                    onError={(error) => toast({
+                      variant: 'error',
+                      title: 'Sticker konnte nicht erstellt werden',
+                      message: error?.message || 'Ungültige Bilddatei',
+                    })}
+                    disabled={composerDisabled || sendingFile}
+                  />
                   <textarea
                     ref={textareaRef}
                     value={input}
@@ -1969,17 +2853,19 @@ export default function ChatsPage() {
                     }}
                     placeholder={
                       selectedPeer.contact?.blocked
-                        ? 'Unblock to send messages…'
-                        : showOfflineComposerReconnect
-                          ? 'Warte auf Verbindung …'
-                          : readingFile
-                            ? 'Reading file…'
-                            : 'Type a message… (Markdown supported)'
+                        ? 'Entblocken, um Nachrichten zu senden…'
+                        : selectedPeer.contact?.blockedByPeer
+                          ? 'Du wurdest blockiert…'
+                          : selectedPeer.contact?.chatDeletedByPeer
+                            ? 'Kontakt hat den Chat gelöscht…'
+                            : showOfflineComposerReconnect
+                              ? 'Warte auf Verbindung …'
+                              : readingFile
+                                ? 'Datei wird gelesen…'
+                                : 'Nachricht schreiben…'
                     }
                     rows={1}
-                    disabled={Boolean(
-                      contactOutgoingBlocked(selectedPeer.contact) || showOfflineComposerReconnect
-                    )}
+                    disabled={composerDisabled}
                   />
                   <button
                     className="btn btn-primary btn-icon"
@@ -1988,8 +2874,7 @@ export default function ChatsPage() {
                       sendingFile
                       || readingFile
                       || (!input.trim() && !pendingFile)
-                      || Boolean(contactOutgoingBlocked(selectedPeer.contact))
-                      || showOfflineComposerReconnect
+                      || composerDisabled
                     }
                     style={{ height: 40, width: 40 }}
                     title="Nachricht senden"
@@ -2075,9 +2960,11 @@ export default function ChatsPage() {
                     ? 'Blockiert'
                     : selectedPeer.contact?.blockedByPeer
                       ? 'Hat dich blockiert'
-                      : selectedPeer.offline
-                        ? 'Offline'
-                        : 'Online'}
+                      : selectedPeer.contact?.chatDeletedByPeer
+                        ? 'Hat den Chat gelöscht'
+                        : selectedPeer.offline
+                          ? 'Offline'
+                          : 'Online'}
                   {!contactE2eePreferenceOn(selectedPeer.contact) ? ' · Ausgehend ohne E2EE' : ''}
                 </span>
               </div>
@@ -2273,68 +3160,14 @@ export default function ChatsPage() {
           </button>
           {contactNotificationMuteOn && !listContextMenu.chat.contact?.blocked ? (
             <>
-              {isContactNotificationMuted(listContextMenu.chat.contact) ? (
-                <button
-                  type="button"
-                  className="chat-list-context-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    applyNotificationMute(listContextMenu.chat.id, 'off');
-                    closeListContextMenu();
-                  }}
-                >
-                  <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                  Mitteilungen ein
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="chat-list-context-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  applyNotificationMute(listContextMenu.chat.id, '1h');
-                  closeListContextMenu();
-                }}
-              >
-                <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                1 Std. Mitteilungen stumm
-              </button>
-              <button
-                type="button"
-                className="chat-list-context-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  applyNotificationMute(listContextMenu.chat.id, '8h');
-                  closeListContextMenu();
-                }}
-              >
-                <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                8 Std. Mitteilungen stumm
-              </button>
-              <button
-                type="button"
-                className="chat-list-context-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  applyNotificationMute(listContextMenu.chat.id, '24h');
-                  closeListContextMenu();
-                }}
-              >
-                <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                24 Std. Mitteilungen stumm
-              </button>
-              <button
-                type="button"
-                className="chat-list-context-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  applyNotificationMute(listContextMenu.chat.id, 'manual');
-                  closeListContextMenu();
-                }}
-              >
-                <Bell size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                Mitteilungen stumm bis manuell ein
-              </button>
+              <ContextMenuHoverSubmenu label="Mitteilungen" icon={Bell}>
+                <NotificationMuteMenuItems
+                  contact={listContextMenu.chat.contact}
+                  contactId={listContextMenu.chat.id}
+                  applyNotificationMute={applyNotificationMute}
+                  onDone={closeListContextMenu}
+                />
+              </ContextMenuHoverSubmenu>
               <div className="chat-list-context-menu-sep" role="separator" />
             </>
           ) : null}
@@ -2384,6 +3217,123 @@ export default function ChatsPage() {
             <Trash2 size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             Chat löschen…
           </button>
+        </div>
+      )}
+
+      {messageContextMenu && (
+        <div
+          ref={messageContextMenuRef}
+          className="chat-list-context-menu msg-context-menu"
+          role="menu"
+          style={{ left: messageContextMenu.x, top: messageContextMenu.y }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            className="chat-list-context-menu-item"
+            role="menuitem"
+            onClick={() => handleReplyToMessage(messageContextMenu.message)}
+          >
+            <Reply size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            Antworten
+          </button>
+          <button
+            type="button"
+            className="chat-list-context-menu-item"
+            role="menuitem"
+            onClick={() => openForwardDialog([messageContextMenu.message])}
+          >
+            <Forward size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            Weiterleiten
+          </button>
+          <button
+            type="button"
+            className="chat-list-context-menu-item chat-list-context-menu-item--danger"
+            role="menuitem"
+            onClick={() => {
+              if (!selectedPeer) return;
+              void handleDeleteMessage(selectedPeer.id, messageContextMenu.message.messageId);
+              closeMessageContextMenu();
+            }}
+          >
+            <Trash2 size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            Löschen
+          </button>
+          <div className="chat-list-context-menu-sep" role="separator" />
+          <button
+            type="button"
+            className="chat-list-context-menu-item"
+            role="menuitem"
+            onClick={closeMessageContextMenu}
+          >
+            <X size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            Aus
+          </button>
+        </div>
+      )}
+
+      {forwardDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (forwardingMessages) return;
+            setForwardDialog(null);
+          }}
+        >
+          <div className="modal animate-scale forward-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 style={{ margin: 0 }}>
+                {forwardDialog.messages.length === 1 ? 'Nachricht weiterleiten' : `${forwardDialog.messages.length} Nachrichten weiterleiten`}
+              </h3>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => {
+                  if (forwardingMessages) return;
+                  setForwardDialog(null);
+                }}
+                aria-label="Schließen"
+                disabled={forwardingMessages}
+              >
+                <X size={16} strokeWidth={CHAT_ICON_STROKE} />
+              </button>
+            </div>
+            <p className="text-muted" style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
+              Wähle einen Chat als Ziel.
+            </p>
+            <div className="forward-dialog-list">
+              {forwardableChats.length === 0 ? (
+                <div className="empty-state" style={{ padding: '12px 0' }}>
+                  <p>Keine weiteren Chats verfügbar.</p>
+                </div>
+              ) : (
+                forwardableChats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    className="forward-dialog-item"
+                    disabled={forwardingMessages}
+                    onClick={() => void confirmForwardToPeer(chat.id)}
+                  >
+                    <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={32} />
+                    <div className="forward-dialog-item-info">
+                      <div className="forward-dialog-item-name">{chat.displayName}</div>
+                      <div className="forward-dialog-item-sub">{getLastPreview(chat.lastMessage)}</div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setForwardDialog(null)}
+                disabled={forwardingMessages}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

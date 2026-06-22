@@ -2,9 +2,18 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
+const FORBIDDEN_PATH_PARTS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function splitSafeKey(key) {
+  if (typeof key !== 'string' || !key) return null;
+  const parts = key.split('.');
+  if (parts.some((part) => !part || FORBIDDEN_PATH_PARTS.has(part))) return null;
+  return parts;
+}
+
 class Store {
   constructor(opts) {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = opts.baseDir || app.getPath('userData');
     this.path = path.join(userDataPath, opts.configName + '.json');
     this.data = this._load();
     this._dirty = false;
@@ -13,7 +22,8 @@ class Store {
 
   _load() {
     try {
-      return JSON.parse(fs.readFileSync(this.path, 'utf-8'));
+      const parsed = JSON.parse(fs.readFileSync(this.path, 'utf-8'));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       return {};
     }
@@ -51,20 +61,32 @@ class Store {
   }
 
   get(key, defaultValue) {
-    const keys = key.split('.');
+    const keys = splitSafeKey(key);
+    if (!keys) return defaultValue;
     let result = this.data;
     for (const k of keys) {
-      if (result === undefined || result === null) return defaultValue;
+      if (
+        result === undefined
+        || result === null
+        || typeof result !== 'object'
+        || !Object.prototype.hasOwnProperty.call(result, k)
+      ) return defaultValue;
       result = result[k];
     }
     return result !== undefined ? result : defaultValue;
   }
 
   set(key, value) {
-    const keys = key.split('.');
+    const keys = splitSafeKey(key);
+    if (!keys) throw new Error('Invalid store key');
     let obj = this.data;
     for (let i = 0; i < keys.length - 1; i++) {
-      if (!(keys[i] in obj) || typeof obj[keys[i]] !== 'object') {
+      if (
+        !Object.prototype.hasOwnProperty.call(obj, keys[i])
+        || obj[keys[i]] === null
+        || typeof obj[keys[i]] !== 'object'
+        || Array.isArray(obj[keys[i]])
+      ) {
         obj[keys[i]] = {};
       }
       obj = obj[keys[i]];
@@ -74,10 +96,11 @@ class Store {
   }
 
   delete(key) {
-    const keys = key.split('.');
+    const keys = splitSafeKey(key);
+    if (!keys) return;
     let obj = this.data;
     for (let i = 0; i < keys.length - 1; i++) {
-      if (!(keys[i] in obj)) return;
+      if (!obj || typeof obj !== 'object' || !Object.prototype.hasOwnProperty.call(obj, keys[i])) return;
       obj = obj[keys[i]];
     }
     delete obj[keys[keys.length - 1]];

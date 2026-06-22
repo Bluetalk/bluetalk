@@ -1,4 +1,8 @@
 const http = require('http');
+const crypto = require('crypto');
+
+const MAX_API_BODY_BYTES = 12 * 1024 * 1024;
+const API_BIND_HOST = '127.0.0.1';
 
 /**
  * APIServer - HTTP REST API for external real-time actions.
@@ -14,6 +18,9 @@ class APIServer {
     this.store = store;
     this.server = null;
     this.sseClients = new Set();
+    this.token = store.get('apiToken', '') || store.get('settings.apiToken', '') || crypto.randomBytes(32).toString('hex');
+    if (!store.get('apiToken', '')) store.set('apiToken', this.token);
+    store.delete?.('settings.apiToken');
     this._setupEventForwarding();
   }
 
@@ -36,10 +43,23 @@ class APIServer {
   }
 
   _broadcastSSE(event, data) {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    let serialized = JSON.stringify(data);
+    if (Buffer.byteLength(serialized) > 1024 * 1024) {
+      serialized = JSON.stringify({
+        from: data?.from,
+        kind: data?.kind,
+        messageId: data?.messageId,
+        timestamp: data?.timestamp,
+        payloadOmitted: true,
+      });
+    }
+    const payload = `event: ${event}\ndata: ${serialized}\n\n`;
     for (const client of this.sseClients) {
       try {
-        client.write(payload);
+        if (!client.write(payload)) {
+          client.end();
+          this.sseClients.delete(client);
+        }
       } catch {
         this.sseClients.delete(client);
       }
@@ -49,24 +69,50 @@ class APIServer {
   _json(res, statusCode, data) {
     res.writeHead(statusCode, {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
     });
     res.end(JSON.stringify(data));
   }
 
+  _isAuthorized(req) {
+    const value = String(req.headers.authorization || '');
+    const provided = value.startsWith('Bearer ') ? value.slice(7).trim() : '';
+    const expected = Buffer.from(this.token);
+    const actual = Buffer.from(provided);
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  }
+
   _readBody(req) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const chunks = [];
-      req.on('data', (chunk) => chunks.push(chunk));
+      let size = 0;
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        if (tooLarge) return;
+        size += chunk.length;
+        if (size > MAX_API_BODY_BYTES) {
+          tooLarge = true;
+          chunks.length = 0;
+          const error = new Error('Request body too large');
+          error.statusCode = 413;
+          reject(error);
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on('end', () => {
+        if (tooLarge) return;
         try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString()));
+          const raw = Buffer.concat(chunks).toString('utf8');
+          resolve(raw ? JSON.parse(raw) : {});
         } catch {
-          resolve({});
+          const error = new Error('Invalid JSON body');
+          error.statusCode = 400;
+          reject(error);
         }
       });
+      req.on('error', reject);
     });
   }
 
@@ -80,29 +126,40 @@ class APIServer {
       this.server = null;
     }
 
+    const listenPort = Number(port);
+    if (!Number.isInteger(listenPort) || listenPort < 0 || listenPort > 65535) {
+      throw new Error('Invalid API port');
+    }
+
     this.server = http.createServer(async (req, res) => {
-      // CORS preflight
+      if (req.headers.origin) {
+        return this._json(res, 403, { error: 'Browser-origin requests are not allowed' });
+      }
+
       if (req.method === 'OPTIONS') {
-        res.writeHead(204, {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        });
+        res.writeHead(204, { Allow: 'GET, POST, PUT, DELETE, OPTIONS' });
         res.end();
         return;
       }
 
-      const url = new URL(req.url, `http://localhost:${port}`);
+      const url = new URL(req.url, `http://${API_BIND_HOST}:${listenPort}`);
       const path = url.pathname;
 
       try {
+        if (path === '/api/health' && req.method === 'GET') {
+          return this._json(res, 200, { ok: true });
+        }
+        if (!this._isAuthorized(req)) {
+          return this._json(res, 401, { error: 'Unauthorized' });
+        }
+
         // -- SSE Events Stream --
         if (path === '/api/events' && req.method === 'GET') {
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
+            'X-Content-Type-Options': 'nosniff',
           });
           res.write('event: connected\ndata: {"status":"ok"}\n\n');
           this.sseClients.add(res);
@@ -189,13 +246,19 @@ class APIServer {
         // -- 404 --
         this._json(res, 404, { error: 'Not found' });
       } catch (err) {
-        this._json(res, 500, { error: err.message });
+        if (!res.headersSent) this._json(res, err.statusCode || 500, { error: err.message });
+        else res.end();
       }
     });
 
-    this.server.listen(port, () => {
-      console.log(`[APIServer] REST API listening on port ${port}`);
+    this.server.on('error', (error) => {
+      console.error(`[APIServer] Could not listen on ${API_BIND_HOST}:${listenPort}:`, error.message);
     });
+    this.server.listen(listenPort, API_BIND_HOST, () => {
+      const actualPort = this.server?.address()?.port || listenPort;
+      console.log(`[APIServer] REST API listening on ${API_BIND_HOST}:${actualPort}`);
+    });
+    return this.server;
   }
 
   stop(callback) {

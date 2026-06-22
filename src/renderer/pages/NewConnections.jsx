@@ -12,36 +12,29 @@ export default function NewConnectionsPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   const newPeerRows = useMemo(() => {
-    const ids = new Set([
-      ...peers.map((p) => p.id),
-      ...contacts.map((c) => c.id),
-    ]);
-    ids.delete('self');
-
     const rows = [];
-    for (const id of ids) {
-      const count = chatMeta[id]?.count || 0;
-      const contact = contacts.find((c) => c.id === id);
+    for (const peer of peers) {
+      if (!peer?.id || peer.id === 'self') continue;
+
+      const count = chatMeta[peer.id]?.count || 0;
+      const contact = contacts.find((c) => c.id === peer.id);
       if (count > 0) continue;
       if (contact?.pendingMessageRequest) continue;
       if (contact?.hasOutgoing) continue;
 
-      const peer = peers.find((p) => p.id === id);
-      const baseName = contact?.name || peer?.name || id;
+      const baseName = contact?.name || peer.name || peer.id;
       rows.push({
-        id,
+        id: peer.id,
         peer,
         contact,
         displayName: contact?.nickname || baseName,
         baseName,
-        offline: !peer,
       });
     }
 
-    return rows.sort((a, b) => {
-      if (a.offline !== b.offline) return Number(a.offline) - Number(b.offline);
-      return (a.displayName || '').localeCompare(b.displayName || '', undefined, { sensitivity: 'base' });
-    });
+    return rows.sort((a, b) =>
+      (a.displayName || '').localeCompare(b.displayName || '', undefined, { sensitivity: 'base' })
+    );
   }, [peers, contacts, chatMeta]);
 
   const filtered = useMemo(
@@ -125,7 +118,7 @@ export default function NewConnectionsPage() {
                   <div className="min-w-0">
                     <div className="font-medium truncate">{row.displayName}</div>
                     <div className="text-xs text-muted truncate">
-                      {row.offline ? 'Offline' : 'Online'}
+                      Online
                       {row.id !== row.displayName ? ` · ${row.id}` : ''}
                     </div>
                   </div>

@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('bluetalk', {
     saveAs: (payload) => ipcRenderer.invoke('file:saveAs', payload),
   },
 
+  library: {
+    listMedia: () => ipcRenderer.invoke('library:listMedia'),
+    getMediaData: (peerId, messageId) => ipcRenderer.invoke('library:getMediaData', peerId, messageId),
+  },
+
   // Native notifications
   notify: {
     show: (payload) => ipcRenderer.invoke('notify:show', payload),
@@ -61,6 +66,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
   network: {
     testPorts: () => ipcRenderer.invoke('network:testPorts'),
     doctor: () => ipcRenderer.invoke('network:doctor'),
+    getApiAccess: () => ipcRenderer.invoke('network:getApiAccess'),
   },
 
   // Auto updater
@@ -75,6 +81,15 @@ contextBridge.exposeInMainWorld('bluetalk', {
   poker: {
     openGameWindow: () => ipcRenderer.invoke('poker:openGameWindow'),
     closeGameWindow: () => ipcRenderer.invoke('poker:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('poker:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('poker:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('poker:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('poker:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('poker:windowMaximized', listener);
+    },
     pushState: (payload) => ipcRenderer.send('poker:pumpState', payload),
     sendAction: (payload) => ipcRenderer.send('poker:fromChild', payload),
     onState: (callback) => {

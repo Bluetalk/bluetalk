@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useApp } from '../App';
 import { pluginRuntime } from './pluginRuntime';
 
 /**
@@ -9,6 +10,8 @@ import { pluginRuntime } from './pluginRuntime';
  */
 export default function PluginTabView() {
   const { tabId } = useParams();
+  const { settings } = useApp();
+  const debugMode = settings.debugMode ?? false;
   const containerRef = useRef(null);
   const [tab, setTab] = useState(() => pluginRuntime.getTab(decodeURIComponent(tabId || '')));
 
@@ -29,7 +32,11 @@ export default function PluginTabView() {
       cleanup = tab.render(container, { tabId: tab.tabId, pluginId: tab.pluginId });
     } catch (e) {
       console.error('[PluginTabView] render failed:', e);
-      container.innerHTML = `<div class="plugin-error">Plugin tab failed to render: ${String(e?.message || e)}</div>`;
+      container.replaceChildren();
+      const errorNode = document.createElement('div');
+      errorNode.className = 'plugin-error';
+      errorNode.textContent = `Plugin tab failed to render: ${String(e?.message || e)}`;
+      container.appendChild(errorNode);
     }
     return () => {
       try {
@@ -46,8 +53,7 @@ export default function PluginTabView() {
       <div className="plugin-host-empty">
         <h2>Plugin tab not available</h2>
         <p>
-          The plugin backing this tab is disabled or was uninstalled. Open Settings → Plugins to
-          manage installed plugins.
+          Die zugehörige Erweiterung ist deaktiviert oder wurde entfernt. Unter Erweiterungen kannst du sie wieder aktivieren.
         </p>
       </div>
     );
@@ -55,10 +61,12 @@ export default function PluginTabView() {
 
   return (
     <div className="plugin-host">
-      <div className="plugin-host-header">
-        <span className="plugin-host-title">{tab.label}</span>
-        <span className="plugin-host-sub">from {tab.pluginId}</span>
-      </div>
+      {debugMode ? (
+        <div className="plugin-host-header">
+          <span className="plugin-host-title">{tab.label}</span>
+          <span className="plugin-host-sub">from {tab.pluginId}</span>
+        </div>
+      ) : null}
       <div ref={containerRef} className="plugin-host-body" />
     </div>
   );

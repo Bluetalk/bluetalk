@@ -6,7 +6,7 @@
  *   - Execute each enabled plugin's `ui.js` source inside a per-plugin function
  *     closure so plugin globals don't collide.
  *   - Provide the plugin-facing `BlueTalkPlugin` API: events, peer, messages,
- *     contacts, UI registration (tabs, screens, commands), storage, toast.
+ *     (tabs, screens, commands, composer attachments), storage, toast.
  *   - Maintain registries for custom tabs + screens and notify subscribers
  *     via a tiny pub/sub.
  *
@@ -155,6 +155,7 @@ class PluginRuntime {
     this.emitter.emit('plugins-changed', this.plugins);
     this.emitter.emit('tabs-changed', this.listTabs());
     this.emitter.emit('screens-changed', this.listScreens());
+    this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
   }
 
   _activate(plugin) {
@@ -170,6 +171,7 @@ class PluginRuntime {
       manifest: plugin.manifest,
       tabs: new Map(),
       screens: new Map(),
+      composerAttachments: new Map(),
       commands: new Map(),
       eventListeners: new Map(),
       disposers: new Set(),
@@ -215,11 +217,13 @@ class PluginRuntime {
     record.timers.clear();
     record.tabs.clear();
     record.screens.clear();
+    record.composerAttachments.clear();
     record.commands.clear();
     record.eventListeners.clear();
     this.active.delete(id);
     this.emitter.emit('tabs-changed', this.listTabs());
     this.emitter.emit('screens-changed', this.listScreens());
+    this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
   }
 
   _buildPluginApi(record) {
@@ -403,6 +407,31 @@ class PluginRuntime {
           return off;
         },
 
+        /**
+         * Register an extra option in the chat composer “+” attach menu.
+         * `onSelect(ctx)` receives `{ peerId, closeMenu, sendMessage, toast, settings, contacts, peers }`.
+         */
+        registerComposerAttachment: (item) => {
+          if (!item || typeof item.onSelect !== 'function') return () => undefined;
+          const attachmentId = `${id}:${item.id || item.label || Math.random().toString(36).slice(2, 8)}`;
+          const entry = {
+            attachmentId,
+            pluginId: id,
+            label: item.label || manifest.name || id,
+            icon: item.icon || 'Plug',
+            order: typeof item.order === 'number' ? item.order : 200,
+            onSelect: item.onSelect,
+          };
+          record.composerAttachments.set(attachmentId, entry);
+          this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
+          const off = () => {
+            record.composerAttachments.delete(attachmentId);
+            this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
+          };
+          record.disposers.add(off);
+          return off;
+        },
+
         invokeCommand: async (commandId, args) => {
           const handler = record.commands.get(commandId);
           if (handler) return handler(args);
@@ -469,6 +498,17 @@ class PluginRuntime {
     return out;
   }
 
+  listComposerAttachments() {
+    const out = [];
+    for (const record of this.active.values()) {
+      for (const item of record.composerAttachments.values()) {
+        out.push(item);
+      }
+    }
+    out.sort((a, b) => a.order - b.order);
+    return out;
+  }
+
   getTab(tabId) {
     return this.listTabs().find((t) => t.tabId === tabId) || null;
   }
@@ -479,6 +519,10 @@ class PluginRuntime {
 
   onScreensChanged(fn) {
     return this.emitter.on('screens-changed', fn);
+  }
+
+  onComposerAttachmentsChanged(fn) {
+    return this.emitter.on('composer-attachments-changed', fn);
   }
 
   onPluginsChanged(fn) {

@@ -23,6 +23,13 @@ export const FEATURE_FLAG_DEFINITIONS = [
       'Erlaubt pro Kontakt Windows-Mitteilungen stummzuschalten: für eine feste Dauer (z. B. 1 h) oder bis du die Stummschaltung wieder aufhebst. Betrifft nur Benachrichtigungen, nicht den Nachrichteneingang.',
     defaultEnabled: false,
   },
+  {
+    id: 'settingsHub',
+    label: 'Settings-Hub',
+    description:
+      'Zeigt die Einstellungen als Übersicht mit Unterseiten (Account, Verbindung) statt alles auf einer Seite.',
+    defaultEnabled: false,
+  },
 ];
 
 /** @param {object | null | undefined} contact */

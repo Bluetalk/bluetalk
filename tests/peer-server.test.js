@@ -46,8 +46,9 @@ test('connect resolves after the WebSocket handshake and keeps idle sockets aliv
     assert.equal(info.id, right.id);
     assert.equal(left.peers.size, 1);
     assert.equal(right.peers.size, 1);
-    assert.equal(left.peers.get(right.id).socket.timeout, 0);
-    assert.equal(right.peers.get(left.id).socket.timeout, 0);
+    assert.equal(left.peers.get(right.id).socket._socket.timeout, 0);
+    assert.equal(right.peers.get(left.id).socket._socket.timeout, 0);
+    assert.equal(left.peers.get(right.id).info.supportsHeartbeat, true);
   } finally {
     closePair(left, right);
   }
@@ -71,6 +72,108 @@ test('simultaneous dialing converges on one shared connection', async () => {
   }
 });
 
+test('connectTo replaces a stale dead peer entry', async () => {
+  const { left, right } = await createPair();
+  try {
+    await left.connectTo({ id: right.id, address: '127.0.0.1', port: right.port });
+    assert.equal(left.peers.size, 1);
+
+    const staleSocket = left.peers.get(right.id).socket;
+    staleSocket.terminate();
+    left._pruneDeadPeer(right.id);
+
+    const staleOnRight = right.peers.get(left.id);
+    assert.ok(staleOnRight);
+    staleOnRight.lastPongAt = Date.now() - 30000;
+
+    const info = await left.connectTo({ id: right.id, address: '127.0.0.1', port: right.port });
+    assert.equal(info.id, right.id);
+    assert.equal(left.peers.size, 1);
+    assert.equal(right.peers.size, 1);
+  } finally {
+    closePair(left, right);
+  }
+});
+
+test('heartbeat removes peers that stop responding', async () => {
+  const { left, right } = await createPair();
+  try {
+    await left.connectTo({ id: right.id, address: '127.0.0.1', port: right.port });
+    const peerEntry = left.peers.get(right.id);
+    assert.ok(peerEntry);
+
+    peerEntry.lastPongAt = Date.now() - 76000;
+    left._heartbeatTick();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(left.peers.has(right.id), false);
+  } finally {
+    closePair(left, right);
+  }
+});
+
+test('heartbeat remains compatible with peers that do not advertise support', async () => {
+  const { left, right } = await createPair();
+  try {
+    await left.connectTo({ id: right.id, address: '127.0.0.1', port: right.port });
+    const peerEntry = left.peers.get(right.id);
+    peerEntry.info.supportsHeartbeat = false;
+    peerEntry.lastPongAt = Date.now() - 5 * 60 * 1000;
+    left._heartbeatTick();
+    assert.equal(left.peers.has(right.id), true);
+  } finally {
+    closePair(left, right);
+  }
+});
+
+test('saved contacts retain their identity when reconnecting host:port addresses', async () => {
+  const peer = new PeerServer(new MemoryStore({
+    peerId: 'bt-a',
+    contacts: [{ id: 'bt-b', address: '127.0.0.1:4567' }],
+  }));
+  const calls = [];
+  peer.connectTo = async (target) => {
+    calls.push(target);
+    return { id: target.id };
+  };
+  peer.reconnectContactsFromStore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [{ id: 'bt-b', address: '127.0.0.1:4567' }]);
+  const descriptor = peer._createConnectionDescriptor(calls[0]);
+  assert.equal(descriptor.peerId, 'bt-b');
+  assert.equal(descriptor.host, '127.0.0.1');
+  assert.deepEqual(descriptor.ports, [4567]);
+  peer.stop();
+});
+
+test('candidate dialing uses bounded parallel batches', async () => {
+  const peer = new PeerServer(new MemoryStore({ peerId: 'bt-a' }));
+  let active = 0;
+  let maxActive = 0;
+  peer._connectToCandidateWs = async (candidate) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    active -= 1;
+    throw new Error(`failed:${candidate.port}`);
+  };
+  await assert.rejects(
+    peer._connectUsingCandidates({}, Array.from({ length: 9 }, (_, index) => ({ host: '127.0.0.1', port: 1000 + index }))),
+    /failed:/
+  );
+  assert.equal(maxActive, 4);
+  peer.stop();
+});
+
+test('invalid peer identities are rejected before dialing', async () => {
+  const peer = new PeerServer(new MemoryStore({ peerId: 'bt-a' }));
+  await assert.rejects(
+    peer.connectTo({ id: '__proto__', address: '127.0.0.1:1234' }),
+    /Invalid peer identity/
+  );
+  peer.stop();
+});
+
 test('messages larger than 64 KiB survive WebSocket framing', async () => {
   const { left, right } = await createPair();
   try {
@@ -81,6 +184,26 @@ test('messages larger than 64 KiB survive WebSocket framing', async () => {
     const [message] = await received;
     assert.equal(message.from, left.id);
     assert.equal(message.content, content);
+  } finally {
+    closePair(left, right);
+  }
+});
+
+test('wire messages cannot spoof their sender or override the transport type', async () => {
+  const { left, right } = await createPair();
+  try {
+    await left.connectTo({ id: right.id, address: '127.0.0.1', port: right.port });
+    const received = once(right, 'peer:message');
+    assert.equal(left.sendTo(right.id, {
+      type: 'bye',
+      from: 'bt-spoofed',
+      kind: 'chat',
+      content: 'still a message',
+    }), true);
+    const [message] = await received;
+    assert.equal(message.from, left.id);
+    assert.equal(message.type, 'message');
+    assert.equal(right.peers.has(left.id), true);
   } finally {
     closePair(left, right);
   }

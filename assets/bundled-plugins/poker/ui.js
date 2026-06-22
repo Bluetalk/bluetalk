@@ -990,7 +990,7 @@
         return true;
       },
       invitePayload() {
-        const sum = `NL Hold'em · SB ${cfg.smallBlind}/${cfg.bigBlind} · max. ${cfg.maxPlayers}`;
+        const sum = `NL Hold'em · Blinds ${cfg.smallBlind}/${cfg.bigBlind} · max. ${cfg.maxPlayers} · ${cfg.startingChips.toLocaleString('de-DE')} Chips`;
         return {
           kind: 'poker-invite',
           tableId,

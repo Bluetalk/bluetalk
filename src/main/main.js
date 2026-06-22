@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, dialog, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, dialog, session, shell } = require('electron');
 const fs = require('fs/promises');
 const { autoUpdater } = require('electron-updater');
 const net = require('net');
@@ -37,6 +37,7 @@ const PORT_TEST_TIMEOUT_MS = 1800;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const CHAT_MESSAGE_BATCH_SIZE = 24;
+const MAX_SAVE_BASE64_CHARS = 12 * 1024 * 1024;
 
 /** GitHub release exists but `latest.yml` / blockmap not uploaded yet (electron-updater 404). */
 const UPDATE_RELEASE_PENDING_MESSAGE =
@@ -88,6 +89,12 @@ function getStoredChatMessages(peerId) {
   return Array.isArray(list) ? list : [];
 }
 
+function toMessageSummary(message) {
+  if (!message || typeof message !== 'object') return message || null;
+  const { fileData, localPreviewUrl, ...summary } = message;
+  return summary;
+}
+
 function setStoredChatMessages(peerId, list) {
   if (!store || !peerId) return [];
   store.set(`messages.${peerId}`, list);
@@ -135,7 +142,7 @@ function getChatMessageMeta() {
 
     meta[peerId] = {
       count: messages.length,
-      lastMessage: messages[messages.length - 1] || null,
+      lastMessage: toMessageSummary(messages[messages.length - 1]),
     };
   }
 
@@ -145,7 +152,7 @@ function getChatMessageMeta() {
 function getChatMessageBatch(peerId, options = {}) {
   const messages = getStoredChatMessages(peerId);
   const skip = Math.max(0, Number(options.skip) || 0);
-  const limit = Math.max(1, Number(options.limit) || CHAT_MESSAGE_BATCH_SIZE);
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || CHAT_MESSAGE_BATCH_SIZE));
   const total = messages.length;
   const end = Math.max(0, total - skip);
   const start = Math.max(0, end - limit);
@@ -156,6 +163,61 @@ function getChatMessageBatch(peerId, options = {}) {
     remaining: start,
     hasMore: start > 0,
     batchSize: end - start,
+  };
+}
+
+function getFileCategoryForLibrary(mime, fileName) {
+  const m = String(mime || '').toLowerCase();
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase() || '';
+  if (m.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image';
+  if (m.startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) return 'video';
+  if (m.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus'].includes(ext)) return 'audio';
+  return 'other';
+}
+
+function listLibraryMedia() {
+  const storedMessages = getStoredMessages();
+  const items = [];
+
+  for (const [peerId, rawMessages] of Object.entries(storedMessages)) {
+    if (peerId === 'self') continue;
+    const messages = Array.isArray(rawMessages) ? rawMessages : [];
+    for (const m of messages) {
+      if (!m || (m.kind !== 'file' && m.kind !== 'sticker')) continue;
+      if (m.from === 'self') continue;
+      items.push({
+        messageId: m.messageId,
+        peerId,
+        from: m.from,
+        sender: m.sender,
+        timestamp: m.timestamp || 0,
+        kind: m.kind,
+        fileName: m.fileName,
+        fileType: m.fileType,
+        fileSize: m.fileSize || 0,
+        stickerId: m.stickerId,
+        packId: m.packId,
+        category: m.kind === 'sticker' ? 'sticker' : getFileCategoryForLibrary(m.fileType, m.fileName),
+        hasData: Boolean(m.fileData),
+      });
+    }
+  }
+
+  items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  return items;
+}
+
+function getLibraryMediaData(peerId, messageId) {
+  if (!peerId || !messageId) return null;
+  const list = getStoredChatMessages(peerId);
+  const m = list.find((item) => item?.messageId === messageId);
+  if (!m || (m.kind !== 'file' && m.kind !== 'sticker')) return null;
+  return {
+    fileData: m.fileData,
+    fileName: m.fileName,
+    fileType: m.fileType,
+    fileSize: m.fileSize,
+    kind: m.kind,
   };
 }
 
@@ -605,7 +667,28 @@ async function readTailOfFile(filePath, maxBytes = 120_000) {
     try {
       const buf = Buffer.alloc(length);
       await fh.read(buf, 0, length, start);
-      return { ok: true, path: filePath, truncated: start > 0, text: buf.toString('utf-8') };
+      let text = buf.toString('utf-8');
+      if (start === 0) {
+        try {
+          const parsed = JSON.parse(text);
+          const redact = (value) => {
+            if (!value || typeof value !== 'object') return;
+            for (const [key, child] of Object.entries(value)) {
+              if (['privateJwk', 'aesKeyB64', 'apiToken', 'fileData', 'profilePicture'].includes(key)) {
+                value[key] = '[redacted]';
+              } else {
+                redact(child);
+              }
+            }
+          };
+          redact(parsed);
+          text = JSON.stringify(parsed, null, 2);
+        } catch {
+          /* display a safely redacted raw tail below */
+        }
+      }
+      text = text.replace(/("(?:apiToken|aesKeyB64|fileData|profilePicture)"\s*:\s*")[^"]*(")/g, '$1[redacted]$2');
+      return { ok: true, path: filePath, truncated: start > 0, text };
     } finally {
       await fh.close();
     }
@@ -638,20 +721,6 @@ async function runNetworkDoctor() {
       code: 'no_lan_ipv4',
       severity: 'warn',
       message: 'No non-loopback IPv4 interfaces found; LAN discovery may be limited.',
-    });
-  }
-
-  if (portProbe?.recommendedPort && apiPort !== portProbe.recommendedPort) {
-    issues.push({
-      code: 'api_port_mismatch',
-      severity: 'info',
-      message: `REST API port (${apiPort}) differs from the first open outbound test port (${portProbe.recommendedPort}).`,
-    });
-    fixes.push({
-      code: 'align_api_port',
-      label: `Set API port to ${portProbe.recommendedPort}`,
-      settingKey: 'apiPort',
-      value: portProbe.recommendedPort,
     });
   }
 
@@ -793,7 +862,9 @@ function queueIncomingChatNotification(data) {
         ? `File: ${data.fileName || data.content || 'Attachment'}`
         : data.kind === 'poker-invite'
           ? `Poker: ${data.tableName || 'Einladung'}`
-          : (data.content || 'New message');
+          : data.kind === 'contact-share'
+            ? `Kontakt: ${data.sharedContact?.displayName || data.sharedContact?.name || 'geteilt'}`
+            : (data.content || 'New message');
 
   if (incomingNotifBatch.senderLabel !== senderLabel) {
     flushIncomingNotificationBatch();
@@ -822,13 +893,67 @@ function showMainWindow() {
   }
 }
 
-function broadcastWindowMaximized() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function windowFromIpcEvent(event) {
+  return BrowserWindow.fromWebContents(event.sender);
+}
+
+function bindWindowMaximizeEvents(win, channel = 'window:maximized') {
+  if (!win) return;
+  const notify = () => {
+    if (win.isDestroyed()) return;
+    try {
+      win.webContents.send(channel, win.isMaximized());
+    } catch {
+      /* webContents unavailable during teardown */
+    }
+  };
+  win.on('maximize', notify);
+  win.on('unmaximize', notify);
+  win.webContents.on('did-finish-load', notify);
+}
+
+function isPokerGameSender(event) {
+  return Boolean(
+    pokerGameWindow
+    && !pokerGameWindow.isDestroyed()
+    && event.sender === pokerGameWindow.webContents,
+  );
+}
+
+function isTrustedRendererUrl(value) {
   try {
-    mainWindow.webContents.send('window:maximized', mainWindow.isMaximized());
+    const url = new URL(value);
+    if (isDev) return url.protocol === 'http:' && url.hostname === 'localhost' && url.port === '5173';
+    if (url.protocol !== 'file:') return false;
+    const expected = path.normalize(path.join(__dirname, '..', '..', 'dist', 'index.html'));
+    return path.normalize(decodeURIComponent(url.pathname).replace(/^\/(?:([A-Za-z]:))/, '$1')) === expected;
   } catch {
-    /* webContents unavailable during teardown */
+    return false;
   }
+}
+
+function hardenWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isTrustedRendererUrl(url)) return;
+    event.preventDefault();
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  win.webContents.on('will-attach-webview', (event) => event.preventDefault());
+}
+
+function configureSessionSecurity() {
+  const trusted = (webContents) => isTrustedRendererUrl(webContents?.getURL?.() || '');
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => (
+    trusted(webContents) && permission === 'clipboard-sanitized-write'
+  ));
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(trusted(webContents) && permission === 'clipboard-sanitized-write');
+  });
 }
 
 /** Peers can connect before the renderer registers IPC listeners; push authoritative state after each load. */
@@ -860,10 +985,12 @@ function createWindow() {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      spellcheck: false,
     },
     show: false,
   });
+  hardenWindow(mainWindow);
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -873,7 +1000,13 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     broadcastUpdateState();
-    broadcastWindowMaximized();
+    if (!mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.send('window:maximized', mainWindow.isMaximized());
+      } catch {
+        /* ignore */
+      }
+    }
     syncPeersToRenderer();
   });
 
@@ -893,8 +1026,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  mainWindow.on('maximize', broadcastWindowMaximized);
-  mainWindow.on('unmaximize', broadcastWindowMaximized);
+  bindWindowMaximizeEvents(mainWindow);
 
   return mainWindow;
 }
@@ -922,10 +1054,12 @@ function createPokerGameWindow() {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      spellcheck: false,
     },
     show: false,
   });
+  hardenWindow(pokerGameWindow);
 
   if (isDev) {
     pokerGameWindow.loadURL('http://localhost:5173/#/poker-game');
@@ -945,6 +1079,8 @@ function createPokerGameWindow() {
   pokerGameWindow.on('closed', () => {
     pokerGameWindow = null;
   });
+
+  bindWindowMaximizeEvents(pokerGameWindow, 'poker:windowMaximized');
 
   return pokerGameWindow;
 }
@@ -1027,13 +1163,15 @@ async function clearStoredChatMessagesOnly() {
 }
 
 function setupIPC() {
-  ipcMain.handle('window:minimize', () => mainWindow?.minimize());
-  ipcMain.handle('window:maximize', () => {
-    if (mainWindow?.isMaximized()) mainWindow.unmaximize();
-    else mainWindow?.maximize();
+  ipcMain.handle('window:minimize', (event) => windowFromIpcEvent(event)?.minimize());
+  ipcMain.handle('window:maximize', (event) => {
+    const win = windowFromIpcEvent(event);
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
   });
-  ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false);
-  ipcMain.handle('window:close', () => mainWindow?.close());
+  ipcMain.handle('window:isMaximized', (event) => windowFromIpcEvent(event)?.isMaximized() ?? false);
+  ipcMain.handle('window:close', (event) => windowFromIpcEvent(event)?.close());
 
   ipcMain.handle('poker:openGameWindow', () => {
     try {
@@ -1054,6 +1192,32 @@ function setupIPC() {
     } catch (e) {
       return { ok: false, error: e?.message || 'close_failed' };
     }
+  });
+
+  ipcMain.handle('poker:minimizeWindow', (event) => {
+    if (!isPokerGameSender(event)) return { ok: false };
+    try {
+      pokerGameWindow?.minimize();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.message || 'minimize_failed' };
+    }
+  });
+
+  ipcMain.handle('poker:maximizeWindow', (event) => {
+    if (!isPokerGameSender(event)) return { ok: false };
+    try {
+      if (pokerGameWindow?.isMaximized()) pokerGameWindow.unmaximize();
+      else pokerGameWindow?.maximize();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.message || 'maximize_failed' };
+    }
+  });
+
+  ipcMain.handle('poker:isWindowMaximized', (event) => {
+    if (!isPokerGameSender(event)) return false;
+    return pokerGameWindow?.isMaximized() ?? false;
   });
 
   ipcMain.on('poker:pumpState', (event, payload) => {
@@ -1112,6 +1276,9 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.handle('library:listMedia', () => listLibraryMedia());
+  ipcMain.handle('library:getMediaData', (_, peerId, messageId) => getLibraryMediaData(peerId, messageId));
+
   ipcMain.handle('peer:getInfo', () => peerServer?.getInfo() ?? { id: '', name: '', port: 0, ports: [], addresses: [], endpoints: [], peers: [], hostedFiles: [] });
   ipcMain.handle('peer:connect', (_, address) => {
     if (!peerServer) throw new Error('Peer server not ready');
@@ -1149,12 +1316,18 @@ function setupIPC() {
     /* ignore if not registered */
   }
   ipcMain.handle('file:saveAs', async (_, { defaultFilename, base64 } = {}) => {
-    if (typeof base64 !== 'string' || !base64.length) {
+    if (
+      typeof base64 !== 'string'
+      || !base64.length
+      || base64.length > MAX_SAVE_BASE64_CHARS
+      || base64.length % 4 !== 0
+      || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
+    ) {
       return { ok: false, error: 'invalid_payload' };
     }
-    const name =
-      typeof defaultFilename === 'string' && defaultFilename.trim() ? defaultFilename.trim() : 'download';
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    const requestedName = typeof defaultFilename === 'string' ? defaultFilename.trim() : '';
+    const name = path.basename(requestedName || 'download').replace(/[\r\n]/g, '_').slice(0, 180) || 'download';
+    const { canceled, filePath } = await dialog.showSaveDialog(windowFromIpcEvent(_) || mainWindow, {
       defaultPath: name,
       filters: [{ name: 'All Files', extensions: ['*'] }],
     });
@@ -1176,6 +1349,11 @@ function setupIPC() {
 
   ipcMain.handle('network:testPorts', async () => runPortDiagnostics());
   ipcMain.handle('network:doctor', async () => runNetworkDoctor());
+  ipcMain.handle('network:getApiAccess', () => ({
+    host: '127.0.0.1',
+    port: lastApiServerPort || store?.get('settings.apiPort', 19876) || 19876,
+    token: apiServer?.token || '',
+  }));
 
   ipcMain.handle('app:getConfigLogPath', () => ({
     ok: Boolean(store),
@@ -1250,9 +1428,9 @@ function setupIPC() {
     try {
       let result;
       if (payload?.dir) {
-        result = await pluginHost.installFromDirectory(payload.dir);
+        result = await pluginHost.installFromDirectory(payload.dir, { initialEnabled: false });
       } else if (payload?.id && payload?.files) {
-        result = await pluginHost.installFromPayload(payload);
+        result = await pluginHost.installFromPayload(payload, { initialEnabled: false });
       } else {
         return { ok: false, error: 'invalid_payload' };
       }
@@ -1269,7 +1447,7 @@ function setupIPC() {
     });
     if (canceled || !filePaths?.[0]) return { ok: false, canceled: true };
     try {
-      const result = await pluginHost.installFromDirectory(filePaths[0]);
+      const result = await pluginHost.installFromDirectory(filePaths[0], { initialEnabled: false });
       return { ok: true, plugin: result };
     } catch (e) {
       return { ok: false, error: e?.message || 'install_failed' };
@@ -1322,6 +1500,8 @@ function setupIPC() {
           data.kind !== 'delivery-receipt'
           && data.kind !== 'read-receipt'
           && data.kind !== 'messaging-blocked'
+          && data.kind !== 'contact-blocked'
+          && data.kind !== 'chat-deleted'
           && data.kind !== 'e2ee-key-handshake'
           && data.kind !== 'poker'
         ) {
@@ -1353,6 +1533,7 @@ if (!gotSingleInstanceLock) {
     peerServer = new PeerServer(store);
     apiServer = new APIServer(peerServer, store);
 
+    configureSessionSecurity();
     createWindow();
     createTray();
     setupIPC();
@@ -1368,9 +1549,10 @@ if (!gotSingleInstanceLock) {
           for (const contact of contacts) {
             if (!contact?.id || !contact.address) continue;
             // Skip if already connected (e.g. via discovery)
-            if (peerServer.peers.has(contact.id)) continue;
-            peerServer.connectTo(contact.address).catch((err) => {
+            if (peerServer._getActivePeer(contact.id)) continue;
+            peerServer.connectTo({ id: contact.id, address: contact.address }).catch((err) => {
               console.warn(`[Startup] Reconnect to ${contact.address} failed:`, err.message);
+              peerServer._scheduleReconnect(contact.id);
             });
           }
         }

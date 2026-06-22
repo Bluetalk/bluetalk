@@ -5,10 +5,12 @@ import {
   Crown,
   HelpCircle,
   LogOut,
+  Maximize2,
   Minus,
   Play,
   Save,
   Settings,
+  SquareStack,
   UserPlus,
   Users,
   Volume2,
@@ -330,6 +332,28 @@ function GameTable({ snapshot, selfId, onAction }) {
   );
 }
 
+function usePokerWindowMaximized() {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    const api = window.bluetalk?.poker;
+    if (!api?.isWindowMaximized || !api?.onWindowMaximizedChange) return undefined;
+    let cancelled = false;
+    void api.isWindowMaximized().then((value) => {
+      if (!cancelled) setIsMaximized(Boolean(value));
+    });
+    const off = api.onWindowMaximizedChange((value) => {
+      if (!cancelled) setIsMaximized(Boolean(value));
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, []);
+
+  return isMaximized;
+}
+
 function OverlayPanel({ title, onClose, children }) {
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -352,6 +376,7 @@ function OverlayPanel({ title, onClose, children }) {
 export default function PokerGamePage() {
   const { snapshot, selfId, isHost, send, soundEnabled, setSoundEnabled } = usePokerState();
   const [panel, setPanel] = useState('');
+  const isMaximized = usePokerWindowMaximized();
   const pub = snapshot?.public;
   const inLobby = !pub?.phase || pub.phase === 'lobby';
 
@@ -360,7 +385,16 @@ export default function PokerGamePage() {
   const action = useCallback((value) => send({ type: 'action', action: value }), [send]);
 
   if (!snapshot?.public) {
-    return <div className="poker-game-root"><main className="poker-empty-state"><div className="poker-launch-mark">♠</div><h1>Poker wird vorbereitet…</h1><p>Falls kein Tisch geladen wird, starte oder öffne ihn über den Poker-Bereich im Hauptfenster.</p><button type="button" className="poker-btn-ghost" onClick={() => send({ type: 'request_state' })}>Erneut laden</button></main></div>;
+    return (
+      <div className="poker-game-root">
+        <main className="poker-empty-state">
+          <div className="poker-launch-mark">♠</div>
+          <h1>Poker wird vorbereitet…</h1>
+          <p>Falls kein Tisch geladen wird, starte oder öffne ihn über den Poker-Bereich im Hauptfenster.</p>
+          <button type="button" className="poker-btn-ghost" onClick={() => send({ type: 'request_state' })}>Erneut laden</button>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -375,7 +409,16 @@ export default function PokerGamePage() {
           {isHost ? <button type="button" className="poker-game-btn-icon" title="Spielstand speichern" aria-label="Spielstand speichern" onClick={() => send({ type: 'save_game' })}><Save size={16} /></button> : null}
           <button type="button" className="poker-game-btn-icon" title="Tisch verlassen" aria-label="Tisch verlassen" onClick={leave}><LogOut size={16} /></button>
           <button type="button" className="poker-game-btn-icon" title={soundEnabled ? 'Ton aus' : 'Ton an'} aria-label={soundEnabled ? 'Ton ausschalten' : 'Ton einschalten'} onClick={() => setSoundEnabled((value) => !value)}>{soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
-          <button type="button" className="poker-game-btn-icon" title="Minimieren" aria-label="Minimieren" onClick={() => window.bluetalk?.window?.minimize?.()}><Minus size={16} /></button>
+          <button type="button" className="poker-game-btn-icon" title="Minimieren" aria-label="Minimieren" onClick={() => window.bluetalk?.poker?.minimizeWindow?.()}><Minus size={16} /></button>
+          <button
+            type="button"
+            className="poker-game-btn-icon"
+            title={isMaximized ? 'Fenster wiederherstellen' : 'Fenster maximieren'}
+            aria-label={isMaximized ? 'Fenster wiederherstellen' : 'Fenster maximieren'}
+            onClick={() => window.bluetalk?.poker?.maximizeWindow?.()}
+          >
+            {isMaximized ? <SquareStack size={16} /> : <Maximize2 size={16} />}
+          </button>
           <button type="button" className="poker-game-btn-icon" title="Fenster schließen" aria-label="Fenster schließen" onClick={closeWindow}><X size={16} /></button>
         </div>
       </header>

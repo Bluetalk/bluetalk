@@ -1,22 +1,14 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, startTransition, createContext, useContext } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, startTransition, createContext, useContext, lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom';
 import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
-import * as LucideIcons from 'lucide-react';
-import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Plug } from 'lucide-react';
+import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade } from 'lucide-react';
 
 import ChatsPage from './pages/Chats';
-import SettingsPage from './pages/Settings';
-import NewConnectionsPage from './pages/NewConnections';
-import CloudSyncPage from './pages/CloudSync';
-import NotFoundPage from './pages/NotFound';
-import PluginsPage from './pages/Plugins';
 import RuntimeUnavailablePage from './pages/RuntimeUnavailable';
 import NotificationCenter from './components/NotificationCenter';
 import ProfileMenu from './components/ProfileMenu';
 import { ToastProvider, useToast } from './components/ToastProvider';
-import PluginTabView from './plugins/PluginTabView';
 import PluginScreenHost from './plugins/PluginScreenHost';
-import PokerGamePage from './pages/PokerGamePage';
 import { pluginRuntime } from './plugins/pluginRuntime';
 import ErrorBoundary from './components/ErrorBoundary';
 import VersionWelcomeModal from './components/VersionWelcomeModal';
@@ -36,10 +28,27 @@ import {
 } from './chatCrypto';
 import { mergeFeatureFlagDefaults, getEffectiveFlag } from './featureFlags';
 import VerticalResizeHandle from './components/VerticalResizeHandle';
+import { base64ByteLength, validateStickerData } from './stickers/stickerStore';
+
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const AccountSettingsPage = lazy(() => import('./pages/settings/AccountSettings'));
+const ConnectionSettingsPage = lazy(() => import('./pages/settings/ConnectionSettings'));
+const UpdatesSettingsPage = lazy(() => import('./pages/settings/UpdatesSettings'));
+const ApplicationSettingsPage = lazy(() => import('./pages/settings/ApplicationSettings'));
+const StickersSettingsPage = lazy(() => import('./pages/settings/StickersSettings'));
+const NewConnectionsPage = lazy(() => import('./pages/NewConnections'));
+const CloudSyncPage = lazy(() => import('./pages/CloudSync'));
+const LibraryPage = lazy(() => import('./pages/Library'));
+const NotFoundPage = lazy(() => import('./pages/NotFound'));
+const PluginsPage = lazy(() => import('./pages/Plugins'));
+const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
+const PokerGamePage = lazy(() => import('./pages/PokerGamePage'));
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
 const CHAT_MESSAGE_BATCH_SIZE = 24;
+const MAX_CHAT_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_CHAT_TEXT_CHARS = 128 * 1024;
 
 const DEFAULT_APP_SETTINGS = {
   displayName: 'Anonymous',
@@ -209,10 +218,7 @@ function TitleBar() {
 
 function resolveLucideIcon(name) {
   if (!name || typeof name !== 'string') return Plug;
-  const direct = LucideIcons[name];
-  if (direct) return direct;
-  const camel = name.charAt(0).toUpperCase() + name.slice(1);
-  return LucideIcons[camel] || Plug;
+  return { Plug, Palette, Sparkles, Spade, Blocks, MessageCircle, FolderOpen }[name] || Plug;
 }
 
 const SIDEBAR_WIDTH_DEFAULT = 56;
@@ -272,7 +278,8 @@ function Sidebar() {
   const links = [
     { to: '/', label: 'Chats', icon: MessageCircle },
     { to: '/new', label: 'New', icon: UserPlus },
-    { to: '/plugins', label: 'Plugins', icon: Plug },
+    { to: '/library', label: 'Bibliothek', icon: FolderOpen },
+    { to: '/plugins', label: 'Erweiterungen', icon: Blocks },
     { to: '/settings', label: 'Settings', icon: SettingsIcon },
   ];
 
@@ -602,6 +609,29 @@ export default function App() {
         const fromId = msg.from;
         const isBlocked = fromId && contactsRef.current.some((c) => c?.id === fromId && c.blocked === true);
 
+        if (msg.kind === 'contact-blocked' && fromId) {
+          const blocked = msg.blocked === true;
+          upsertContact({ id: fromId, blockedByPeer: blocked });
+          inboundToastRef.current?.({
+            variant: blocked ? 'warning' : 'success',
+            title: blocked ? 'Du wurdest blockiert' : 'Blockierung aufgehoben',
+            message: blocked
+              ? `${msg.sender || fromId} hat dich blockiert. Du kannst keine Nachrichten senden, bis du entblockt wirst.`
+              : `${msg.sender || fromId} hat die Blockierung aufgehoben. Du kannst wieder Nachrichten senden.`,
+          });
+          return;
+        }
+
+        if (msg.kind === 'chat-deleted' && fromId) {
+          upsertContact({ id: fromId, chatDeletedByPeer: true });
+          inboundToastRef.current?.({
+            variant: 'info',
+            title: 'Chat gelöscht',
+            message: `${msg.sender || fromId} hat den Chat gelöscht. Du kannst den Verlauf exportieren oder lokal entfernen.`,
+          });
+          return;
+        }
+
         if (msg.kind === 'messaging-blocked' && msg.refMessageId && fromId) {
           const tid = deliveryTimersRef.current.get(msg.refMessageId);
           if (tid) clearTimeout(tid);
@@ -707,7 +737,7 @@ export default function App() {
         if (isBlocked) {
           const k = msg.kind;
           const blockable =
-            k === 'chat' || k === 'file' || k === 'encrypted-chat-e2ee' || k === 'poker-invite';
+            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'contact-share';
           if (blockable && fromId && msg.messageId) {
             void window.bluetalk.peer.send(fromId, {
               kind: 'messaging-blocked',
@@ -756,7 +786,26 @@ export default function App() {
           }
         }
 
-        if ((normalized.kind === 'chat' || normalized.kind === 'file') && normalized.messageId && fromId) {
+        if (normalized.kind === 'sticker') {
+          try {
+            normalized = { ...normalized, ...validateStickerData(normalized) };
+          } catch {
+            console.warn('Rejected invalid sticker payload from peer:', fromId);
+            return;
+          }
+        } else if (normalized.kind === 'file' && normalized.fileData) {
+          const actualSize = base64ByteLength(normalized.fileData);
+          if (actualSize < 0 || actualSize > MAX_CHAT_FILE_BYTES) {
+            console.warn('Rejected oversized or invalid file payload from peer:', fromId);
+            return;
+          }
+          normalized = { ...normalized, fileSize: actualSize };
+        } else if (normalized.kind === 'chat' && String(normalized.content || '').length > MAX_CHAT_TEXT_CHARS) {
+          console.warn('Rejected oversized chat message from peer:', fromId);
+          return;
+        }
+
+        if ((normalized.kind === 'chat' || normalized.kind === 'file' || normalized.kind === 'sticker' || normalized.kind === 'contact-share') && normalized.messageId && fromId) {
           void window.bluetalk.peer.send(fromId, {
             kind: 'delivery-receipt',
             refMessageId: normalized.messageId,
@@ -768,7 +817,18 @@ export default function App() {
         const meta = await window.bluetalk.messages.append(fromId, normalized);
         if (meta?.appended === false) return;
 
-        upsertContact({ id: fromId, blockedByPeer: false });
+        if (normalized.kind === 'contact-share' && normalized.sharedContact?.id) {
+          const shared = normalized.sharedContact;
+          upsertContact({
+            id: shared.id,
+            name: shared.displayName || shared.name || shared.id,
+            bio: shared.bio,
+            profilePicture: shared.profilePicture,
+            address: shared.address,
+          });
+        }
+
+        upsertContact({ id: fromId, blockedByPeer: false, chatDeletedByPeer: false });
 
         setChatMeta((prev) => ({
           ...prev,
@@ -977,7 +1037,10 @@ export default function App() {
   const sendMessage = useCallback((peerId, payload) => {
     if (!window.bluetalk || !peerId) return Promise.resolve(false);
 
-    if (contactsRef.current.some((c) => c?.id === peerId && c.blocked === true)) {
+    if (contactsRef.current.some((c) => {
+      if (c?.id !== peerId) return false;
+      return c.blocked === true || c.blockedByPeer === true || c.chatDeletedByPeer === true;
+    })) {
       return Promise.resolve(false);
     }
 
@@ -985,8 +1048,10 @@ export default function App() {
       ? { kind: 'chat', content: payload }
       : { kind: 'chat', ...payload };
 
-    const localPreviewUrl = outgoing.kind === 'file' ? outgoing.localPreviewUrl : undefined;
-    const fileDataB64 = outgoing.kind === 'file' ? outgoing.fileData : undefined;
+    const localPreviewUrl =
+      outgoing.kind === 'file' || outgoing.kind === 'sticker' ? outgoing.localPreviewUrl : undefined;
+    const fileDataB64 =
+      outgoing.kind === 'file' || outgoing.kind === 'sticker' ? outgoing.fileData : undefined;
 
     const payloadForCrypto = { ...outgoing };
     delete payloadForCrypto.localPreviewUrl;
@@ -1002,7 +1067,7 @@ export default function App() {
     };
 
     const selfMessageLight =
-      innerPlain.kind === 'file'
+      innerPlain.kind === 'file' || innerPlain.kind === 'sticker'
         ? {
             ...innerPlain,
             fileData: undefined,
@@ -1060,7 +1125,7 @@ export default function App() {
       let wirePayload = innerPlain;
       if (
         contactWantsOutgoingE2ee(contactsRef, peerId)
-        && (innerPlain.kind === 'chat' || innerPlain.kind === 'file')
+        && (innerPlain.kind === 'chat' || innerPlain.kind === 'file' || innerPlain.kind === 'contact-share' || innerPlain.kind === 'sticker')
       ) {
         await waitForE2eeIdentity(ownEcdhPublicSpkiRef);
         let session = e2eeSessionsRef.current[peerId];
@@ -1105,7 +1170,7 @@ export default function App() {
         timestamp: createdAt,
       };
 
-      const isFile = innerPlain.kind === 'file';
+      const isFile = innerPlain.kind === 'file' || innerPlain.kind === 'sticker';
       const deferDisk = isFile;
 
       try {
@@ -1264,6 +1329,13 @@ export default function App() {
   const setContactBlocked = useCallback((contactId, blocked) => {
     if (!contactId) return;
     upsertContact({ id: contactId, blocked: Boolean(blocked) });
+    if (window.bluetalk) {
+      void window.bluetalk.peer.send(contactId, {
+        kind: 'contact-blocked',
+        blocked: Boolean(blocked),
+        sender: settingsRef.current.displayName,
+      }).catch(() => {});
+    }
     if (blocked) {
       const next = { ...e2eeSessionsRef.current };
       delete next[contactId];
@@ -1317,6 +1389,15 @@ export default function App() {
 
   const deleteChat = useCallback(async (peerId) => {
     if (!window.bluetalk || !peerId) return false;
+
+    try {
+      await window.bluetalk.peer.send(peerId, {
+        kind: 'chat-deleted',
+        sender: settingsRef.current.displayName,
+      });
+    } catch {
+      /* Peer evtl. offline */
+    }
 
     await window.bluetalk.messages.deleteChat(peerId);
     setPeerReadReceipts((prev) => {
@@ -1465,6 +1546,7 @@ export default function App() {
             <HashRouter>
             <InboundToastBridge toastRef={inboundToastRef} />
             <PluginRuntimeToastBridge />
+            <Suspense fallback={<div className="page"><div className="page-body">Wird geladen…</div></div>}>
             <Routes>
               <Route path="/poker-game" element={<PokerGamePage />} />
               <Route
@@ -1496,7 +1578,13 @@ export default function App() {
                   <Routes>
                     <Route path="/" element={<ChatsPage />} />
                     <Route path="/new" element={<NewConnectionsPage />} />
+                    <Route path="/library" element={<LibraryPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/settings/account" element={<AccountSettingsPage />} />
+                    <Route path="/settings/connection" element={<ConnectionSettingsPage />} />
+                    <Route path="/settings/updates" element={<UpdatesSettingsPage />} />
+                    <Route path="/settings/application" element={<ApplicationSettingsPage />} />
+                    <Route path="/settings/stickers" element={<StickersSettingsPage />} />
                     <Route path="/cloud-sync" element={<CloudSyncPage />} />
                     <Route path="/plugins" element={<PluginsPage />} />
                     <Route path="/plugin/:tabId" element={<PluginTabView />} />
@@ -1509,6 +1597,7 @@ export default function App() {
                 )}
               />
             </Routes>
+            </Suspense>
           </HashRouter>
         </ErrorBoundary>
       </ToastProvider>
