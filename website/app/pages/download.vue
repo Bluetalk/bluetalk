@@ -47,7 +47,7 @@ const { data: allData, pending: allPending } = await useFetch<{
 }>('/api/releases/all', { key: 'bluetalk-all-releases' })
 
 /** Same repo as `server/utils/releases.ts` — external URL so static prerender never crawls /api/releases/download (404 without assets). */
-const githubReleasesPage = 'https://github.com/Henny263462/bluetalk/releases'
+const githubReleasesPage = 'https://github.com/Bluetalk/bluetalk/releases'
 
 const baseMeta = ['Setup · Windows · .exe', 'No install · Windows · .exe'] as const
 

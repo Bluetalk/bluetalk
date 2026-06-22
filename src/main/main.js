@@ -96,9 +96,12 @@ function setStoredChatMessages(peerId, list) {
 
 function appendStoredChatMessage(peerId, message) {
   const current = getStoredChatMessages(peerId);
+  if (message?.messageId && current.some((item) => item?.messageId === message.messageId)) {
+    return { messages: current, appended: false };
+  }
   const updated = [...current, message];
   setStoredChatMessages(peerId, updated);
-  return updated;
+  return { messages: updated, appended: true };
 }
 
 function patchStoredChatMessage(peerId, messageId, patch) {
@@ -486,6 +489,24 @@ function setupAutoUpdater() {
   }
 }
 
+function compareVersionParts(left, right) {
+  const a = String(left || '0').split('.').map((part) => Number(part) || 0);
+  const b = String(right || '0').split('.').map((part) => Number(part) || 0);
+  const count = Math.max(a.length, b.length);
+  for (let index = 0; index < count; index += 1) {
+    if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
+  }
+  return 0;
+}
+
+async function readPluginManifest(dir) {
+  try {
+    return JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 async function seedBundledPlugins(host) {
   if (!host) return;
   const bundledDir = path.join(__dirname, '..', '..', 'assets', 'bundled-plugins');
@@ -509,7 +530,18 @@ async function seedBundledPlugins(host) {
     } catch {
       destExists = false;
     }
-    if (destExists) continue;
+    if (destExists) {
+      const [sourceManifest, installedManifest] = await Promise.all([
+        readPluginManifest(srcDir),
+        readPluginManifest(destDir),
+      ]);
+      if (
+        sourceManifest?.id !== entry.name
+        || compareVersionParts(sourceManifest?.version, installedManifest?.version) <= 0
+      ) {
+        continue;
+      }
+    }
     try {
       await host.installFromDirectory(srcDir);
     } catch (e) {
@@ -1065,8 +1097,9 @@ function setupIPC() {
   ipcMain.handle('messages:getMeta', () => getChatMessageMeta());
   ipcMain.handle('messages:getBatch', (_, peerId, options = {}) => getChatMessageBatch(peerId, options));
   ipcMain.handle('messages:append', (_, peerId, message) => {
-    appendStoredChatMessage(peerId, message);
-    return getChatMessageMeta()[peerId] || { count: 0, lastMessage: null };
+    const result = appendStoredChatMessage(peerId, message);
+    const meta = getChatMessageMeta()[peerId] || { count: 0, lastMessage: null };
+    return { ...meta, appended: result.appended };
   });
   ipcMain.handle('messages:patch', (_, peerId, messageId, patch) =>
     patchStoredChatMessage(peerId, messageId, patch)
@@ -1289,6 +1322,7 @@ function setupIPC() {
           data.kind !== 'delivery-receipt'
           && data.kind !== 'read-receipt'
           && data.kind !== 'messaging-blocked'
+          && data.kind !== 'e2ee-key-handshake'
           && data.kind !== 'poker'
         ) {
           if (!isContactBlockedInStore(data.from) && !isContactNotificationMutedInStore(data.from)) {

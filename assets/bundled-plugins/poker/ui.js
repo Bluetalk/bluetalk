@@ -57,8 +57,7 @@
     }
     const sf = flush && straightHigh >= 0;
     if (sf) {
-      const high = straightHigh === 3 && uniq[0] === 12 ? 12 : straightHigh;
-      return [8, high];
+      return [8, straightHigh];
     }
     if (byFreq[0].n === 4) {
       const quad = byFreq[0].k;
@@ -68,8 +67,7 @@
     if (byFreq[0].n === 3 && byFreq[1].n === 2) return [6, byFreq[0].k, byFreq[1].k];
     if (flush) return [5].concat(r);
     if (straightHigh >= 0) {
-      const high = straightHigh === 3 && uniq[0] === 12 ? 12 : straightHigh;
-      return [4, high];
+      return [4, straightHigh];
     }
     if (byFreq[0].n === 3) {
       const t = byFreq[0].k;
@@ -160,6 +158,26 @@
     };
   }
 
+  function clampInt(value, min, max, fallback) {
+    const parsed = Math.round(Number(value));
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  }
+
+  function sanitizeSettings(input = {}, fallback = defaultSettings(), minSeats = 2) {
+    const next = { ...defaultSettings(), ...fallback, ...input };
+    next.tableName = String(next.tableName || 'Poker-Tisch').trim().slice(0, 48) || 'Poker-Tisch';
+    next.smallBlind = clampInt(next.smallBlind, 1, 1000000, fallback.smallBlind || 10);
+    next.bigBlind = clampInt(next.bigBlind, next.smallBlind, 2000000, Math.max(next.smallBlind, fallback.bigBlind || 20));
+    next.ante = clampInt(next.ante, 0, 1000000, fallback.ante || 0);
+    next.startingChips = clampInt(next.startingChips, next.bigBlind * 2, 1000000000, fallback.startingChips || 2000);
+    next.maxPlayers = clampInt(next.maxPlayers, Math.max(2, minSeats), 9, Math.max(6, minSeats));
+    next.turnTimeSec = clampInt(next.turnTimeSec, 0, 300, fallback.turnTimeSec || 0);
+    next.minRaiseBB = clampInt(next.minRaiseBB, 1, 10, fallback.minRaiseBB || 1);
+    next.autoStart = next.autoStart === true;
+    return next;
+  }
+
   function isContactBlocked(peerId) {
     const list = api.contacts() || [];
     return list.some((c) => c?.id === peerId && c.blocked === true);
@@ -176,13 +194,15 @@
   }
 
   /** --- Host --- */
-  function createHost(settings, onTick, me) {
+  function createHost(settings, onTick, me, restoredGame = null) {
     const selfId = me?.id;
-    const tableId = `tbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const cfg = { ...defaultSettings(), ...settings };
+    const tableId = restoredGame?.tableId || `tbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const restoredPlayers = Array.isArray(restoredGame?.players) ? restoredGame.players : [];
+    const minSeats = Math.max(2, ...restoredPlayers.map((p) => Number(p?.seat) + 1 || 0));
+    const cfg = sanitizeSettings(settings, restoredGame?.settings || defaultSettings(), minSeats);
     const players = [];
     let phase = 'lobby';
-    let dealerIdx = 0;
+    let dealerIdx = -1;
     let deck = [];
     let board = [];
     let pot = 0;
@@ -192,11 +212,42 @@
     let toActIdx = -1;
     let acted = new Set();
     let lastRaise = cfg.bigBlind;
-    let handNumber = 0;
+    let handNumber = clampInt(restoredGame?.handNumber, 0, 1000000000, 0);
     let winners = [];
+    let showdownCards = [];
     let message = '';
     let turnTimer = null;
+    let botTimer = null;
     let autoStartTimer = null;
+    let nextHandTimer = null;
+    let savedAt = Number(restoredGame?.savedAt) || 0;
+
+    for (const row of restoredPlayers) {
+      if (!row?.peerId || players.some((p) => p.peerId === row.peerId)) continue;
+      const isSelf = row.peerId === selfId;
+      const isBot = isPokerBotId(row.peerId);
+      players.push({
+        peerId: row.peerId,
+        name: String(row.name || row.peerId).slice(0, 48),
+        seat: clampInt(row.seat, 0, cfg.maxPlayers - 1, players.length),
+        chips: clampInt(row.chips, 0, 1000000000, cfg.startingChips),
+        folded: false,
+        allIn: false,
+        currentRoundBet: 0,
+        totalBet: 0,
+        hole: [],
+        inHand: false,
+        isBot,
+        connected: isSelf || isBot || (api.peers() || []).some((p) => p.id === row.peerId),
+        pendingChips: clampInt(row.pendingChips, 0, 1000000000, 0),
+        stats: {
+          handsPlayed: clampInt(row.stats?.handsPlayed, 0, 1000000000, 0),
+          handsWon: clampInt(row.stats?.handsWon, 0, 1000000000, 0),
+          chipsGranted: clampInt(row.stats?.chipsGranted, 0, 1000000000, 0),
+        },
+      });
+    }
+    players.sort((a, b) => a.seat - b.seat);
 
     function peerIds() {
       return players.map((p) => p.peerId);
@@ -207,6 +258,10 @@
         api.timer.clearTimeout(turnTimer);
         turnTimer = null;
       }
+      if (botTimer) {
+        api.timer.clearTimeout(botTimer);
+        botTimer = null;
+      }
     }
 
     function clearAutoStartTimer() {
@@ -214,6 +269,33 @@
         api.timer.clearTimeout(autoStartTimer);
         autoStartTimer = null;
       }
+      if (nextHandTimer) {
+        api.timer.clearTimeout(nextHandTimer);
+        nextHandTimer = null;
+      }
+    }
+
+    function checkpoint(reason = 'auto') {
+      savedAt = Date.now();
+      const saved = {
+        version: 2,
+        tableId,
+        savedAt,
+        reason,
+        handNumber,
+        settings: { ...cfg },
+        players: players.map((p) => ({
+          peerId: p.peerId,
+          name: p.name,
+          seat: p.seat,
+          chips: p.chips,
+          pendingChips: p.pendingChips || 0,
+          stats: { ...(p.stats || {}) },
+        })),
+      };
+      api.storage.set('savedPokerGame', saved);
+      api.storage.set('pokerSettings', { ...cfg });
+      return saved;
     }
 
     function scheduleAutoStart() {
@@ -240,6 +322,12 @@
     }
 
     function publicState() {
+      const actor = toActIdx >= 0 ? players[toActIdx] : null;
+      const maxBet = players.some((p) => p.inHand && !p.folded)
+        ? Math.max(...players.filter((p) => p.inHand && !p.folded).map((p) => p.currentRoundBet))
+        : 0;
+      const actorMax = actor ? actor.currentRoundBet + actor.chips : 0;
+      const minRaiseTo = actor ? Math.min(actorMax, maxBet + minRaise) : 0;
       return {
         tableId,
         hostPeerId: selfId,
@@ -251,11 +339,19 @@
         currentBet,
         minRaise,
         toAct: toActIdx >= 0 && players[toActIdx] ? players[toActIdx].peerId : null,
-        dealerSeat: dealerIdx,
+        dealerSeat: dealerIdx >= 0 ? players[dealerIdx]?.seat ?? null : null,
         handNumber,
         winners,
+        showdownCards,
+        savedAt,
         message,
         settings: cfg,
+        actionBounds: actor ? {
+          toCall: Math.max(0, maxBet - actor.currentRoundBet),
+          minRaiseTo,
+          maxRaiseTo: actorMax,
+          canRaise: actorMax > maxBet,
+        } : null,
         players: players.map((p) => ({
           peerId: p.peerId,
           name: p.name,
@@ -266,6 +362,9 @@
           currentRoundBet: p.currentRoundBet,
           bet: p.currentRoundBet,
           isBot: Boolean(p.isBot),
+          connected: p.connected !== false,
+          pendingChips: p.pendingChips || 0,
+          stats: { ...(p.stats || {}) },
         })),
       };
     }
@@ -294,8 +393,16 @@
     }
 
     function addPlayer(peerId, name) {
+      const existing = players.find((p) => p.peerId === peerId);
+      if (existing) {
+        existing.connected = true;
+        existing.name = String(name || existing.name || peerId).slice(0, 48);
+        message = `${existing.name} ist wieder verbunden.`;
+        if (existing.hole?.length) sendHole(existing, existing.hole);
+        pushState();
+        return true;
+      }
       if (players.length >= cfg.maxPlayers) return false;
-      if (players.some((p) => p.peerId === peerId)) return false;
       const seat = findSeat();
       if (seat < 0) return false;
       players.push({
@@ -310,6 +417,9 @@
         hole: [],
         inHand: false,
         isBot: isPokerBotId(peerId),
+        connected: true,
+        pendingChips: 0,
+        stats: { handsPlayed: 0, handsWon: 0, chipsGranted: 0 },
       });
       players.sort((a, b) => a.seat - b.seat);
       message = `${name || peerId} ist am Tisch.`;
@@ -321,7 +431,22 @@
     function removePlayer(peerId) {
       const i = players.findIndex((p) => p.peerId === peerId);
       if (i < 0) return;
-      players.splice(i, 1);
+      const player = players[i];
+      if (player.inHand && phase !== 'lobby' && phase !== 'between') {
+        player.connected = false;
+        if (i === toActIdx) {
+          applyAction(peerId, { type: 'fold' });
+          return;
+        }
+        player.folded = true;
+        acted.add(peerId);
+        message = `${player.name} ist nicht mehr verbunden und foldet.`;
+        if (awardUncontested()) return;
+      } else {
+        players.splice(i, 1);
+        if (i < dealerIdx) dealerIdx -= 1;
+        if (dealerIdx >= players.length) dealerIdx = players.length - 1;
+      }
       if (players.length === 0) {
         phase = 'lobby';
         street = 'idle';
@@ -347,7 +472,7 @@
 
     function bettingComplete() {
       const live = activeInHand().filter((p) => !p.allIn);
-      if (live.length <= 1) return true;
+      if (live.length === 0) return true;
       const maxBet = Math.max(...players.filter((p) => p.inHand && !p.folded).map((p) => p.currentRoundBet));
       const allMatched = live.every((p) => p.currentRoundBet === maxBet);
       const allActed = live.every((p) => acted.has(p.peerId));
@@ -387,8 +512,8 @@
         if (p.inHand) p.currentRoundBet = 0;
       }
       currentBet = 0;
-      minRaise = cfg.bigBlind;
-      lastRaise = cfg.bigBlind;
+      minRaise = cfg.bigBlind * cfg.minRaiseBB;
+      lastRaise = minRaise;
       acted = new Set();
 
       if (street === 'preflop') {
@@ -405,7 +530,8 @@
         board.push(deck.pop());
       }
       const n = players.length;
-      if (n <= 2) {
+      const inHandCount = players.filter((p) => p.inHand).length;
+      if (inHandCount <= 2) {
         toActIdx = dealerIdx % n;
       } else {
         toActIdx = nextLiveSeat(dealerIdx);
@@ -433,6 +559,9 @@
       }
       const pots = buildSidePots(contrib);
       const results = [];
+      showdownCards = players
+        .filter((p) => p.inHand && !p.folded)
+        .map((p) => ({ peerId: p.peerId, cards: p.hole.map(cardLabel) }));
       for (const potInfo of pots) {
         const elig = potInfo.eligible.filter((id) => {
           const pl = players.find((x) => x.peerId === id);
@@ -452,23 +581,38 @@
             winnersLocal.push(id);
           }
         }
-        const share = potInfo.amount / winnersLocal.length;
+        const share = Math.floor(potInfo.amount / winnersLocal.length);
+        let remainder = potInfo.amount - share * winnersLocal.length;
         for (const id of winnersLocal) {
           const pl = players.find((x) => x.peerId === id);
-          pl.chips += Math.floor(share);
-          results.push({ peerId: id, amount: Math.floor(share), hand: handLabel(best) });
+          const amount = share + (remainder > 0 ? 1 : 0);
+          remainder = Math.max(0, remainder - 1);
+          pl.chips += amount;
+          results.push({ peerId: id, amount, hand: handLabel(best) });
         }
       }
-      winners = results;
+      const aggregated = new Map();
+      for (const result of results) {
+        const previous = aggregated.get(result.peerId);
+        aggregated.set(result.peerId, previous
+          ? { ...previous, amount: previous.amount + result.amount }
+          : result);
+      }
+      winners = [...aggregated.values()];
+      for (const result of winners) {
+        const winner = players.find((p) => p.peerId === result.peerId);
+        if (winner?.stats) winner.stats.handsWon += 1;
+      }
       phase = 'between';
       street = 'idle';
       toActIdx = -1;
       message = 'Hand beendet.';
+      checkpoint('hand_complete');
       pushState();
       
       // Auto-start nächste Hand nach 3 Sekunden
       if (cfg.autoStart) {
-        api.timer.setTimeout(() => {
+        nextHandTimer = api.timer.setTimeout(() => {
           if (phase === 'between') startHand();
         }, 3000);
       }
@@ -480,16 +624,19 @@
       if (alive.length !== 1) return false;
       const w = alive[0];
       w.chips += pot;
+      if (w.stats) w.stats.handsWon += 1;
       winners = [{ peerId: w.peerId, amount: pot, hand: 'Gewinn (alle anderen gefoldet)' }];
+      showdownCards = [];
       phase = 'between';
       street = 'idle';
       toActIdx = -1;
       message = `${w.name} gewinnt den Pot.`;
+      checkpoint('hand_complete');
       pushState();
       
       // Auto-start nächste Hand nach 3 Sekunden
       if (cfg.autoStart) {
-        api.timer.setTimeout(() => {
+        nextHandTimer = api.timer.setTimeout(() => {
           if (phase === 'between') startHand();
         }, 3000);
       }
@@ -497,6 +644,11 @@
     }
 
     function startHand() {
+      if (phase !== 'lobby' && phase !== 'between') {
+        message = 'Die aktuelle Hand läuft noch.';
+        pushState();
+        return false;
+      }
       try {
         if (window.bluetalk?.poker?.openGameWindow) {
           void window.bluetalk.poker.openGameWindow();
@@ -507,21 +659,27 @@
       clearTurnTimer();
       clearAutoStartTimer();
       winners = [];
-      const ready = players.filter((p) => p.chips > 0);
+      showdownCards = [];
+      for (const player of players) {
+        if (player.pendingChips > 0) {
+          player.chips = Math.min(1000000000, player.chips + player.pendingChips);
+          player.pendingChips = 0;
+        }
+      }
+      const ready = players.filter((p) => p.chips > 0 && (p.connected !== false || p.isBot));
       if (ready.length < 2) {
         message = 'Mindestens zwei Spieler mit Chips benötigt.';
         pushState();
-        return;
+        return false;
       }
       handNumber += 1;
       deck = shuffle(makeDeck());
       board = [];
       pot = 0;
       currentBet = 0;
-      minRaise = cfg.bigBlind;
-      lastRaise = cfg.bigBlind;
+      minRaise = cfg.bigBlind * cfg.minRaiseBB;
+      lastRaise = minRaise;
       acted = new Set();
-      dealerIdx = (dealerIdx + 1) % players.length;
 
       for (const p of players) {
         p.folded = p.chips <= 0;
@@ -529,8 +687,18 @@
         p.currentRoundBet = 0;
         p.totalBet = 0;
         p.hole = [];
-        p.inHand = p.chips > 0;
+        p.inHand = p.chips > 0 && (p.connected !== false || p.isBot);
+        if (p.inHand && p.stats) p.stats.handsPlayed += 1;
       }
+
+      const nextInHandIndex = (from) => {
+        for (let step = 1; step <= players.length; step += 1) {
+          const index = (from + step + players.length) % players.length;
+          if (players[index]?.inHand) return index;
+        }
+        return -1;
+      };
+      dealerIdx = nextInHandIndex(dealerIdx);
 
       const ante = Math.max(0, Number(cfg.ante) || 0);
       if (ante > 0) {
@@ -544,16 +712,16 @@
         }
       }
 
-      const n = players.length;
-      const d = dealerIdx % n;
+      const n = ready.length;
+      const d = dealerIdx;
       let sbIdx;
       let bbIdx;
       if (n === 2) {
         sbIdx = d;
-        bbIdx = (d + 1) % 2;
+        bbIdx = nextInHandIndex(d);
       } else {
-        sbIdx = (d + 1) % n;
-        bbIdx = (d + 2) % n;
+        sbIdx = nextInHandIndex(d);
+        bbIdx = nextInHandIndex(sbIdx);
       }
       const sbP = players[sbIdx];
       const bbP = players[bbIdx];
@@ -582,7 +750,7 @@
 
       phase = 'preflop';
       street = 'preflop';
-      let firstIdx = n === 2 ? bbIdx : (bbIdx + 1) % n;
+      let firstIdx = n === 2 ? d : nextLiveSeat(bbIdx);
       toActIdx = firstIdx;
       {
         let g = 0;
@@ -601,6 +769,7 @@
       scheduleTurnTimer();
       message = `Hand #${handNumber}`;
       pushState();
+      return true;
     }
 
     function applyAction(peerId, act) {
@@ -626,8 +795,11 @@
         if (p.chips === 0) p.allIn = true;
         acted.add(peerId);
       } else if (act.type === 'raise') {
-        const add = Math.max(act.amount || 0, minRaise);
-        const totalTarget = maxBet + add;
+        const requestedTarget = Number(act.raiseTo) || (maxBet + Number(act.amount || 0));
+        const playerMax = p.currentRoundBet + p.chips;
+        if (playerMax <= maxBet) return;
+        const minimumTarget = maxBet + minRaise;
+        const totalTarget = Math.min(playerMax, Math.max(minimumTarget, Math.round(requestedTarget)));
         const need = totalTarget - p.currentRoundBet;
         const pay = Math.min(need, p.chips);
         p.chips -= pay;
@@ -635,10 +807,15 @@
         p.totalBet += pay;
         pot += pay;
         if (p.chips === 0) p.allIn = true;
+        const raiseSize = p.currentRoundBet - maxBet;
         currentBet = Math.max(currentBet, p.currentRoundBet);
-        lastRaise = Math.max(lastRaise, add);
-        minRaise = Math.max(cfg.bigBlind, lastRaise);
-        acted = new Set([peerId]);
+        if (raiseSize >= minRaise) {
+          lastRaise = raiseSize;
+          minRaise = Math.max(cfg.bigBlind * cfg.minRaiseBB, lastRaise);
+          acted = new Set([peerId]);
+        } else {
+          acted.add(peerId);
+        }
       } else if (act.type === 'all_in') {
         const pay = p.chips;
         p.chips = 0;
@@ -646,8 +823,15 @@
         p.totalBet += pay;
         pot += pay;
         p.allIn = true;
+        const raiseSize = p.currentRoundBet - maxBet;
         currentBet = Math.max(currentBet, p.currentRoundBet);
-        acted.add(peerId);
+        if (raiseSize >= minRaise) {
+          lastRaise = raiseSize;
+          minRaise = Math.max(cfg.bigBlind * cfg.minRaiseBB, lastRaise);
+          acted = new Set([peerId]);
+        } else {
+          acted.add(peerId);
+        }
       }
 
       if (awardUncontested()) return;
@@ -679,7 +863,9 @@
       if (phase === 'lobby' || phase === 'between' || street === 'idle') return;
       const actor = players[toActIdx];
       if (!actor || !isPokerBotId(actor.peerId) || actor.folded || actor.allIn) return;
-      api.timer.setTimeout(() => {
+      if (botTimer) return;
+      botTimer = api.timer.setTimeout(() => {
+        botTimer = null;
         const a2 = players[toActIdx];
         if (!a2 || a2.peerId !== POKER_BOT_PEER_ID || a2.folded || a2.allIn) return;
         const maxBet = Math.max(...players.filter((x) => x.inHand && !x.folded).map((x) => x.currentRoundBet));
@@ -720,6 +906,7 @@
 
     function bootstrapHost() {
       addPlayer(selfId, me?.name || 'Host');
+      checkpoint(restoredGame ? 'resumed' : 'table_created');
     }
 
     function addDebugBot() {
@@ -747,8 +934,60 @@
         return cfg;
       },
       updateSettings(patch) {
-        Object.assign(cfg, patch);
+        const occupiedSeats = Math.max(2, ...players.map((p) => p.seat + 1));
+        Object.assign(cfg, sanitizeSettings(patch, cfg, occupiedSeats));
+        message = phase === 'lobby' || phase === 'between'
+          ? 'Tischeinstellungen aktualisiert.'
+          : 'Einstellungen gespeichert; Blind- und Ante-Änderungen gelten ab der nächsten Hand.';
+        if (phase === 'lobby') {
+          scheduleAutoStart();
+        } else if (phase === 'between') {
+          clearAutoStartTimer();
+          if (cfg.autoStart) {
+            nextHandTimer = api.timer.setTimeout(() => {
+              if (phase === 'between') startHand();
+            }, 3000);
+          }
+        } else {
+          scheduleTurnTimer();
+        }
+        if (phase === 'lobby' || phase === 'between') checkpoint('settings');
         pushState();
+      },
+      addChips(peerId, amount) {
+        const player = players.find((p) => p.peerId === peerId);
+        const value = clampInt(amount, 1, 1000000000, 0);
+        if (!player || value <= 0) return false;
+        const activeHand = phase !== 'lobby' && phase !== 'between';
+        if (activeHand) player.pendingChips = Math.min(1000000000, (player.pendingChips || 0) + value);
+        else player.chips = Math.min(1000000000, player.chips + value);
+        if (player.stats) player.stats.chipsGranted += value;
+        message = activeHand
+          ? `${player.name} erhält ${value.toLocaleString()} Chips ab der nächsten Hand.`
+          : `${player.name} erhält ${value.toLocaleString()} Chips.`;
+        if (phase === 'lobby' || phase === 'between') checkpoint('admin_chips');
+        pushState();
+        return true;
+      },
+      invitePeer(peerId) {
+        if (!peerId || players.some((p) => p.peerId === peerId)) return false;
+        const connected = (api.peers() || []).some((p) => p.id === peerId);
+        if (!connected || isContactBlocked(peerId)) return false;
+        void api.chat.send(peerId, this.invitePayload());
+        message = 'Einladung wurde im Chat gesendet.';
+        pushState();
+        return true;
+      },
+      saveNow() {
+        if (phase !== 'lobby' && phase !== 'between') {
+          message = 'Der sichere Spielstand wird automatisch nach dieser Hand gespeichert.';
+          pushState();
+          return false;
+        }
+        checkpoint('manual');
+        message = 'Spielstand gespeichert.';
+        pushState();
+        return true;
       },
       invitePayload() {
         const sum = `NL Hold'em · SB ${cfg.smallBlind}/${cfg.bigBlind} · max. ${cfg.maxPlayers}`;
@@ -771,8 +1010,20 @@
       destroy() {
         clearTurnTimer();
         clearAutoStartTimer();
+        if (botTimer) api.timer.clearTimeout(botTimer);
       },
     };
+  }
+
+  if (window.__BLUETALK_POKER_TEST_HOOKS__) {
+    Object.assign(window.__BLUETALK_POKER_TEST_HOOKS__, {
+      scoreFive,
+      cmpScore,
+      best7,
+      buildSidePots,
+      sanitizeSettings,
+      createHost,
+    });
   }
 
   /** --- Client / Gast --- */
@@ -803,7 +1054,15 @@
     const pub = hostRef ? hostRef.publicState() : clientState;
     if (!pub) return;
     const hole = hostRef ? hostRef.getMyHole() : myHole;
-    window.bluetalk.poker.pushState({ public: pub, myHole: hole });
+    const seated = new Set((pub.players || []).map((p) => p.peerId));
+    const connected = new Map((api.peers() || []).map((p) => [p.id, p]));
+    const inviteCandidates = (api.contacts() || [])
+      .filter((contact) => contact?.id && !contact.blocked && connected.has(contact.id) && !seated.has(contact.id))
+      .map((contact) => ({
+        peerId: contact.id,
+        name: contact.nickname || contact.name || connected.get(contact.id)?.name || contact.id,
+      }));
+    window.bluetalk.poker.pushState({ public: pub, myHole: hole, inviteCandidates });
   }
 
   async function openGameWindowIfNeeded() {
@@ -837,7 +1096,9 @@
         rootRender?.();
         return;
       }
-      if (!host && msg.from !== w.public.hostPeerId) return;
+      if (host) return;
+      if (!clientState || clientState.tableId !== w.tableId || clientState.hostPeerId !== msg.from) return;
+      if (msg.from !== w.public.hostPeerId) return;
       clientState = w.public;
       tryPump();
       void openGameWindowIfNeeded();
@@ -850,6 +1111,12 @@
     }
     if (w.wire === 'join_reject') {
       api.notify.toast?.({ title: 'Poker', message: w.reason || 'Beitritt abgelehnt.' });
+    }
+    if (w.wire === 'leave' && clientState?.tableId === w.tableId && msg.from === clientState.hostPeerId) {
+      clientState = null;
+      myHole = [];
+      tryPump();
+      rootRender?.();
     }
   }
 
@@ -923,12 +1190,89 @@
         .poker-btn { padding: 6px 12px; border-radius: 6px; border: 0; cursor: pointer; font-size: 13px; }
         .poker-btn-primary { background: var(--accent); color: var(--accent-fg); }
         .poker-btn-ghost { background: var(--bg-2); color: var(--fg-0); border: 1px solid var(--border); }
+        .poker-launch-card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; }
+        .poker-launch-mark { font-size: 42px; line-height: 1; color: var(--accent); }
       </style>
     `;
 
     const panels = container.querySelector('.poker-plugin-panels');
 
     async function paint() {
+      {
+        await refreshPokerSelfId();
+        const pending = tryConsumePendingJoin();
+        if (pending?.hostPeerId && pending?.tableId && !host && !clientState) {
+          clientState = {
+            tableId: pending.tableId,
+            hostPeerId: pending.hostPeerId,
+            phase: 'lobby',
+            players: [],
+            settings: sanitizeSettings(pending.pokerSettings || {}),
+            message: 'Verbindung zum Tisch wird hergestellt…',
+          };
+          sendWire(pending.hostPeerId, {
+            wire: 'join',
+            tableId: pending.tableId,
+            name: pokerSelfPeerName || 'Spieler',
+          });
+          await openGameWindowIfNeeded();
+          tryPump();
+        }
+
+        const activeState = host ? host.publicState() : clientState;
+        const savedGame = api.storage.get('savedPokerGame', null);
+        panels.innerHTML = activeState
+          ? `
+            <div class="poker-card poker-launch-card">
+              <div class="poker-launch-mark">♠</div>
+              <div>
+                <h3>${activeState.settings?.tableName || 'Poker-Tisch'}</h3>
+                <p class="poker-plugin-sub">Das Spiel, Einladungen, Chips und Einstellungen werden vollständig im Poker-Fenster verwaltet.</p>
+              </div>
+              <button type="button" class="poker-btn poker-btn-primary" id="poker-launch-open">Poker-Fenster öffnen</button>
+            </div>`
+          : `
+            <div class="poker-card poker-launch-card">
+              <div class="poker-launch-mark">♠</div>
+              <div>
+                <h3>Pokerrunde starten</h3>
+                <p class="poker-plugin-sub">Starte hier nur das Spiel. Alles Weitere erledigst du anschließend direkt am Tisch.</p>
+              </div>
+              <div class="poker-row">
+                <button type="button" class="poker-btn poker-btn-primary" id="poker-launch-new">Neues Spiel</button>
+                ${savedGame?.players?.length ? '<button type="button" class="poker-btn poker-btn-ghost" id="poker-launch-resume">Gespeichertes Spiel fortsetzen</button>' : ''}
+              </div>
+            </div>`;
+
+        const launchHost = async (saved = null) => {
+          const peerInfo = await window.bluetalk?.peer?.getInfo?.();
+          if (!peerInfo?.id) {
+            api.notify.toast?.({ title: 'Poker', message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' });
+            return;
+          }
+          pokerSelfPeerId = peerInfo.id;
+          pokerSelfPeerName = peerInfo.name || '';
+          const settings = saved?.settings || api.storage.get('pokerSettings', defaultSettings());
+          host = createHost(settings, () => {
+            tryPump();
+            rootRender?.();
+          }, { id: peerInfo.id, name: peerInfo.name || 'Host' }, saved);
+          hostRef = host;
+          host.bootstrapHost();
+          clientState = host.publicState();
+          myHole = [];
+          await openGameWindowIfNeeded();
+          tryPump();
+          void paint();
+        };
+
+        panels.querySelector('#poker-launch-open')?.addEventListener('click', () => {
+          void openGameWindowIfNeeded().then(() => tryPump());
+        });
+        panels.querySelector('#poker-launch-new')?.addEventListener('click', () => void launchHost(null));
+        panels.querySelector('#poker-launch-resume')?.addEventListener('click', () => void launchHost(savedGame));
+        return;
+      }
       refreshLists();
       await refreshPokerSelfId();
       let debugPoker = false;
@@ -1170,38 +1514,44 @@
     }
 
     rootRender = () => void paint();
-    const offMsg = api.on('peer:message', (msg) => {
-      if (msg.kind !== 'poker' || !msg.poker) return;
-      if (isContactBlocked(msg.from)) return;
-      if (host && msg.from !== pokerSelfPeerId) {
-        host.onWire(msg.from, msg.poker);
-      }
-      handleWire(msg);
-    });
-
-    const offDisc = api.on('peer:disconnected', (peerId) => {
-      if (host) host.removePlayer(peerId);
-    });
-
     void paint();
 
     return () => {
-      offMsg?.();
-      offDisc?.();
       rootRender = null;
-      hostRef = null;
-      host?.destroy?.();
     };
   }
 
+  const offPokerMessage = api.on('peer:message', (msg) => {
+    if (msg.kind !== 'poker' || !msg.poker || isContactBlocked(msg.from)) return;
+    if (host && msg.from !== pokerSelfPeerId) host.onWire(msg.from, msg.poker);
+    handleWire(msg);
+  });
+  const offPokerDisconnect = api.on('peer:disconnected', (peerId) => {
+    if (host) host.removePlayer(peerId);
+  });
+  const offPokerConnect = api.on('peer:connected', (peer) => {
+    if (!host && clientState?.hostPeerId === peer?.id && clientState?.tableId) {
+      sendWire(peer.id, {
+        wire: 'join',
+        tableId: clientState.tableId,
+        name: pokerSelfPeerName || 'Spieler',
+      });
+    }
+    tryPump();
+    rootRender?.();
+  });
+
   // Handle actions from game window
+  let offPokerChild = null;
   if (window.bluetalk?.poker?.onFromChild) {
-    window.bluetalk.poker.onFromChild((payload) => {
+    offPokerChild = window.bluetalk.poker.onFromChild((payload) => {
       if (!payload) return;
       
       const pid = pokerSelfPeerId;
       
-      if (payload.type === 'action' && payload.action) {
+      if (payload.type === 'request_state') {
+        tryPump();
+      } else if (payload.type === 'action' && payload.action) {
         if (hostRef) {
           hostRef.applyAction(pid, payload.action);
         } else if (clientState?.hostPeerId && clientState?.tableId) {
@@ -1226,6 +1576,7 @@
         }
         clientState = null;
         myHole = [];
+        rootRender?.();
       } else if (payload.type === 'add_bot') {
         if (hostRef) {
           hostRef.addDebugBot();
@@ -1238,6 +1589,12 @@
         if (hostRef) {
           hostRef.updateSettings(payload.settings);
         }
+      } else if (payload.type === 'invite' && payload.peerId) {
+        hostRef?.invitePeer(payload.peerId);
+      } else if (payload.type === 'admin_add_chips' && payload.peerId) {
+        hostRef?.addChips(payload.peerId, payload.amount);
+      } else if (payload.type === 'save_game') {
+        hostRef?.saveNow();
       }
     });
   }
@@ -1250,6 +1607,17 @@
     icon: 'Spade',
     order: 40,
     render,
+  });
+
+  api.onDeactivate(() => {
+    offPokerChild?.();
+    offPokerMessage?.();
+    offPokerDisconnect?.();
+    offPokerConnect?.();
+    host?.destroy?.();
+    host = null;
+    hostRef = null;
+    rootRender = null;
   });
 
   api.log.info('Poker-Plugin UI geladen');

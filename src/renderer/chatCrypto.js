@@ -1,6 +1,10 @@
 const E2EE_INFO = new TextEncoder().encode('bluetalk-chat-e2ee-v1');
 const E2EE_SALT = new TextEncoder().encode('bluetalk-e2ee-salt-v1');
 
+function e2eeAdditionalData(keyId) {
+  return new TextEncoder().encode(`bluetalk-chat-e2ee-v2:${keyId}`);
+}
+
 export function bytesToBase64(buf) {
   const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
   let binary = '';
@@ -59,25 +63,51 @@ export async function deriveSharedAesKey(privateKey, peerPublicKey) {
   return deriveAesFromSharedSecret(bits);
 }
 
-export async function encryptChatPayload(aesKey, plainObject) {
+export async function computeE2eeKeyId(ownPublicSpkiB64, peerPublicSpkiB64) {
+  const ordered = [String(ownPublicSpkiB64 || ''), String(peerPublicSpkiB64 || '')].sort();
+  if (!ordered[0] || !ordered[1]) throw new Error('missing_public_key');
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${ordered[0]}\u0000${ordered[1]}`)
+  );
+  return bytesToBase64(new Uint8Array(digest).subarray(0, 18));
+}
+
+export async function encryptChatPayload(aesKey, plainObject, options = {}) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = new TextEncoder().encode(JSON.stringify(plainObject));
-  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, data);
-  return {
+  const version = options.version === 1 ? 1 : 2;
+  const keyId = String(options.keyId || '');
+  if (version === 2 && !keyId) throw new Error('missing_key_id');
+  const algorithm = { name: 'AES-GCM', iv };
+  if (version === 2) algorithm.additionalData = e2eeAdditionalData(keyId);
+  const cipher = await crypto.subtle.encrypt(algorithm, aesKey, data);
+  const envelope = {
     kind: 'encrypted-chat-e2ee',
-    e2eeV: 1,
+    e2eeV: version,
     iv: bytesToBase64(iv),
     data: bytesToBase64(cipher),
   };
+  if (version === 2) envelope.keyId = keyId;
+  return envelope;
 }
 
-export async function decryptChatPayload(aesKey, envelope) {
+export async function decryptChatPayload(aesKey, envelope, options = {}) {
   if (!envelope || envelope.kind !== 'encrypted-chat-e2ee' || !envelope.iv || !envelope.data) {
     throw new Error('invalid_envelope');
   }
+  const version = Number(envelope.e2eeV || 1);
+  if (version !== 1 && version !== 2) throw new Error('unsupported_e2ee_version');
   const iv = base64ToBytes(envelope.iv);
+  if (iv.length !== 12) throw new Error('invalid_iv');
   const cipher = base64ToBytes(envelope.data);
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, cipher);
+  const algorithm = { name: 'AES-GCM', iv };
+  if (version === 2) {
+    const keyId = String(envelope.keyId || '');
+    if (!keyId || (options.keyId && options.keyId !== keyId)) throw new Error('wrong_key_id');
+    algorithm.additionalData = e2eeAdditionalData(keyId);
+  }
+  const plain = await crypto.subtle.decrypt(algorithm, aesKey, cipher);
   const text = new TextDecoder().decode(plain);
   return JSON.parse(text);
 }

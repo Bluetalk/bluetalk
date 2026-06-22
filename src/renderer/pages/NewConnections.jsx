@@ -116,7 +116,10 @@ export default function NewConnectionsPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {filtered.map((row) => (
-              <div key={row.id} className="card card-row">
+              <div
+                key={row.id}
+                className={`card card-row${row.contact?.blocked ? ' card-row--blocked' : ''}${row.contact?.blockedByPeer ? ' card-row--blocked-by-peer' : ''}`}
+              >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="list-item-avatar">{(row.displayName || '?')[0].toUpperCase()}</div>
                   <div className="min-w-0">
@@ -127,8 +130,20 @@ export default function NewConnectionsPage() {
                     </div>
                   </div>
                 </div>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => startChat(row.id)}>
-                  Start chat
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => startChat(row.id)}
+                  disabled={Boolean(row.contact?.blocked || row.contact?.blockedByPeer)}
+                  title={
+                    row.contact?.blocked
+                      ? 'Kontakt ist blockiert'
+                      : row.contact?.blockedByPeer
+                        ? 'Du wurdest blockiert'
+                        : undefined
+                  }
+                >
+                  {row.contact?.blocked ? 'Blockiert' : row.contact?.blockedByPeer ? 'Blockiert' : 'Start chat'}
                 </button>
               </div>
             ))}

@@ -816,7 +816,14 @@ export default function ChatsPage() {
     () =>
       chatList.filter((chat) => {
         if (chat.contact?.pendingMessageRequest === true) return false;
-        if (chat.messageCount === 0 && !chat.contact?.hasOutgoing) return false;
+        if (
+          chat.messageCount === 0
+          && !chat.contact?.hasOutgoing
+          && !chat.contact?.blocked
+          && !chat.contact?.blockedByPeer
+        ) {
+          return false;
+        }
         return true;
       }),
     [chatList]
@@ -895,12 +902,10 @@ export default function ChatsPage() {
   const hasMoreMessages = selectedPeer ? selectedPeer.messageCount > msgs.length : false;
   const newestTimestamp = msgs[msgs.length - 1]?.timestamp || 0;
 
-  const chatOfflineReconnectOverlayOn = getEffectiveFlag(settings, 'chatOfflineReconnectOverlay');
   const showOfflineComposerReconnect = Boolean(
     selectedPeer &&
       !selectedPeer.peer &&
-      !selectedPeer.contact?.blocked &&
-      chatOfflineReconnectOverlayOn
+      !selectedPeer.contact?.blocked
   );
   const offlineReconnectAddress = useMemo(() => {
     if (!selectedPeer || selectedPeer.peer) return '';
@@ -1508,7 +1513,9 @@ export default function ChatsPage() {
             </div>
           ) : (
             <>
-              <div className="chat-header">
+              <div
+                className={`chat-header${selectedPeer.contact?.blocked ? ' chat-header--blocked' : ''}${selectedPeer.contact?.blockedByPeer ? ' chat-header--blocked-by-peer' : ''}`}
+              >
                 <button
                   type="button"
                   className="chat-header-profile-btn"
@@ -1735,7 +1742,7 @@ export default function ChatsPage() {
               <div className="chat-messages">
                 {selectedPeer.contact?.blocked && (
                   <div className="chat-warning" role="status">
-                    This contact is blocked. Unblock to send messages or see them in the main chat list.
+                    Dieser Kontakt ist blockiert. Entblocken, um Nachrichten zu senden.
                   </div>
                 )}
                 {!selectedPeer.contact?.blocked && selectedPeer.contact?.blockedByPeer && (
@@ -2034,7 +2041,7 @@ export default function ChatsPage() {
       {showPeerProfile && selectedPeer && (
         <div className="modal-overlay" onClick={() => setShowPeerProfile(false)} role="presentation">
           <div
-            className="modal animate-scale peer-profile-modal"
+            className={`modal animate-scale peer-profile-modal${selectedPeer.contact?.blocked ? ' peer-profile-modal--blocked' : ''}${selectedPeer.contact?.blockedByPeer ? ' peer-profile-modal--blocked-by-peer' : ''}`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

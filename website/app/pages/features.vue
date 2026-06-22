@@ -99,7 +99,7 @@ const features = [
         <div class="features-cta">
           <NuxtLink to="/download" class="button button-primary">Download</NuxtLink>
           <a
-            href="https://github.com/Henny263462/bluetalk"
+            href="https://github.com/Bluetalk/bluetalk"
             target="_blank"
             rel="noreferrer"
             class="button button-secondary"

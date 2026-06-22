@@ -8,10 +8,10 @@
 
       <div class="footer-links">
         <NuxtLink to="/download">Download</NuxtLink>
-        <a href="https://github.com/Henny263462/bluetalk/releases" target="_blank" rel="noreferrer">
+        <a href="https://github.com/Bluetalk/bluetalk/releases" target="_blank" rel="noreferrer">
           Releases
         </a>
-        <a href="https://github.com/Henny263462/bluetalk" target="_blank" rel="noreferrer">
+        <a href="https://github.com/Bluetalk/bluetalk" target="_blank" rel="noreferrer">
           GitHub
         </a>
       </div>

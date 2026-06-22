@@ -464,8 +464,31 @@ body {
 .list-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: 0.12s; }
 .list-item:hover { background: var(--bg-hover); }
 .list-item.active { background: var(--bg-active); }
-.list-item--blocked { opacity: 0.62; }
-.list-item--blocked-by-peer { opacity: 0.62; }
+.list-item--blocked,
+.list-item--blocked-by-peer {
+  opacity: 0.72;
+}
+.list-item--blocked .list-item-name,
+.list-item--blocked-by-peer .list-item-name,
+.list-item--blocked .list-item-sub,
+.list-item--blocked-by-peer .list-item-sub,
+.list-item--blocked .list-item-meta,
+.list-item--blocked-by-peer .list-item-meta {
+  color: var(--fg-3);
+}
+.list-item--blocked .peer-avatar-img,
+.list-item--blocked .peer-avatar-fallback,
+.list-item--blocked-by-peer .peer-avatar-img,
+.list-item--blocked-by-peer .peer-avatar-fallback {
+  filter: grayscale(1);
+  opacity: 0.72;
+}
+.list-item--blocked .online-dot,
+.list-item--blocked .offline-dot,
+.list-item--blocked-by-peer .online-dot,
+.list-item--blocked-by-peer .offline-dot {
+  opacity: 0.45;
+}
 .list-item-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); color: var(--fg-0); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; flex-shrink: 0; border: 1px solid var(--border); }
 .list-item-info { flex: 1; min-width: 0; }
 .list-item-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -540,7 +563,42 @@ body {
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 .offline-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); flex-shrink: 0; }
 
+.card-row--blocked,
+.card-row--blocked-by-peer {
+  opacity: 0.72;
+}
+.card-row--blocked .font-medium,
+.card-row--blocked-by-peer .font-medium,
+.card-row--blocked .text-muted,
+.card-row--blocked-by-peer .text-muted {
+  color: var(--fg-3);
+}
+.card-row--blocked .list-item-avatar,
+.card-row--blocked-by-peer .list-item-avatar {
+  filter: grayscale(1);
+  opacity: 0.72;
+}
+
 /* ============ Chat ============ */
+.chat-header--blocked,
+.chat-header--blocked-by-peer {
+  opacity: 0.82;
+}
+.chat-header--blocked .chat-header-profile-btn,
+.chat-header--blocked-by-peer .chat-header-profile-btn {
+  color: var(--fg-3);
+}
+.chat-header--blocked .peer-avatar-img,
+.chat-header--blocked .peer-avatar-fallback,
+.chat-header--blocked-by-peer .peer-avatar-img,
+.chat-header--blocked-by-peer .peer-avatar-fallback {
+  filter: grayscale(1);
+  opacity: 0.72;
+}
+.chat-header--blocked .chat-header-meta,
+.chat-header--blocked-by-peer .chat-header-meta {
+  color: var(--fg-3);
+}
 .chat-header {
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
@@ -1346,6 +1404,23 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
   max-width: 420px;
   padding: 0;
   overflow: hidden;
+}
+.peer-profile-modal--blocked,
+.peer-profile-modal--blocked-by-peer {
+  opacity: 0.85;
+}
+.peer-profile-modal--blocked .peer-profile-modal-name,
+.peer-profile-modal--blocked-by-peer .peer-profile-modal-name,
+.peer-profile-modal--blocked .peer-profile-field,
+.peer-profile-modal--blocked-by-peer .peer-profile-field {
+  color: var(--fg-3);
+}
+.peer-profile-modal--blocked .peer-avatar-img,
+.peer-profile-modal--blocked .peer-avatar-fallback,
+.peer-profile-modal--blocked-by-peer .peer-avatar-img,
+.peer-profile-modal--blocked-by-peer .peer-avatar-fallback {
+  filter: grayscale(1);
+  opacity: 0.72;
 }
 .peer-profile-modal-toolbar {
   display: flex;

@@ -33,7 +33,7 @@ export type ReleaseEntry = {
   portable: { url: string; name: string; size: number } | null
 }
 
-const REPO = 'Henny263462/bluetalk'
+const REPO = 'Bluetalk/bluetalk'
 
 function githubHeaders(token: string | undefined) {
   return {

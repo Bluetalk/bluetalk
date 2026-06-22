@@ -10,13 +10,6 @@ export const FEATURE_FLAG_DEFINITIONS = [
     defaultEnabled: false,
   },
   {
-    id: 'chatOfflineReconnectOverlay',
-    label: 'Offline: Weichzeichner über der Eingabe & Auto-Reconnect',
-    description:
-      'Wenn der Peer im geöffneten Chat nicht verbunden ist: unscharfer Bereich über der Textleiste mit Lade-Punkt, Eingabe gesperrt, und alle 3 Sekunden erneuter Verbindungsversuch zur gespeicherten Adresse (ohne Toast-Spam).',
-    defaultEnabled: false,
-  },
-  {
     id: 'resizableUi',
     label: 'Größenanpassbare Bereiche',
     description:

@@ -51,7 +51,7 @@ const features = [
 
         <div class="hero-actions">
           <NuxtLink to="/download" class="button button-primary">Download</NuxtLink>
-          <a href="https://github.com/Henny263462/bluetalk" target="_blank" rel="noreferrer" class="button button-secondary">
+          <a href="https://github.com/Bluetalk/bluetalk" target="_blank" rel="noreferrer" class="button button-secondary">
             View on GitHub
           </a>
         </div>

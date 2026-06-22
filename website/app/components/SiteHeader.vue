@@ -105,7 +105,7 @@ const toggleMenu = () => {
 
           <a
             class="repo-link"
-            href="https://github.com/Henny263462/bluetalk"
+            href="https://github.com/Bluetalk/bluetalk"
             target="_blank"
             rel="noreferrer"
           >
