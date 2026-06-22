@@ -3,6 +3,14 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.11': {
+    title: "What's new in BlueTalk 1.1.11",
+    items: [
+      'Geblockte Kontakte werden in Chat-Liste, Header und Profil ausgegraut dargestellt.',
+      'Offline-Weichzeichner und Auto-Reconnect sind fest eingebaut (kein Feature-Flag mehr).',
+      'Auto-Updates und Releases laufen über das Repository Bluetalk/bluetalk.',
+    ],
+  },
   '1.1.10': {
     title: "What's new in BlueTalk 1.1.10",
     items: [
