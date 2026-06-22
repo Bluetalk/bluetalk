@@ -1442,7 +1442,6 @@ export default function ChatsPage() {
 
   const sendSticker = useCallback(async (payload) => {
     if (!selectedPeer || composerDisabled) return;
-    setSendingFile(true);
     setFileTransfer({ stage: 'sending', percent: 60, detail: 'Sticker wird gesendet…' });
     try {
       const mime = payload.fileType || 'image/png';
@@ -1455,7 +1454,6 @@ export default function ChatsPage() {
         toast({ variant: 'error', title: 'Sticker nicht gesendet' });
       }
     } finally {
-      setSendingFile(false);
       setFileTransfer(null);
     }
   }, [selectedPeer, composerDisabled, sendMessage, toast]);
