@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build-windows:
     name: Build Windows Release
-    runs-on: blacksmith-2vcpu-windows-2025
+    runs-on: windows-latest
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
