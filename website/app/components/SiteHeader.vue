@@ -103,6 +103,10 @@ const toggleMenu = () => {
             </span>
           </button>
 
+          <NuxtLink to="/download" class="button button-primary header-download-btn">
+            Download
+          </NuxtLink>
+
           <a
             class="repo-link"
             href="https://github.com/Bluetalk/bluetalk"

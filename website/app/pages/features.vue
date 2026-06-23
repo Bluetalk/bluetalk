@@ -84,59 +84,51 @@ const features = [
 
 <template>
   <div class="features-page">
-    <!-- Hero -->
     <section class="section">
       <div class="container features-hero">
-        <div class="section-heading">
-          <span class="section-tag">What's included</span>
-          <h1>Everything in BlueTalk</h1>
-          <p>
-            A focused set of capabilities built around one idea: direct, private communication
-            with no infrastructure in the way.
-          </p>
-        </div>
+        <SectionHeading
+          tag="What's included"
+          title="Everything in BlueTalk"
+          description="A focused set of capabilities built around one idea: direct, private communication with no infrastructure in the way."
+          heading-level="h1"
+        />
 
         <div class="features-cta">
-          <NuxtLink to="/download" class="button button-primary">Download</NuxtLink>
+          <NuxtLink to="/download" class="button button-primary button-lg">Download</NuxtLink>
           <a
             href="https://github.com/Bluetalk/bluetalk"
             target="_blank"
             rel="noreferrer"
-            class="button button-secondary"
+            class="button button-secondary button-lg"
           >View on GitHub</a>
         </div>
       </div>
     </section>
 
-    <!-- Feature grid -->
     <section class="section features-grid-section">
       <div class="container">
         <div class="features-grid">
-          <div
+          <FeatureCard
             v-for="feature in features"
             :key="feature.title"
-            class="feature-item"
-          >
-            <div class="feature-item-icon" v-html="feature.icon" />
-            <div class="feature-item-body">
-              <h3>{{ feature.title }}</h3>
-              <p>{{ feature.description }}</p>
-            </div>
-          </div>
+            :title="feature.title"
+            :description="feature.description"
+            :icon="feature.icon"
+          />
         </div>
       </div>
     </section>
 
-    <!-- CTA -->
     <section class="section section-accent">
       <div class="container">
-        <div class="cta-panel">
-          <div>
+        <div class="cta-panel cta-panel--prominent">
+          <div class="cta-panel-copy">
+            <span class="section-tag">Get started</span>
             <h2>Ready to try it?</h2>
             <p>Download BlueTalk for Windows — installer or portable, your choice.</p>
           </div>
           <div class="cta-actions">
-            <NuxtLink to="/download" class="button button-primary">Download now</NuxtLink>
+            <NuxtLink to="/download" class="button button-primary button-lg">Download now</NuxtLink>
           </div>
         </div>
       </div>
@@ -154,13 +146,6 @@ const features = [
   gap: 20px;
 }
 
-.features-hero h1 {
-  font-size: clamp(1.75rem, 4vw, 2.35rem);
-  line-height: 1.2;
-  font-weight: 600;
-  letter-spacing: -0.45px;
-}
-
 .features-cta {
   display: flex;
   gap: 8px;
@@ -175,62 +160,6 @@ const features = [
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-}
-
-.feature-item {
-  display: flex;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--bg-1);
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.feature-item:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-hover);
-}
-
-.feature-item-icon {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-md);
-  background: var(--bg-3);
-  color: var(--fg-2);
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.feature-item:hover .feature-item-icon {
-  color: var(--blue);
-  background: var(--blue-soft);
-}
-
-.feature-item-icon :deep(svg) {
-  width: 16px;
-  height: 16px;
-}
-
-.feature-item-body {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.feature-item-body h3 {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.3;
-  color: var(--fg-0);
-}
-
-.feature-item-body p {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--fg-2);
 }
 
 @media (max-width: 680px) {

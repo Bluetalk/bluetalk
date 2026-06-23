@@ -2,6 +2,7 @@
 const canvas = useTemplateRef<HTMLCanvasElement>('canvasRef')
 let frame = 0
 let resizeHandler: (() => void) | undefined
+let schemeObserver: MutationObserver | undefined
 
 type NodePoint = {
   x: number
@@ -41,14 +42,13 @@ onMounted(() => {
   let ratio = 1
   let points: NodePoint[] = []
   let backdropRgb = readBackdropRgb()
-  let schemeObserver: MutationObserver | undefined
 
-  const buildPoints = () => Array.from({ length: 16 }, () => ({
+  const buildPoints = () => Array.from({ length: 20 }, () => ({
     x: Math.random() * width,
     y: Math.random() * height,
-    vx: (Math.random() - 0.5) * 0.35,
-    vy: (Math.random() - 0.5) * 0.35,
-    r: Math.random() * 1.4 + 1,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
+    r: Math.random() * 1.6 + 1,
   }))
 
   const resize = () => {
@@ -70,8 +70,8 @@ onMounted(() => {
         const dy = points[i].y - points[j].y
         const distance = Math.sqrt(dx * dx + dy * dy)
 
-        if (distance < 180) {
-          const alpha = (1 - distance / 180) * 0.18
+        if (distance < 200) {
+          const alpha = (1 - distance / 200) * 0.2
           context.beginPath()
           context.strokeStyle = `rgba(${backdropRgb}, ${alpha})`
           context.lineWidth = 1
@@ -84,7 +84,7 @@ onMounted(() => {
 
     points.forEach((point) => {
       context.beginPath()
-      context.fillStyle = `rgba(${backdropRgb}, 0.14)`
+      context.fillStyle = `rgba(${backdropRgb}, 0.16)`
       context.arc(point.x, point.y, point.r, 0, Math.PI * 2)
       context.fill()
     })
@@ -147,7 +147,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(frame)
-
   schemeObserver?.disconnect()
 
   if (resizeHandler) {
