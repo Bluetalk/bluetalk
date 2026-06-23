@@ -157,11 +157,14 @@ const apiWarningText = computed(() => {
 
 <template>
   <div class="download-page">
-    <section class="section">
+    <section class="section download-hero-section">
       <div class="container download-hero">
-        <div class="section-heading download-heading">
-          <span class="section-tag">Get BlueTalk</span>
-          <h1>Download Options</h1>
+        <div class="download-hero-panel">
+          <SectionHeading
+            tag="Get BlueTalk"
+            title="Download Options"
+            heading-level="h1"
+          />
           <p v-if="pagePending" class="download-version-indicator" aria-live="polite">
             Download BlueTalk …
           </p>
