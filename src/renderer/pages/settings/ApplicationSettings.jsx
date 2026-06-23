@@ -43,7 +43,7 @@ export default function ApplicationSettingsPage() {
                   <Bell size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
                   Windows-Benachrichtigungen
                 </span>
-                <span>System-Mitteilungen für eingehende Nachrichten. Mehrere in kurzer Zeit werden zu einer Zusammenfassung gruppiert.</span>
+                <span>System-Mitteilungen für eingehende Nachrichten. Keine Benachrichtigung, solange BlueTalk im Vordergrund ist. Mehrere in kurzer Zeit werden zu einer Zusammenfassung gruppiert.</span>
               </div>
               <label className="toggle">
                 <input
@@ -80,6 +80,7 @@ export default function ApplicationSettingsPage() {
                 onClick={() => window.bluetalk?.notify?.show?.({
                   title: 'BlueTalk',
                   body: 'Windows notifications are active.',
+                  allowInForeground: true,
                 })}
               >
                 Test

@@ -96,3 +96,13 @@ test('admin chips and lobby standings are persisted', () => {
   resumed.bootstrapHost();
   assert.equal(resumed.publicState().players.find((player) => player.peerId === 'host').chips, 2750);
 });
+
+test('host can remove chips between hands', () => {
+  const { hooks } = loadPokerEngine();
+  const host = hooks.createHost({}, () => {}, { id: 'host', name: 'Host' });
+  host.bootstrapHost();
+  assert.equal(host.removeChips('host', 500), true);
+  assert.equal(host.publicState().players.find((player) => player.peerId === 'host').chips, 1500);
+  assert.equal(host.removeChips('host', 5000), true);
+  assert.equal(host.publicState().players.find((player) => player.peerId === 'host').chips, 0);
+});

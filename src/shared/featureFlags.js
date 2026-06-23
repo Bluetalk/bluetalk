@@ -1,8 +1,8 @@
 /**
  * Experimentelle und Leistungs-Schalter. Werte in settings.featureFlags; fehlende Keys nutzen defaultEnabled.
- * Renderer-Einstieg; Logik ist mit src/shared/featureFlags.js abgestimmt.
+ * Gemeinsam für Main- und Renderer-Prozess.
  */
-export const FEATURE_FLAG_DEFINITIONS = [
+const FEATURE_FLAG_DEFINITIONS = [
   {
     id: 'chatUnreadListBadges',
     label: 'Ungelesen in der Chat-Liste',
@@ -33,28 +33,26 @@ export const FEATURE_FLAG_DEFINITIONS = [
   },
 ];
 
-/** @param {object | null | undefined} contact */
-export function isContactNotificationMuted(contact, now = Date.now()) {
-  if (!contact || typeof contact !== 'object') return false;
-  if (contact.notifyMutedManual === true) return true;
-  if (typeof contact.notifyMutedUntil === 'number' && now < contact.notifyMutedUntil) return true;
-  return false;
-}
-
 const DEFAULT_FLAG_MAP = Object.fromEntries(
   FEATURE_FLAG_DEFINITIONS.map((d) => [d.id, d.defaultEnabled])
 );
 
-export function mergeFeatureFlagDefaults(stored) {
+function mergeFeatureFlagDefaults(stored) {
   return {
     ...DEFAULT_FLAG_MAP,
     ...(stored && typeof stored === 'object' ? stored : {}),
   };
 }
 
-export function getEffectiveFlag(settings, flagId) {
+function getEffectiveFlag(settings, flagId) {
   const def = FEATURE_FLAG_DEFINITIONS.find((d) => d.id === flagId);
   const v = settings?.featureFlags?.[flagId];
   if (typeof v === 'boolean') return v;
   return def ? def.defaultEnabled : false;
 }
+
+module.exports = {
+  FEATURE_FLAG_DEFINITIONS,
+  mergeFeatureFlagDefaults,
+  getEffectiveFlag,
+};

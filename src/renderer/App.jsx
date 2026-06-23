@@ -43,6 +43,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const PluginsPage = lazy(() => import('./pages/Plugins'));
 const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
 const PokerGamePage = lazy(() => import('./pages/PokerGamePage'));
+const UnoGamePage = lazy(() => import('./pages/UnoGamePage'));
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -312,7 +313,10 @@ function Sidebar() {
                 title={tab.label}
               >
                 <Icon size={15} strokeWidth={2} />
-                <span>{tab.label}</span>
+                <span className="sidebar-link-label">
+                  <span>{tab.label}</span>
+                  {tab.tag ? <span className="plugin-tag-badge">{tab.tag}</span> : null}
+                </span>
               </NavLink>
             );
           })}
@@ -499,22 +503,30 @@ export default function App() {
     deliveryTimersRef.current.clear();
   }, []);
 
+  const applyContactPatch = useCallback((prev, patch) => {
+    if (!patch?.id) return prev;
+    const idx = prev.findIndex((c) => c.id === patch.id);
+    const base = idx >= 0 ? prev[idx] : { id: patch.id, addedAt: Date.now() };
+    const merged = { ...base, ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch, 'notifyMutedUntil') && patch.notifyMutedUntil === undefined) {
+      delete merged.notifyMutedUntil;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'notifyMutedManual') && patch.notifyMutedManual === false) {
+      delete merged.notifyMutedManual;
+    }
+    return idx >= 0
+      ? prev.map((contact, i) => (i === idx ? merged : contact))
+      : [...prev, merged];
+  }, []);
+
   const upsertContact = useCallback((patch) => {
     if (!patch?.id) return;
     setContacts((prev) => {
-      const idx = prev.findIndex((c) => c.id === patch.id);
-      const merged = idx >= 0
-        ? { ...prev[idx], ...patch }
-        : { id: patch.id, addedAt: Date.now(), ...patch };
-
-      const updated = idx >= 0
-        ? prev.map((contact, i) => (i === idx ? merged : contact))
-        : [...prev, merged];
-
-      if (window.bluetalk) window.bluetalk.store.set('contacts', updated);
+      const updated = applyContactPatch(prev, patch);
+      if (window.bluetalk) void window.bluetalk.store.set('contacts', updated);
       return updated;
     });
-  }, []);
+  }, [applyContactPatch]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -734,10 +746,16 @@ export default function App() {
           return;
         }
 
+        // UNO-Spielprotokoll (Wire) — nicht im Chatverlauf speichern
+        if (msg.kind === 'uno' && fromId) {
+          if (isBlocked) return;
+          return;
+        }
+
         if (isBlocked) {
           const k = msg.kind;
           const blockable =
-            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'contact-share';
+            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'contact-share';
           if (blockable && fromId && msg.messageId) {
             void window.bluetalk.peer.send(fromId, {
               kind: 'messaging-blocked',
@@ -828,8 +846,6 @@ export default function App() {
           });
         }
 
-        upsertContact({ id: fromId, blockedByPeer: false, chatDeletedByPeer: false });
-
         setChatMeta((prev) => ({
           ...prev,
           [fromId]: meta?.count ? meta : {
@@ -847,19 +863,17 @@ export default function App() {
 
         if (fromId) {
           setContacts((prev) => {
-            const idx = prev.findIndex((c) => c.id === fromId);
-            const existing = idx >= 0 ? prev[idx] : null;
+            const existing = prev.find((c) => c?.id === fromId) || null;
             const hasOutgoing = existing?.hasOutgoing === true;
             const requestCleared = existing?.pendingMessageRequest === false;
-            const merged = {
-              ...(existing || { id: fromId, addedAt: Date.now() }),
+            const updated = applyContactPatch(prev, {
+              id: fromId,
+              blockedByPeer: false,
+              chatDeletedByPeer: false,
               name: normalized.sender || existing?.name || fromId,
               pendingMessageRequest: hasOutgoing || requestCleared ? false : true,
-            };
-            const updated = idx >= 0
-              ? prev.map((c, i) => (i === idx ? merged : c))
-              : [...prev, merged];
-            if (window.bluetalk) window.bluetalk.store.set('contacts', updated);
+            });
+            if (window.bluetalk) void window.bluetalk.store.set('contacts', updated);
             return updated;
           });
         }
@@ -955,7 +969,7 @@ export default function App() {
       deliveryTimersRef.current.forEach((tid) => clearTimeout(tid));
       deliveryTimersRef.current.clear();
     };
-  }, [upsertContact, applyMessagePatch, sendE2eeHandshake]);
+  }, [upsertContact, applyContactPatch, applyMessagePatch, sendE2eeHandshake]);
 
   useEffect(() => {
     if (!window.bluetalk?.on) return undefined;
@@ -1313,6 +1327,7 @@ export default function App() {
    */
   const setContactNotificationMute = useCallback((contactId, opts = {}) => {
     if (!contactId) return;
+    if (!getEffectiveFlag(settingsRef.current, 'contactNotificationMute')) return;
     if (opts.clear) {
       upsertContact({ id: contactId, notifyMutedManual: false, notifyMutedUntil: undefined });
       return;
@@ -1436,10 +1451,10 @@ export default function App() {
     setSettings((prev) => {
       const merged = { ...prev, ...newSettings };
       if (newSettings.featureFlags && typeof newSettings.featureFlags === 'object') {
-        merged.featureFlags = {
+        merged.featureFlags = mergeFeatureFlagDefaults({
           ...(prev.featureFlags || {}),
           ...newSettings.featureFlags,
-        };
+        });
       }
       if (newSettings.uiResize && typeof newSettings.uiResize === 'object') {
         merged.uiResize = {
@@ -1549,6 +1564,7 @@ export default function App() {
             <Suspense fallback={<div className="page"><div className="page-body">Wird geladen…</div></div>}>
             <Routes>
               <Route path="/poker-game" element={<PokerGamePage />} />
+              <Route path="/uno-game" element={<UnoGamePage />} />
               <Route
                 path="*"
                 element={(

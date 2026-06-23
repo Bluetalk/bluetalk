@@ -969,6 +969,23 @@
         pushState();
         return true;
       },
+      removeChips(peerId, amount) {
+        const player = players.find((p) => p.peerId === peerId);
+        const value = clampInt(amount, 1, 1000000000, 0);
+        if (!player || value <= 0) return false;
+        const activeHand = phase !== 'lobby' && phase !== 'between';
+        if (activeHand) {
+          message = 'Chips koennen nur zwischen Haenden entfernt werden.';
+          pushState();
+          return false;
+        }
+        const removed = Math.min(player.chips, value);
+        player.chips = Math.max(0, player.chips - value);
+        message = `${player.name} verliert ${removed.toLocaleString()} Chips.`;
+        checkpoint('admin_chips');
+        pushState();
+        return true;
+      },
       invitePeer(peerId) {
         if (!peerId || players.some((p) => p.peerId === peerId)) return false;
         const connected = (api.peers() || []).some((p) => p.id === peerId);
@@ -1052,7 +1069,10 @@
   function tryPump() {
     if (!window.bluetalk?.poker?.pushState) return;
     const pub = hostRef ? hostRef.publicState() : clientState;
-    if (!pub) return;
+    if (!pub) {
+      window.bluetalk.poker.pushState(null);
+      return;
+    }
     const hole = hostRef ? hostRef.getMyHole() : myHole;
     const seated = new Set((pub.players || []).map((p) => p.peerId));
     const connected = new Map((api.peers() || []).map((p) => [p.id, p]));
@@ -1111,6 +1131,12 @@
     }
     if (w.wire === 'join_reject') {
       api.notify.toast?.({ title: 'Poker', message: w.reason || 'Beitritt abgelehnt.' });
+      if (!w.tableId || w.tableId === clientState?.tableId) {
+        clientState = null;
+        myHole = [];
+        tryPump();
+        rootRender?.();
+      }
     }
     if (w.wire === 'leave' && clientState?.tableId === w.tableId && msg.from === clientState.hostPeerId) {
       clientState = null;
@@ -1576,6 +1602,7 @@
         }
         clientState = null;
         myHole = [];
+        tryPump();
         rootRender?.();
       } else if (payload.type === 'add_bot') {
         if (hostRef) {
@@ -1593,6 +1620,8 @@
         hostRef?.invitePeer(payload.peerId);
       } else if (payload.type === 'admin_add_chips' && payload.peerId) {
         hostRef?.addChips(payload.peerId, payload.amount);
+      } else if (payload.type === 'admin_remove_chips' && payload.peerId) {
+        hostRef?.removeChips(payload.peerId, payload.amount);
       } else if (payload.type === 'save_game') {
         hostRef?.saveNow();
       }

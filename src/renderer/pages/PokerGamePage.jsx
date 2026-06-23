@@ -185,7 +185,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
   );
 }
 
-function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onAddBot, onRemoveBot }) {
+function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onRemoveChips, onAddBot, onRemoveBot }) {
   const players = snapshot?.public?.players || [];
   const inviteCandidates = snapshot?.inviteCandidates || [];
   const [amounts, setAmounts] = useState({});
@@ -205,7 +205,7 @@ function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onAddBot, 
         </div>
       </section>
       <section>
-        <div className="poker-panel-heading"><div><h3>Chips & Spielstände</h3><p>Als Host kannst du Chips hinzufügen. Der Stand wird zwischen Händen automatisch gespeichert.</p></div></div>
+        <div className="poker-panel-heading"><div><h3>Chips & Spielstände</h3><p>Als Host kannst du Chips hinzufügen oder zwischen Händen entfernen. Der Stand wird automatisch gespeichert.</p></div></div>
         <div className="poker-manage-list">
           {players.map((player) => (
             <div key={player.peerId} className="poker-manage-row poker-manage-player">
@@ -220,6 +220,7 @@ function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onAddBot, 
                     onChange={(event) => setAmounts((current) => ({ ...current, [player.peerId]: Number(event.target.value) }))}
                   />
                   <button type="button" className="poker-btn-ghost" onClick={() => onGrantChips(player.peerId, amounts[player.peerId] ?? 500)}><Coins size={14} /> Geben</button>
+                  <button type="button" className="poker-btn-ghost" onClick={() => onRemoveChips(player.peerId, amounts[player.peerId] ?? 500)}><Coins size={14} /> Nehmen</button>
                 </div>
               ) : null}
             </div>
@@ -428,7 +429,7 @@ export default function PokerGamePage() {
       </main>
       {panel === 'help' ? <OverlayPanel title="Poker kurz erklärt" onClose={() => setPanel('')}><PokerGuide /></OverlayPanel> : null}
       {panel === 'settings' ? <OverlayPanel title="Tischeinstellungen" onClose={() => setPanel('')}><SettingsPanel settings={pub.settings} isHost={isHost} onUpdate={(settings) => send({ type: 'update_settings', settings })} /></OverlayPanel> : null}
-      {panel === 'players' ? <OverlayPanel title="Spieler verwalten" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} isHost={isHost} onInvite={(peerId) => send({ type: 'invite', peerId })} onGrantChips={(peerId, amount) => send({ type: 'admin_add_chips', peerId, amount })} onAddBot={() => send({ type: 'add_bot' })} onRemoveBot={() => send({ type: 'remove_bot' })} /></OverlayPanel> : null}
+      {panel === 'players' ? <OverlayPanel title="Spieler verwalten" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} isHost={isHost} onInvite={(peerId) => send({ type: 'invite', peerId })} onGrantChips={(peerId, amount) => send({ type: 'admin_add_chips', peerId, amount })} onRemoveChips={(peerId, amount) => send({ type: 'admin_remove_chips', peerId, amount })} onAddBot={() => send({ type: 'add_bot' })} onRemoveBot={() => send({ type: 'remove_bot' })} /></OverlayPanel> : null}
     </div>
   );
 }

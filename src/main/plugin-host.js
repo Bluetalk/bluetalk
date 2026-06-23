@@ -102,11 +102,12 @@ async function readFileSafe(filePath) {
 }
 
 class PluginHost extends EventEmitter {
-  constructor({ peerServer, store, mainWindowRef }) {
+  constructor({ peerServer, store, mainWindowRef, isAppInForegroundRef }) {
     super();
     this.peerServer = peerServer;
     this.store = store;
     this.mainWindowRef = mainWindowRef;
+    this.isAppInForegroundRef = isAppInForegroundRef;
     this.pluginsDir = path.join(app.getPath('userData'), 'plugins');
     /** @type {Map<string, { manifest: any, dir: string, enabled: boolean, module?: any, api?: any, context?: any, commands: Map<string, Function>, disposers: Set<Function>, timers: Set<any>, ui?: string, lastError?: string }>} */
     this.plugins = new Map();
@@ -456,6 +457,12 @@ class PluginHost extends EventEmitter {
 
       notify: {
         show: (payload = {}) => {
+          if (this.store?.get('settings.windowsNotifications', true) === false) {
+            return false;
+          }
+          if (!payload.allowInForeground && this.isAppInForegroundRef?.()) {
+            return false;
+          }
           const win = this.mainWindowRef?.();
           try {
             if (process.platform === 'win32' && Notification.isSupported()) {

@@ -30,6 +30,7 @@ import {
   Smile,
   Trash2,
   Bell,
+  BellOff,
   UserRound,
   X,
   MoreVertical,
@@ -66,6 +67,10 @@ function resolveLucideIcon(name) {
 const MUTE_1H_MS = 60 * 60 * 1000;
 const MUTE_8H_MS = 8 * MUTE_1H_MS;
 const MUTE_24H_MS = 24 * MUTE_1H_MS;
+
+function isContextMenuFlyoutTarget(target) {
+  return target instanceof Element && Boolean(target.closest('.chat-list-context-menu-flyout-panel'));
+}
 
 function notificationMuteSelectValue(contact) {
   if (!contact || !isContactNotificationMuted(contact)) return 'off';
@@ -189,6 +194,7 @@ function getMessagePreviewText(message) {
     return `Kontakt: ${name}`;
   }
   if (message.kind === 'poker-invite') return `Poker: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'uno-invite') return `UNO: ${message.tableName || 'Einladung'}`;
   const content = String(message.content || '').trim();
   if (!content) return 'Nachricht';
   return content.length > 120 ? `${content.slice(0, 117)}…` : content;
@@ -232,6 +238,9 @@ function getLastPreview(message) {
   }
   if (message.kind === 'poker-invite') {
     return `${message.from === 'self' ? 'Du: ' : ''}Poker: ${message.tableName || 'Einladung'}`;
+  }
+  if (message.kind === 'uno-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}UNO: ${message.tableName || 'Einladung'}`;
   }
   return (message.from === 'self' ? 'You: ' : '') + (message.content || 'Message');
 }
@@ -443,7 +452,7 @@ function isBareMediaMessage(message) {
 /** Rich-Embeds (Poker, Kontakt, …): ohne Sprechblasen-Karte */
 function isChatEmbedMessage(message) {
   if (!message) return false;
-  return message.kind === 'poker-invite' || message.kind === 'contact-share';
+  return message.kind === 'poker-invite' || message.kind === 'uno-invite' || message.kind === 'contact-share';
 }
 
 function FileTypeIcon({ mime, fileName, size = 22 }) {
@@ -725,6 +734,68 @@ function PokerInviteMessage({ message }) {
   );
 }
 
+function UnoInviteMessage({ message }) {
+  const navigate = useNavigate();
+  const tableName = message.tableName || 'UNO-Tisch';
+  const settings = message.unoSettings || {};
+  const summary = message.unoSettingsSummary || message.content || '';
+  const maxPlayers = Number(settings.maxPlayers) || 4;
+  const gameMode = settings.gameMode === 'points'
+    ? `Punkte bis ${Number(settings.targetScore) || 500}`
+    : 'Einzelrunde';
+  const houseRules = settings.houseRules === 'casual' ? 'Casual' : 'Offiziell';
+
+  const joinGame = () => {
+    try {
+      sessionStorage.setItem(
+        'bt.uno.pendingJoin',
+        JSON.stringify({
+          hostPeerId: message.hostPeerId,
+          gameId: message.gameId,
+          tableName,
+          unoSettings: settings,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    navigate(`/plugin/${encodeURIComponent('uno:game')}`);
+    void window.bluetalk?.uno?.openGameWindow?.();
+  };
+
+  return (
+    <div className="uno-invite-card" role="group" aria-label="UNO-Einladung">
+      <div className="uno-invite-card-head">
+        <span className="uno-invite-card-icon" aria-hidden>🎴</span>
+        <div className="uno-invite-card-copy">
+          <div className="uno-invite-card-kicker">UNO</div>
+          <div className="uno-invite-card-title">{tableName}</div>
+          {summary ? <div className="uno-invite-card-meta">{summary}</div> : null}
+        </div>
+      </div>
+      <dl className="uno-invite-card-stats">
+        <div>
+          <dt>Plätze</dt>
+          <dd>max. {maxPlayers}</dd>
+        </div>
+        <div>
+          <dt>Modus</dt>
+          <dd>{gameMode}</dd>
+        </div>
+        <div>
+          <dt>Regeln</dt>
+          <dd>{houseRules}</dd>
+        </div>
+      </dl>
+      <p className="uno-invite-card-hint">Peer-to-Peer — du musst mit dem Host verbunden sein.</p>
+      <p className="uno-invite-card-alpha" role="note">Alpha: Das UNO-Plugin kann noch Fehler haben und sich ändern.</p>
+      <button type="button" className="uno-invite-card-btn" onClick={joinGame}>
+        Spiel beitreten
+      </button>
+    </div>
+  );
+}
+
 function MessageReplyQuote({ replyTo, isSelf }) {
   if (!replyTo) return null;
   return (
@@ -807,6 +878,11 @@ function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
         aria-expanded={open}
         onMouseEnter={showSubmenu}
         onMouseLeave={hideSubmenu}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (open) hideSubmenu();
+          else showSubmenu();
+        }}
       >
         <Icon size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         {label}
@@ -829,6 +905,7 @@ function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
               }}
               onMouseEnter={clearHideTimer}
               onMouseLeave={hideSubmenu}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               {children}
             </div>,
@@ -1143,6 +1220,27 @@ export default function ChatsPage() {
   const readingFile = fileTransfer?.stage === 'reading';
   const sendingFile = fileTransfer?.stage === 'sending';
 
+  const contactById = useMemo(() => {
+    const map = new Map();
+    for (const c of contacts) {
+      if (c?.id) map.set(c.id, c);
+    }
+    return map;
+  }, [contacts]);
+
+  const peerById = useMemo(() => {
+    const map = new Map();
+    for (const p of peers) {
+      if (p?.id) map.set(p.id, p);
+    }
+    return map;
+  }, [peers]);
+
+  const resolveContact = useCallback(
+    (peerId) => (peerId ? contactById.get(peerId) ?? null : null),
+    [contactById]
+  );
+
   const chatList = useMemo(() => {
     const ids = new Set([
       ...contacts.map((c) => c.id),
@@ -1153,8 +1251,8 @@ export default function ChatsPage() {
 
     const list = [];
     for (const id of ids) {
-      const peer = peers.find((p) => p.id === id);
-      const contact = contacts.find((c) => c.id === id);
+      const peer = peerById.get(id) || null;
+      const contact = contactById.get(id) || null;
       const meta = chatMeta[id] || null;
       const baseName = contact?.name || peer?.name || id;
       const profilePicture = contact?.profilePicture || peer?.profilePicture || '';
@@ -1182,7 +1280,7 @@ export default function ChatsPage() {
       const bTs = b.lastMessage?.timestamp || b.contact?.addedAt || 0;
       return bTs - aTs;
     });
-  }, [chatMeta, contacts, peers]);
+  }, [chatMeta, contactById, contacts, peerById, peers]);
 
   const mainChatList = useMemo(
     () =>
@@ -1211,6 +1309,11 @@ export default function ChatsPage() {
   const selectedPeer = useMemo(
     () => chatList.find((c) => c.id === selectedPeerId) || null,
     [chatList, selectedPeerId]
+  );
+
+  const selectedContact = useMemo(
+    () => (selectedPeer ? resolveContact(selectedPeer.id) : null),
+    [selectedPeer, resolveContact]
   );
 
   const peerPendingDelete = useMemo(
@@ -1342,6 +1445,7 @@ export default function ChatsPage() {
         const t = e.target;
         if (chatActionsMenuBtnRef.current?.contains(t)) return;
         if (chatActionsMenuPanelRef.current?.contains(t)) return;
+        if (isContextMenuFlyoutTarget(t)) return;
         setChatActionsMenuOpen(false);
       };
       document.addEventListener('mousedown', onDown);
@@ -1589,15 +1693,18 @@ export default function ChatsPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [newestTimestamp, selectedPeerId]);
 
+  const showUnreadListBadges = getEffectiveFlag(settings, 'chatUnreadListBadges');
+  const contactNotificationMuteOn = getEffectiveFlag(settings, 'contactNotificationMute');
+
   useEffect(() => {
-    if (!selectedPeerId) return;
+    if (!showUnreadListBadges || !selectedPeerId) return;
     const peerMsgs = messages[selectedPeerId] || [];
     const upTo = peerMsgs.reduce((acc, m) => {
       if (m.from !== 'self' && typeof m.timestamp === 'number') return Math.max(acc, m.timestamp);
       return acc;
     }, 0);
     if (upTo > 0) markPeerChatViewed(selectedPeerId, upTo);
-  }, [selectedPeerId, messages, markPeerChatViewed]);
+  }, [showUnreadListBadges, selectedPeerId, messages, markPeerChatViewed]);
 
   useEffect(() => {
     if (!selectedPeerId || !settings.sendReadReceipts) return;
@@ -1643,6 +1750,7 @@ export default function ChatsPage() {
     };
     const onPointerDown = (e) => {
       if (listContextMenuRef.current?.contains(e.target)) return;
+      if (isContextMenuFlyoutTarget(e.target)) return;
       closeListContextMenu();
     };
     window.addEventListener('keydown', onKey);
@@ -2126,9 +2234,6 @@ export default function ChatsPage() {
     [setContactNotificationMute, toast]
   );
 
-  const showUnreadListBadges = getEffectiveFlag(settings, 'chatUnreadListBadges');
-  const contactNotificationMuteOn = getEffectiveFlag(settings, 'contactNotificationMute');
-
   return (
     <div className="page">
       <MediaLightbox
@@ -2168,6 +2273,7 @@ export default function ChatsPage() {
               </div>
             )}
             {filtered.map((chat) => {
+              const chatContact = resolveContact(chat.id);
               const unreadCount = showUnreadListBadges
                 ? countUnreadPeerMessages(
                     chat.id,
@@ -2195,6 +2301,11 @@ export default function ChatsPage() {
                     {chat.e2eePlaintextBadge && (
                       <span className="chat-pin-badge" title="Ausgehend ohne E2EE (Klartext)">
                         <Unlock size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                      </span>
+                    )}
+                    {contactNotificationMuteOn && isContactNotificationMuted(chatContact) && (
+                      <span className="chat-pin-badge" title="Mitteilungen stumm">
+                        <BellOff size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                       </span>
                     )}
                   </div>
@@ -2273,6 +2384,9 @@ export default function ChatsPage() {
                           ? ` · ${selectedPeer.baseName}`
                           : ''}
                         {!contactE2eePreferenceOn(selectedPeer.contact) ? ' · Klartext (ausgehend)' : ''}
+                        {contactNotificationMuteOn && isContactNotificationMuted(selectedContact)
+                          ? ' · Mitteilungen stumm'
+                          : ''}
                       </span>
                       {selectedPeer.bio ? (
                         <span className="chat-header-bio" title={selectedPeer.bio}>
@@ -2371,11 +2485,14 @@ export default function ChatsPage() {
                           ? 'E2EE deaktivieren (Klartext)'
                           : 'E2EE aktivieren'}
                       </button>
-                      {contactNotificationMuteOn && !selectedPeer.contact?.blocked ? (
+                      {contactNotificationMuteOn && !selectedContact?.blocked ? (
                         <>
-                          <ContextMenuHoverSubmenu label="Mitteilungen" icon={Bell}>
+                          <ContextMenuHoverSubmenu
+                            label="Mitteilungen"
+                            icon={isContactNotificationMuted(selectedContact) ? BellOff : Bell}
+                          >
                             <NotificationMuteMenuItems
-                              contact={selectedPeer.contact}
+                              contact={selectedContact}
                               contactId={selectedPeer.id}
                               applyNotificationMute={applyNotificationMute}
                               onDone={() => setChatActionsMenuOpen(false)}
@@ -2494,18 +2611,18 @@ export default function ChatsPage() {
                     </div>
                   )}
                 {contactNotificationMuteOn &&
-                  !selectedPeer.contact?.blocked &&
-                  isContactNotificationMuted(selectedPeer.contact) && (
+                  !selectedContact?.blocked &&
+                  isContactNotificationMuted(selectedContact) && (
                     <div className="chat-notice-muted" role="status">
-                      {selectedPeer.contact?.notifyMutedManual ? (
+                      {selectedContact?.notifyMutedManual ? (
                         <>
                           Mitteilungen für diesen Kontakt sind stumm, bis du im Menü oben wieder{' '}
                           <strong>Mitteilungen ein</strong> wählst.
                         </>
-                      ) : typeof selectedPeer.contact?.notifyMutedUntil === 'number' ? (
+                      ) : typeof selectedContact?.notifyMutedUntil === 'number' ? (
                         <>
                           Mitteilungen sind bis{' '}
-                          <strong>{formatMuteExpiry(selectedPeer.contact.notifyMutedUntil)}</strong> stumm (nur
+                          <strong>{formatMuteExpiry(selectedContact.notifyMutedUntil)}</strong> stumm (nur
                           Windows-Benachrichtigungen).
                         </>
                       ) : (
@@ -2610,6 +2727,8 @@ export default function ChatsPage() {
                           <StickerMessage message={m} onExpandImage={setMediaLightbox} />
                         ) : m.kind === 'poker-invite' ? (
                           <PokerInviteMessage message={m} />
+                        ) : m.kind === 'uno-invite' ? (
+                          <UnoInviteMessage message={m} />
                         ) : m.kind === 'contact-share' ? (
                           <ContactShareMessage
                             message={m}
@@ -3156,11 +3275,14 @@ export default function ChatsPage() {
               ? 'E2EE deaktivieren (Klartext)'
               : 'E2EE aktivieren'}
           </button>
-          {contactNotificationMuteOn && !listContextMenu.chat.contact?.blocked ? (
+          {contactNotificationMuteOn && !resolveContact(listContextMenu.chat.id)?.blocked ? (
             <>
-              <ContextMenuHoverSubmenu label="Mitteilungen" icon={Bell}>
+              <ContextMenuHoverSubmenu
+                label="Mitteilungen"
+                icon={isContactNotificationMuted(resolveContact(listContextMenu.chat.id)) ? BellOff : Bell}
+              >
                 <NotificationMuteMenuItems
-                  contact={listContextMenu.chat.contact}
+                  contact={resolveContact(listContextMenu.chat.id)}
                   contactId={listContextMenu.chat.id}
                   applyNotificationMute={applyNotificationMute}
                   onDone={closeListContextMenu}

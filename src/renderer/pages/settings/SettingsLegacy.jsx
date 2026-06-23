@@ -940,6 +940,7 @@ export default function SettingsLegacy() {
                 onClick={() => window.bluetalk?.notify?.show?.({
                   title: 'BlueTalk',
                   body: 'Windows notifications are active.',
+                  allowInForeground: true,
                 })}
               >
                 Test

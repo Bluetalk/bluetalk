@@ -318,7 +318,12 @@ export default function PluginsPage() {
           >
             <header className="plugin-card-head">
               <div>
-                <h4>{plugin.manifest?.name || plugin.id}</h4>
+                <h4>
+                  {plugin.manifest?.name || plugin.id}
+                  {plugin.manifest?.tag ? (
+                    <span className="plugin-tag-badge plugin-tag-badge--card">{plugin.manifest.tag}</span>
+                  ) : null}
+                </h4>
                 {debugMode ? (
                   <span className="plugin-card-meta">
                     v{plugin.manifest?.version || '0.0.0'} · {plugin.manifest?.author || 'Unknown author'}
@@ -337,6 +342,11 @@ export default function PluginsPage() {
             </header>
             {plugin.manifest?.description ? (
               <p className="plugin-card-desc">{plugin.manifest.description}</p>
+            ) : null}
+            {plugin.manifest?.tag === 'alpha' ? (
+              <p className="plugin-alpha-notice" role="note">
+                Alpha: Diese Erweiterung ist noch in Entwicklung und funktioniert möglicherweise nicht wie erwartet.
+              </p>
             ) : null}
             {debugMode ? (
               <div className="plugin-card-caps">

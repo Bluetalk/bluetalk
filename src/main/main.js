@@ -7,11 +7,15 @@ const { pathToFileURL } = require('url');
 const { PeerServer, normalizeConnectAddress } = require(path.join(__dirname, '..', 'shared', 'peer-server.js'));
 const { APIServer } = require(path.join(__dirname, '..', 'shared', 'api-server.js'));
 const Store = require(path.join(__dirname, '..', 'shared', 'store.js'));
+const { isPeerNotificationMuted } = require(path.join(__dirname, '..', 'shared', 'contactNotificationMute.js'));
+const { getEffectiveFlag } = require(path.join(__dirname, '..', 'shared', 'featureFlags.js'));
 const { PluginHost } = require(path.join(__dirname, 'plugin-host.js'));
 
 let mainWindow = null;
 /** Separates Fenster für das Poker-Plugin (Spieltisch). */
 let pokerGameWindow = null;
+/** Separates Fenster für das UNO-Plugin. */
+let unoGameWindow = null;
 let tray = null;
 let peerServer = null;
 let apiServer = null;
@@ -783,10 +787,23 @@ async function runPortDiagnostics() {
   };
 }
 
-function showWindowsNotification(title, body = '') {
+function isAppInForeground() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (!focused || focused.isDestroyed()) return false;
+  return (
+    (mainWindow && !mainWindow.isDestroyed() && focused === mainWindow)
+    || (pokerGameWindow && !pokerGameWindow.isDestroyed() && focused === pokerGameWindow)
+    || (unoGameWindow && !unoGameWindow.isDestroyed() && focused === unoGameWindow)
+  );
+}
+
+function showWindowsNotification(title, body = '', options = {}) {
   if (process.platform !== 'win32') return false;
   if (!Notification.isSupported()) return false;
   if (store && store.get('settings.windowsNotifications', true) === false) {
+    return false;
+  }
+  if (!options.allowInForeground && isAppInForeground()) {
     return false;
   }
 
@@ -818,6 +835,7 @@ function flushIncomingNotificationBatch() {
   incomingNotifBatch.previews = [];
   incomingNotifBatch.senderLabel = '';
   if (!previews.length) return;
+  if (isAppInForeground()) return;
 
   if (previews.length === 1) {
     showWindowsNotification(senderLabel || 'BlueTalk', previews[0]);
@@ -839,19 +857,15 @@ function isContactBlockedInStore(peerId) {
 function isContactNotificationMutedInStore(peerId) {
   if (!store || !peerId) return false;
   const settings = store.get('settings', {});
-  const flags = settings && typeof settings.featureFlags === 'object' ? settings.featureFlags : {};
-  if (flags.contactNotificationMute !== true) return false;
-  const contacts = store.get('contacts', []);
-  const c = contacts.find((x) => x && x.id === peerId);
-  if (!c) return false;
-  const now = Date.now();
-  if (c.notifyMutedManual === true) return true;
-  if (typeof c.notifyMutedUntil === 'number' && now < c.notifyMutedUntil) return true;
-  return false;
+  if (!getEffectiveFlag(settings, 'contactNotificationMute')) return false;
+  return isPeerNotificationMuted(store.get('contacts', []), peerId);
 }
 
 function queueIncomingChatNotification(data) {
   if (store && store.get('settings.windowsNotifications', true) === false) {
+    return;
+  }
+  if (isAppInForeground()) {
     return;
   }
   const senderLabel = data.sender || data.from || 'BlueTalk';
@@ -862,7 +876,9 @@ function queueIncomingChatNotification(data) {
         ? `File: ${data.fileName || data.content || 'Attachment'}`
         : data.kind === 'poker-invite'
           ? `Poker: ${data.tableName || 'Einladung'}`
-          : data.kind === 'contact-share'
+          : data.kind === 'uno-invite'
+            ? `UNO: ${data.tableName || 'Einladung'}`
+            : data.kind === 'contact-share'
             ? `Kontakt: ${data.sharedContact?.displayName || data.sharedContact?.name || 'geteilt'}`
             : (data.content || 'New message');
 
@@ -920,6 +936,14 @@ function isPokerGameSender(event) {
   );
 }
 
+function isUnoGameSender(event) {
+  return Boolean(
+    unoGameWindow
+    && !unoGameWindow.isDestroyed()
+    && event.sender === unoGameWindow.webContents,
+  );
+}
+
 function isTrustedRendererUrl(value) {
   try {
     const url = new URL(value);
@@ -974,8 +998,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    minWidth: 860,
-    minHeight: 560,
+    minWidth: 520,
+    minHeight: 400,
     frame: false,
     transparent: false,
     backgroundColor: '#0a0a0f',
@@ -1044,8 +1068,8 @@ function createPokerGameWindow() {
   pokerGameWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: 720,
+    minHeight: 480,
     frame: false,
     transparent: false,
     backgroundColor: '#071018',
@@ -1083,6 +1107,60 @@ function createPokerGameWindow() {
   bindWindowMaximizeEvents(pokerGameWindow, 'poker:windowMaximized');
 
   return pokerGameWindow;
+}
+
+function createUnoGameWindow() {
+  if (unoGameWindow && !unoGameWindow.isDestroyed()) {
+    try {
+      unoGameWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    return unoGameWindow;
+  }
+
+  unoGameWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 720,
+    minHeight: 480,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0a1020',
+    icon: createAppIcon(256),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+    show: false,
+  });
+  hardenWindow(unoGameWindow);
+
+  if (isDev) {
+    unoGameWindow.loadURL('http://localhost:5173/#/uno-game');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    unoGameWindow.loadURL(`${pathToFileURL(indexHtml).href}#/uno-game`);
+  }
+
+  unoGameWindow.once('ready-to-show', () => {
+    try {
+      unoGameWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  unoGameWindow.on('closed', () => {
+    unoGameWindow = null;
+  });
+
+  bindWindowMaximizeEvents(unoGameWindow, 'uno:windowMaximized');
+
+  return unoGameWindow;
 }
 
 function createTray() {
@@ -1242,6 +1320,75 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('uno:openGameWindow', () => {
+    try {
+      createUnoGameWindow();
+      return { ok: true };
+    } catch (e) {
+      console.error('uno:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('uno:closeGameWindow', () => {
+    try {
+      if (unoGameWindow && !unoGameWindow.isDestroyed()) {
+        unoGameWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('uno:minimizeWindow', (event) => {
+    if (!isUnoGameSender(event)) return { ok: false };
+    try {
+      unoGameWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('uno:maximizeWindow', (event) => {
+    if (!isUnoGameSender(event)) return { ok: false };
+    try {
+      if (unoGameWindow?.isMaximized()) unoGameWindow.unmaximize();
+      else unoGameWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('uno:isWindowMaximized', (event) => {
+    if (!isUnoGameSender(event)) return false;
+    return unoGameWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('uno:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    if (!unoGameWindow || unoGameWindow.isDestroyed()) return;
+    try {
+      unoGameWindow.webContents.send('uno:state', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  ipcMain.on('uno:fromChild', (event, payload) => {
+    if (!unoGameWindow || unoGameWindow.isDestroyed()) return;
+    if (event.sender !== unoGameWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('uno:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
   ipcMain.handle('store:get', (_, key, defaultVal) => store.get(key, defaultVal));
   ipcMain.handle('store:set', (_, key, value) => {
     store.set(key, value);
@@ -1344,7 +1491,9 @@ function setupIPC() {
     if (store && store.get('settings.windowsNotifications', true) === false) {
       return false;
     }
-    return showWindowsNotification(payload.title || 'BlueTalk', payload.body || '');
+    return showWindowsNotification(payload.title || 'BlueTalk', payload.body || '', {
+      allowInForeground: payload.allowInForeground === true,
+    });
   });
 
   ipcMain.handle('network:testPorts', async () => runPortDiagnostics());
@@ -1504,6 +1653,7 @@ function setupIPC() {
           && data.kind !== 'chat-deleted'
           && data.kind !== 'e2ee-key-handshake'
           && data.kind !== 'poker'
+          && data.kind !== 'uno'
         ) {
           if (!isContactBlockedInStore(data.from) && !isContactNotificationMutedInStore(data.from)) {
             queueIncomingChatNotification(data);
@@ -1568,6 +1718,7 @@ if (!gotSingleInstanceLock) {
       peerServer,
       store,
       mainWindowRef: () => mainWindow,
+      isAppInForegroundRef: isAppInForeground,
     });
     (async () => {
       try {
@@ -1590,6 +1741,10 @@ app.on('before-quit', () => {
     if (pokerGameWindow && !pokerGameWindow.isDestroyed()) {
       pokerGameWindow.destroy();
       pokerGameWindow = null;
+    }
+    if (unoGameWindow && !unoGameWindow.isDestroyed()) {
+      unoGameWindow.destroy();
+      unoGameWindow = null;
     }
   } catch {
     /* ignore */

@@ -1,0 +1,12 @@
+{
+  "id": "uno",
+  "name": "UNO",
+  "version": "1.0.0-alpha",
+  "tag": "alpha",
+  "description": "UNO für bis zu 8 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster mit 3D-Karten. Alpha: kann noch unzuverlässig sein oder nicht wie erwartet funktionieren.",
+  "author": "BlueTalk",
+  "main": "main.js",
+  "ui": "ui.js",
+  "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "tabs:register"],
+  "autoEnable": true
+}

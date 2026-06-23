@@ -106,6 +106,35 @@ contextBridge.exposeInMainWorld('bluetalk', {
     },
   },
 
+  /** UNO-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  uno: {
+    openGameWindow: () => ipcRenderer.invoke('uno:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('uno:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('uno:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('uno:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('uno:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('uno:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('uno:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('uno:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('uno:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('uno:state', listener);
+      return () => ipcRenderer.removeListener('uno:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('uno:fromChild', listener);
+      return () => ipcRenderer.removeListener('uno:fromChild', listener);
+    },
+  },
+
   app: {
     clearCache: () => ipcRenderer.invoke('app:clearCache'),
     clearMessages: () => ipcRenderer.invoke('app:clearMessages'),

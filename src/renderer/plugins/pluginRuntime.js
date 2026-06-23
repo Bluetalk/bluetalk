@@ -344,6 +344,7 @@ class PluginRuntime {
             pluginId: id,
             label: tab.label || manifest.name || id,
             icon: tab.icon || 'Plug',
+            tag: tab.tag || manifest.tag || null,
             path: `/plugin/${encodeURIComponent(tabId)}`,
             render: tab.render,
             order: typeof tab.order === 'number' ? tab.order : 100,
