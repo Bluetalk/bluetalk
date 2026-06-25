@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   AI_CHAT_PEER_ID,
   AI_CHAT_PEER_PREFIX,
+  OLLAMA_DEFAULT_PORT,
   AI_MODEL_TIERS,
   AI_CHAT_SYSTEM_PROMPT,
   AI_AGENT_TOOLS,
@@ -44,6 +45,11 @@ test('local tiers reference ollama pull names', () => {
     assert.ok(getModelTier(id).local);
     assert.ok(getModelTier(id).estimatedSizeBytes > 0);
   }
+});
+
+test('BlueTalk uses a private Ollama port', () => {
+  assert.equal(OLLAMA_DEFAULT_PORT, 32114);
+  assert.notEqual(OLLAMA_DEFAULT_PORT, 11434);
 });
 
 test('AI_CHAT_SYSTEM_PROMPT encodes offline assistant rules', () => {

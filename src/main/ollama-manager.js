@@ -37,9 +37,16 @@ const {
   sanitizeMessagesForOllama,
   formatToolResultMessageContent,
 } = require(path.join(__dirname, 'agent-tools.js'));
+const {
+  BLUETALK_OLLAMA_MODELS_ENV,
+  defaultModelsDir,
+  isBlueTalkManagedModelsDir,
+  isSameOrInsidePath,
+  resolveOllamaModelsDir,
+  windowsPublicModelsDir,
+} = require(path.join(__dirname, 'ollama-paths.js'));
 
 const RUNTIME_DIR_NAME = 'runtime';
-const MODELS_DIR_NAME = 'models';
 const MAX_AGENT_TOOL_ROUNDS = 12;
 const MAX_SUBAGENT_TOOL_ROUNDS = 8;
 
@@ -101,9 +108,12 @@ class OllamaManager {
       ? invokePluginCommand
       : null;
     this.askUser = typeof askUser === 'function' ? askUser : null;
-    this.baseDir = path.join(app.getPath('userData'), 'ollama');
+    this.userDataDir = app.getPath('userData');
+    this.baseDir = path.join(this.userDataDir, 'ollama');
     this.runtimeDir = path.join(this.baseDir, RUNTIME_DIR_NAME);
-    this.modelsDir = path.join(this.baseDir, MODELS_DIR_NAME);
+    const modelsPath = resolveOllamaModelsDir({ appUserDataDir: this.userDataDir });
+    this.modelsDir = modelsPath.dir;
+    this.modelsDirSource = modelsPath.source;
     this.serverProcess = null;
     this.downloadAbort = null;
     this.modelPullAbort = null;
@@ -132,7 +142,7 @@ class OllamaManager {
   }
 
   async init() {
-    await fsPromises.mkdir(this.modelsDir, { recursive: true });
+    await this._prepareModelsDir();
     await fsPromises.mkdir(this.runtimeDir, { recursive: true });
     await this.refreshState();
   }
@@ -160,6 +170,9 @@ class OllamaManager {
       baseDir: this.baseDir,
       runtimeDir: this.runtimeDir,
       modelsDir: this.modelsDir,
+      modelsDirSource: this.modelsDirSource,
+      modelsEnvVariable: BLUETALK_OLLAMA_MODELS_ENV,
+      serverPort: OLLAMA_DEFAULT_PORT,
       runtimePath: this._ollamaBinaryPath(),
     };
   }
@@ -184,6 +197,40 @@ class OllamaManager {
       OLLAMA_HOST: `127.0.0.1:${OLLAMA_DEFAULT_PORT}`,
       OLLAMA_ORIGINS: '*',
     };
+  }
+
+  async _prepareModelsDir() {
+    const preferred = resolveOllamaModelsDir({ appUserDataDir: this.userDataDir });
+    const fallback = {
+      dir: defaultModelsDir(this.userDataDir),
+      source: 'userData-fallback',
+    };
+    const candidates = [];
+    const safePublicFallback = process.platform === 'win32' && preferred.source === 'windows-safe'
+      ? { dir: windowsPublicModelsDir(process.env), source: 'windows-public' }
+      : null;
+    for (const candidate of [preferred, safePublicFallback, fallback]) {
+      if (!candidate?.dir) continue;
+      if (candidates.some((entry) => path.resolve(entry.dir) === path.resolve(candidate.dir))) continue;
+      candidates.push(candidate);
+    }
+
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await fsPromises.mkdir(candidate.dir, { recursive: true });
+        // eslint-disable-next-line no-await-in-loop
+        await fsPromises.access(candidate.dir, fs.constants.R_OK | fs.constants.W_OK);
+        this.modelsDir = candidate.dir;
+        this.modelsDirSource = candidate.source;
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('Modellordner konnte nicht angelegt werden.');
   }
 
   async _runtimeLooksReady() {
@@ -1207,6 +1254,7 @@ class OllamaManager {
 
     const bin = this._ollamaBinaryPath();
     if (!bin) return false;
+    await this._prepareModelsDir();
 
     this.serverProcess = spawn(bin, ['serve'], {
       env: this._runtimeEnv(),
@@ -1536,7 +1584,16 @@ class OllamaManager {
     } catch {
       /* ignore */
     }
-    await fsPromises.mkdir(this.modelsDir, { recursive: true }).catch(() => {});
+    const canDeleteExternalModelsDir = this.modelsDirSource !== BLUETALK_OLLAMA_MODELS_ENV
+      && isBlueTalkManagedModelsDir(this.modelsDir);
+    if (!isSameOrInsidePath(this.modelsDir, this.baseDir) && canDeleteExternalModelsDir) {
+      try {
+        await fsPromises.rm(this.modelsDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    await this._prepareModelsDir().catch(() => {});
     await fsPromises.mkdir(this.runtimeDir, { recursive: true }).catch(() => {});
 
     this.state = this._emptyState();

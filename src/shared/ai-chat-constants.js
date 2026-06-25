@@ -5,9 +5,9 @@ const AI_CHAT_PEER_PREFIX = '__ai_chat__:';
 /** Angezeigter Download-Hinweis für die Ollama-Laufzeit (~1,5 GB). */
 const OLLAMA_RUNTIME_DISCLAIMER_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
 
-const OLLAMA_DEFAULT_PORT = 11434;
+const OLLAMA_DEFAULT_PORT = 32114;
 
-/** Modell-Stufen: lokale Pulls landen unter userData/ollama/models via OLLAMA_MODELS. */
+/** Modell-Stufen: lokale Pulls landen im BlueTalk-Modellordner via OLLAMA_MODELS. */
 const AI_MODEL_TIERS = {
   fast: {
     id: 'fast',
