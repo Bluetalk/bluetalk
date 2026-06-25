@@ -1561,6 +1561,10 @@ function setupIPC() {
     const state = await ollamaManager.downloadRuntime();
     return { ok: state.runtimeStatus === 'ready', state };
   });
+  ipcMain.handle('ollama:selectRuntimeMode', async (_, mode) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.selectRuntimeMode(mode);
+  });
   ipcMain.handle('ollama:selectModelTier', async (_, tierId) => {
     if (!ollamaManager) return { ok: false, error: 'not_ready' };
     return ollamaManager.selectModelTier(tierId);

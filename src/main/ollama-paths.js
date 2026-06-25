@@ -30,6 +30,33 @@ function windowsPublicModelsDir(env = process.env) {
   return path.win32.join(publicDir, 'BlueTalk', 'ollama', 'models');
 }
 
+function resolveSystemOllamaModelsDir({ env = process.env, platform = process.platform } = {}) {
+  const custom = cleanCustomModelsDir(env.OLLAMA_MODELS);
+  if (custom) {
+    return {
+      dir: path.resolve(custom),
+      source: 'OLLAMA_MODELS',
+    };
+  }
+
+  if (platform === 'win32') {
+    const home = cleanCustomModelsDir(env.USERPROFILE)
+      || (cleanCustomModelsDir(env.HOMEDRIVE) && cleanCustomModelsDir(env.HOMEPATH)
+        ? `${cleanCustomModelsDir(env.HOMEDRIVE)}${cleanCustomModelsDir(env.HOMEPATH)}`
+        : '');
+    return {
+      dir: path.win32.join(home || 'C:\\Users\\Public', '.ollama', 'models'),
+      source: 'system-default',
+    };
+  }
+
+  const home = cleanCustomModelsDir(env.HOME) || process.cwd();
+  return {
+    dir: path.join(home, '.ollama', 'models'),
+    source: 'system-default',
+  };
+}
+
 function resolveOllamaModelsDir({ appUserDataDir, env = process.env, platform = process.platform } = {}) {
   const custom = cleanCustomModelsDir(
     env[BLUETALK_OLLAMA_MODELS_ENV] || env[LEGACY_BLUETALK_OLLAMA_MODELS_ENV]
@@ -78,6 +105,7 @@ module.exports = {
   isBlueTalkManagedModelsDir,
   isSameOrInsidePath,
   resolveOllamaModelsDir,
+  resolveSystemOllamaModelsDir,
   windowsPublicModelsDir,
   windowsSafeModelsDir,
 };

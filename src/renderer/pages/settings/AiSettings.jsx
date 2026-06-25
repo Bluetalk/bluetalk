@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Cloud, Download, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, Cloud, Download, FolderOpen, RefreshCw, Server, Trash2 } from 'lucide-react';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
 import AiChatSetup from '../../components/AiChatSetup';
 import CreateAiAgentModal from '../../components/CreateAiAgentModal';
@@ -9,6 +9,9 @@ import {
   AI_CLOUD_MODELS,
   AI_MODEL_TIERS,
   AI_THINKING_DEFAULT_MODE_ID,
+  OLLAMA_DEFAULT_RUNTIME_MODE,
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
   isValidThinkingMode,
 } from '../../aiChatConstants';
 import { formatBytes, SETTINGS_ICON_STROKE } from './settingsUtils';
@@ -63,6 +66,21 @@ export default function AiSettingsPage() {
   };
 
   const setupComplete = Boolean(state?.setupComplete);
+  const runtimeMode = state?.runtimeMode || paths?.runtimeMode || OLLAMA_DEFAULT_RUNTIME_MODE;
+
+  const switchRuntimeMode = async (mode) => {
+    await run(`runtime-mode-${mode}`, async () => {
+      const result = await window.bluetalk.ollama.selectRuntimeMode(mode);
+      if (result?.ok !== false) {
+        toast({
+          variant: 'success',
+          title: mode === OLLAMA_RUNTIME_MODE_BLUETALK ? 'BlueTalk-Ollama aktiv' : 'Eigener Ollama aktiv',
+          message: 'Der KI-Chat nutzt jetzt diesen Ollama-Modus.',
+        });
+      }
+      return result;
+    });
+  };
 
   const createAiAgent = async ({ name, personality, personalityCustom, agentMode, agentWorkDir, thinkingMode }) => {
     if (!window.bluetalk?.store || creatingAgent) return;
@@ -211,6 +229,37 @@ export default function AiSettingsPage() {
                 <RefreshCw size={14} strokeWidth={SETTINGS_ICON_STROKE} />
                 Aktualisieren
               </button>
+            </div>
+
+            <div className="toggle-row">
+              <div className="toggle-row-info">
+                <span>Ollama-Modus</span>
+                <span>
+                  {runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM
+                    ? `Eigener Ollama auf Port ${paths?.serverPort || 11434}`
+                    : `BlueTalk-Ollama auf Port ${paths?.serverPort || 32114}`}
+                </span>
+              </div>
+              <div className="ai-settings-runtime-actions">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${runtimeMode === OLLAMA_RUNTIME_MODE_BLUETALK ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => void switchRuntimeMode(OLLAMA_RUNTIME_MODE_BLUETALK)}
+                  disabled={Boolean(busy) || runtimeMode === OLLAMA_RUNTIME_MODE_BLUETALK}
+                >
+                  <Bot size={14} strokeWidth={SETTINGS_ICON_STROKE} />
+                  BlueTalk
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => void switchRuntimeMode(OLLAMA_RUNTIME_MODE_SYSTEM)}
+                  disabled={Boolean(busy) || runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM}
+                >
+                  <Server size={14} strokeWidth={SETTINGS_ICON_STROKE} />
+                  Eigener
+                </button>
+              </div>
             </div>
 
             <div className="toggle-row">

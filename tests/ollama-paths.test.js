@@ -7,6 +7,7 @@ const {
   isBlueTalkManagedModelsDir,
   isSameOrInsidePath,
   resolveOllamaModelsDir,
+  resolveSystemOllamaModelsDir,
   windowsPublicModelsDir,
 } = require('../src/main/ollama-paths.js');
 
@@ -42,6 +43,27 @@ test('windowsPublicModelsDir provides an ASCII fallback location', () => {
     windowsPublicModelsDir({ PUBLIC: 'C:\\Users\\Public' }),
     path.win32.join('C:\\Users\\Public', 'BlueTalk', 'ollama', 'models')
   );
+});
+
+test('resolveSystemOllamaModelsDir uses the regular Ollama location', () => {
+  const result = resolveSystemOllamaModelsDir({
+    platform: 'win32',
+    env: { USERPROFILE: 'C:\\Users\\schüler.HFERBER23' },
+  });
+
+  assert.equal(result.dir, path.win32.join('C:\\Users\\schüler.HFERBER23', '.ollama', 'models'));
+  assert.equal(result.source, 'system-default');
+});
+
+test('resolveSystemOllamaModelsDir respects OLLAMA_MODELS', () => {
+  const customDir = path.join(process.cwd(), 'own-ollama-models');
+  const result = resolveSystemOllamaModelsDir({
+    platform: 'win32',
+    env: { OLLAMA_MODELS: customDir, USERPROFILE: 'C:\\Users\\schüler.HFERBER23' },
+  });
+
+  assert.equal(result.dir, path.resolve(customDir));
+  assert.equal(result.source, 'OLLAMA_MODELS');
 });
 
 test('isSameOrInsidePath distinguishes contained and sibling paths', () => {

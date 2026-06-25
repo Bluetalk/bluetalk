@@ -3948,6 +3948,43 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
   flex-wrap: wrap;
   margin-top: 4px;
 }
+.ai-runtime-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.ai-runtime-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ai-runtime-mode-option svg {
+  flex-shrink: 0;
+  color: var(--blue);
+  margin-top: 1px;
+}
+.ai-runtime-mode-option span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ai-runtime-mode-option strong {
+  font-size: 14px;
+}
+.ai-runtime-mode-option small {
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.ai-runtime-mode-option--active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
 .ai-model-tier-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -4455,6 +4492,13 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.ai-settings-runtime-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 @media (max-width: 720px) {
   .new-ai-agent-card,
   .ai-settings-model-row {
@@ -4465,6 +4509,7 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
     grid-template-columns: 1fr;
   }
   .new-ai-agent-controls,
+  .ai-settings-runtime-actions,
   .ai-settings-model-actions {
     width: 100%;
   }

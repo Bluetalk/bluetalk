@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
     getState: () => ipcRenderer.invoke('ollama:getState'),
     getModelCatalog: () => ipcRenderer.invoke('ollama:getModelCatalog'),
     downloadRuntime: () => ipcRenderer.invoke('ollama:downloadRuntime'),
+    selectRuntimeMode: (mode) => ipcRenderer.invoke('ollama:selectRuntimeMode', mode),
     selectModelTier: (tierId) => ipcRenderer.invoke('ollama:selectModelTier', tierId),
     selectCloudModel: (cloudModelId) => ipcRenderer.invoke('ollama:selectCloudModel', cloudModelId),
     downloadModel: (tierId) => ipcRenderer.invoke('ollama:downloadModel', tierId),

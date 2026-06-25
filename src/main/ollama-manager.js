@@ -10,7 +10,10 @@ const {
   AI_MODEL_TIERS,
   AI_MODEL_TIER_IDS,
   OLLAMA_DEFAULT_PORT,
+  OLLAMA_SYSTEM_PORT,
   OLLAMA_RUNTIME_DISCLAIMER_BYTES,
+  OLLAMA_DEFAULT_RUNTIME_MODE,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
   AI_AGENT_TOOLS,
   AI_AGENT_TOOL_NAMES,
   getToolsForTier,
@@ -28,6 +31,7 @@ const {
   isAiChatPeerId,
   resolveThinkOption,
   resolveAgentThinkingMode,
+  resolveOllamaRuntimeMode,
 } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
 const {
   defaultWorkDir,
@@ -43,6 +47,7 @@ const {
   isBlueTalkManagedModelsDir,
   isSameOrInsidePath,
   resolveOllamaModelsDir,
+  resolveSystemOllamaModelsDir,
   windowsPublicModelsDir,
 } = require(path.join(__dirname, 'ollama-paths.js'));
 
@@ -111,18 +116,38 @@ class OllamaManager {
     this.userDataDir = app.getPath('userData');
     this.baseDir = path.join(this.userDataDir, 'ollama');
     this.runtimeDir = path.join(this.baseDir, RUNTIME_DIR_NAME);
-    const modelsPath = resolveOllamaModelsDir({ appUserDataDir: this.userDataDir });
-    this.modelsDir = modelsPath.dir;
-    this.modelsDirSource = modelsPath.source;
+    this.runtimeMode = resolveOllamaRuntimeMode(this.store.get('aiChat.ollamaRuntimeMode', ''));
+    this.systemRuntimePath = '';
+    this._applyRuntimeMode();
     this.serverProcess = null;
+    this.serverProcessMode = '';
     this.downloadAbort = null;
     this.modelPullAbort = null;
     this.chatAborters = new Map();
     this.state = this._emptyState();
   }
 
+  _isSystemRuntime() {
+    return this.runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM;
+  }
+
+  _runtimePort() {
+    return this._isSystemRuntime() ? OLLAMA_SYSTEM_PORT : OLLAMA_DEFAULT_PORT;
+  }
+
+  _applyRuntimeMode() {
+    const storedMode = resolveOllamaRuntimeMode(this.store.get('aiChat.ollamaRuntimeMode', ''));
+    this.runtimeMode = storedMode;
+    const modelsPath = this._isSystemRuntime()
+      ? resolveSystemOllamaModelsDir()
+      : resolveOllamaModelsDir({ appUserDataDir: this.userDataDir });
+    this.modelsDir = modelsPath.dir;
+    this.modelsDirSource = modelsPath.source;
+  }
+
   _emptyState() {
     return {
+      runtimeMode: this.runtimeMode || OLLAMA_DEFAULT_RUNTIME_MODE,
       runtimeStatus: 'missing',
       runtimePath: '',
       runtimeError: '',
@@ -142,7 +167,10 @@ class OllamaManager {
   }
 
   async init() {
-    await this._prepareModelsDir();
+    this._applyRuntimeMode();
+    if (!this._isSystemRuntime()) {
+      await this._prepareModelsDir();
+    }
     await fsPromises.mkdir(this.runtimeDir, { recursive: true });
     await this.refreshState();
   }
@@ -167,13 +195,14 @@ class OllamaManager {
 
   getStoragePaths() {
     return {
+      runtimeMode: this.runtimeMode,
       baseDir: this.baseDir,
       runtimeDir: this.runtimeDir,
       modelsDir: this.modelsDir,
       modelsDirSource: this.modelsDirSource,
       modelsEnvVariable: BLUETALK_OLLAMA_MODELS_ENV,
-      serverPort: OLLAMA_DEFAULT_PORT,
-      runtimePath: this._ollamaBinaryPath(),
+      serverPort: this._runtimePort(),
+      runtimePath: this.state.runtimePath || (this._isSystemRuntime() ? this.systemRuntimePath : this._ollamaBinaryPath()),
     };
   }
 
@@ -190,13 +219,23 @@ class OllamaManager {
     return '';
   }
 
+  async _runtimeBinaryPath() {
+    if (!this._isSystemRuntime()) return this._ollamaBinaryPath();
+    const bin = await this._detectSystemOllama();
+    this.systemRuntimePath = bin;
+    return bin;
+  }
+
   _runtimeEnv() {
-    return {
+    const env = {
       ...process.env,
-      OLLAMA_MODELS: this.modelsDir,
-      OLLAMA_HOST: `127.0.0.1:${OLLAMA_DEFAULT_PORT}`,
+      OLLAMA_HOST: `127.0.0.1:${this._runtimePort()}`,
       OLLAMA_ORIGINS: '*',
     };
+    if (!this._isSystemRuntime()) {
+      env.OLLAMA_MODELS = this.modelsDir;
+    }
+    return env;
   }
 
   async _prepareModelsDir() {
@@ -234,8 +273,12 @@ class OllamaManager {
   }
 
   async _runtimeLooksReady() {
-    const bin = this._ollamaBinaryPath();
+    if (this._isSystemRuntime() && await this._pingServer()) {
+      return true;
+    }
+    const bin = await this._runtimeBinaryPath();
     if (!bin) return false;
+    if (this._isSystemRuntime()) return true;
     try {
       await fsPromises.access(bin, fs.constants.X_OK | fs.constants.R_OK);
     } catch {
@@ -301,17 +344,26 @@ class OllamaManager {
   }
 
   async refreshState() {
+    this._applyRuntimeMode();
     const storedTier = this.store.get('aiChat.selectedModelTier', '') || '';
     const runtimeReady = await this._runtimeLooksReady();
     let runtimeStatus = runtimeReady ? 'ready' : 'missing';
-    let runtimePath = runtimeReady ? this._ollamaBinaryPath() : '';
+    let runtimePath = runtimeReady ? await this._runtimeBinaryPath() : '';
+    let runtimeError = '';
+    let serverRunning = false;
 
     if (this.state.runtimeStatus === 'downloading') {
       runtimeStatus = 'downloading';
     }
 
-    if (runtimeReady) {
-      await this._ensureServerRunning();
+    if (runtimeReady && runtimeStatus !== 'downloading') {
+      serverRunning = await this._ensureServerRunning();
+      if (!serverRunning) {
+        runtimeStatus = 'error';
+        runtimeError = this._isSystemRuntime()
+          ? 'Eigener Ollama-Server ist nicht erreichbar. Starte Ollama oder wechsle zu BlueTalk-Ollama.'
+          : 'BlueTalk-Ollama konnte nicht gestartet werden.';
+      }
     }
 
     const cloudAuth = Boolean(this.store.get('aiChat.cloudAuth', false));
@@ -335,10 +387,11 @@ class OllamaManager {
     }
 
     this._broadcast({
+      runtimeMode: this.runtimeMode,
       runtimeStatus,
       runtimePath,
-      runtimeError: runtimeStatus === 'error' ? this.state.runtimeError : '',
-      serverRunning: Boolean(this.serverProcess && !this.serverProcess.killed),
+      runtimeError: runtimeStatus === 'error' ? (runtimeError || this.state.runtimeError) : '',
+      serverRunning,
       selectedModelTier,
       modelStatus,
       cloudAuth,
@@ -351,6 +404,14 @@ class OllamaManager {
   }
 
   async downloadRuntime() {
+    this._applyRuntimeMode();
+    if (this._isSystemRuntime()) {
+      this._broadcast({
+        runtimeStatus: 'error',
+        runtimeError: 'Im eigenen Ollama-Modus verwaltet BlueTalk die Runtime nicht.',
+      });
+      return this.refreshState();
+    }
     if (this.state.runtimeStatus === 'downloading') return this.getState();
     if (await this._runtimeLooksReady()) {
       await this.refreshState();
@@ -387,7 +448,10 @@ class OllamaManager {
         throw new Error('Ollama konnte nach dem Entpacken nicht gefunden werden.');
       }
 
-      await this._ensureServerRunning();
+      const serverStarted = await this._ensureServerRunning();
+      if (!serverStarted) {
+        throw new Error('Ollama konnte nicht gestartet werden.');
+      }
       this._broadcast({
         runtimeStatus: 'ready',
         runtimePath: this._ollamaBinaryPath(),
@@ -402,6 +466,30 @@ class OllamaManager {
     }
 
     return this.refreshState();
+  }
+
+  async selectRuntimeMode(mode) {
+    const nextMode = resolveOllamaRuntimeMode(mode);
+    if (nextMode === this.runtimeMode) {
+      return { ok: true, state: await this.refreshState() };
+    }
+
+    this._abortRuntimeDownload();
+    this._abortModelPull();
+    for (const abort of this.chatAborters.values()) {
+      try {
+        abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.chatAborters.clear();
+    await this._stopServer();
+
+    this.store.set('aiChat.ollamaRuntimeMode', nextMode);
+    this.runtimeMode = nextMode;
+    this._applyRuntimeMode();
+    return { ok: true, state: await this.refreshState() };
   }
 
   async selectModelTier(tierId) {
@@ -515,7 +603,9 @@ class OllamaManager {
   }
 
   async openModelsDir() {
-    await fsPromises.mkdir(this.modelsDir, { recursive: true });
+    if (!this._isSystemRuntime()) {
+      await fsPromises.mkdir(this.modelsDir, { recursive: true });
+    }
     const result = await shell.openPath(this.modelsDir);
     return { ok: !result, error: result || '', path: this.modelsDir };
   }
@@ -814,7 +904,7 @@ class OllamaManager {
   }
 
   async startCloudSignIn() {
-    const bin = this._ollamaBinaryPath();
+    const bin = await this._runtimeBinaryPath();
     if (!bin) {
       return { ok: false, error: 'runtime_not_ready', state: this.getState() };
     }
@@ -1042,7 +1132,7 @@ class OllamaManager {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: OLLAMA_DEFAULT_PORT,
+          port: this._runtimePort(),
           path: '/api/chat',
           method: 'POST',
           headers: {
@@ -1091,7 +1181,7 @@ class OllamaManager {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: OLLAMA_DEFAULT_PORT,
+          port: this._runtimePort(),
           path: '/api/chat',
           method: 'POST',
           headers: {
@@ -1244,7 +1334,7 @@ class OllamaManager {
   }
 
   async _ensureServerRunning() {
-    if (this.serverProcess && !this.serverProcess.killed) return true;
+    if (this.serverProcess && !this.serverProcess.killed && this.serverProcessMode === this.runtimeMode) return true;
 
     const alreadyUp = await this._pingServer();
     if (alreadyUp) {
@@ -1252,9 +1342,11 @@ class OllamaManager {
       return true;
     }
 
-    const bin = this._ollamaBinaryPath();
+    const bin = await this._runtimeBinaryPath();
     if (!bin) return false;
-    await this._prepareModelsDir();
+    if (!this._isSystemRuntime()) {
+      await this._prepareModelsDir();
+    }
 
     this.serverProcess = spawn(bin, ['serve'], {
       env: this._runtimeEnv(),
@@ -1262,9 +1354,11 @@ class OllamaManager {
       detached: false,
       windowsHide: true,
     });
+    this.serverProcessMode = this.runtimeMode;
 
     this.serverProcess.on('exit', () => {
       this.serverProcess = null;
+      this.serverProcessMode = '';
       this._broadcast({ serverRunning: false });
     });
 
@@ -1290,6 +1384,7 @@ class OllamaManager {
       /* ignore */
     }
     this.serverProcess = null;
+    this.serverProcessMode = '';
     this._broadcast({ serverRunning: false });
   }
 
@@ -1298,7 +1393,7 @@ class OllamaManager {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: OLLAMA_DEFAULT_PORT,
+          port: this._runtimePort(),
           path: '/api/tags',
           method: 'GET',
           timeout: 1500,
@@ -1439,7 +1534,7 @@ class OllamaManager {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: OLLAMA_DEFAULT_PORT,
+          port: this._runtimePort(),
           path: '/api/pull',
           method: 'POST',
           headers: {
@@ -1496,7 +1591,7 @@ class OllamaManager {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: OLLAMA_DEFAULT_PORT,
+          port: this._runtimePort(),
           path: apiPath,
           method,
           headers: payload
@@ -1593,7 +1688,9 @@ class OllamaManager {
         /* ignore */
       }
     }
-    await this._prepareModelsDir().catch(() => {});
+    if (!this._isSystemRuntime()) {
+      await this._prepareModelsDir().catch(() => {});
+    }
     await fsPromises.mkdir(this.runtimeDir, { recursive: true }).catch(() => {});
 
     this.state = this._emptyState();

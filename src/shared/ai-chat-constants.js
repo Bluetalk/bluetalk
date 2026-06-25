@@ -6,6 +6,14 @@ const AI_CHAT_PEER_PREFIX = '__ai_chat__:';
 const OLLAMA_RUNTIME_DISCLAIMER_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
 
 const OLLAMA_DEFAULT_PORT = 32114;
+const OLLAMA_SYSTEM_PORT = 11434;
+const OLLAMA_RUNTIME_MODE_BLUETALK = 'bluetalk';
+const OLLAMA_RUNTIME_MODE_SYSTEM = 'system';
+const OLLAMA_RUNTIME_MODE_IDS = [
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
+];
+const OLLAMA_DEFAULT_RUNTIME_MODE = OLLAMA_RUNTIME_MODE_BLUETALK;
 
 /** Modell-Stufen: lokale Pulls landen im BlueTalk-Modellordner via OLLAMA_MODELS. */
 const AI_MODEL_TIERS = {
@@ -875,11 +883,24 @@ function isAiChatPeerId(peerId) {
   return peerId === AI_CHAT_PEER_ID || String(peerId || '').startsWith(AI_CHAT_PEER_PREFIX);
 }
 
+function isValidOllamaRuntimeMode(mode) {
+  return OLLAMA_RUNTIME_MODE_IDS.includes(mode);
+}
+
+function resolveOllamaRuntimeMode(mode) {
+  return isValidOllamaRuntimeMode(mode) ? mode : OLLAMA_DEFAULT_RUNTIME_MODE;
+}
+
 module.exports = {
   AI_CHAT_PEER_ID,
   AI_CHAT_PEER_PREFIX,
   OLLAMA_RUNTIME_DISCLAIMER_BYTES,
   OLLAMA_DEFAULT_PORT,
+  OLLAMA_SYSTEM_PORT,
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
+  OLLAMA_RUNTIME_MODE_IDS,
+  OLLAMA_DEFAULT_RUNTIME_MODE,
   AI_MODEL_TIERS,
   AI_MODEL_TIER_IDS,
   AI_CLOUD_MODELS,
@@ -925,4 +946,6 @@ module.exports = {
   resolveCloudModelId,
   resolveActiveModelName,
   isAiChatPeerId,
+  isValidOllamaRuntimeMode,
+  resolveOllamaRuntimeMode,
 };

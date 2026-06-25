@@ -5,10 +5,19 @@ import {
   Download,
   Gauge,
   Loader2,
+  Server,
   Sparkles,
   Zap,
 } from 'lucide-react';
-import { AI_CLOUD_DEFAULT_MODEL_ID, AI_CLOUD_MODELS, AI_MODEL_TIERS, OLLAMA_RUNTIME_DISCLAIMER_BYTES } from '../aiChatConstants';
+import {
+  AI_CLOUD_DEFAULT_MODEL_ID,
+  AI_CLOUD_MODELS,
+  AI_MODEL_TIERS,
+  OLLAMA_DEFAULT_RUNTIME_MODE,
+  OLLAMA_RUNTIME_DISCLAIMER_BYTES,
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
+} from '../aiChatConstants';
 import { formatBytes } from '../pages/settings/settingsUtils';
 
 const TIER_ICONS = {
@@ -49,6 +58,8 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
   const runtimeReady = ollamaState?.runtimeStatus === 'ready';
   const runtimeBusy = ollamaState?.runtimeStatus === 'downloading';
   const setupComplete = Boolean(ollamaState?.setupComplete);
+  const runtimeMode = ollamaState?.runtimeMode || OLLAMA_DEFAULT_RUNTIME_MODE;
+  const usingSystemRuntime = runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM;
 
   useEffect(() => {
     if (!ollamaState) return;
@@ -79,6 +90,14 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
   const downloadRuntime = () => runAction('runtime', async () => {
     await window.bluetalk.ollama.downloadRuntime();
     setStep(2);
+  });
+
+  const selectRuntimeMode = (mode) => runAction(`runtime-mode-${mode}`, async () => {
+    const result = await window.bluetalk.ollama.selectRuntimeMode(mode);
+    await onRefresh?.();
+    if (result?.state?.runtimeStatus === 'ready') setStep(2);
+    else setStep(1);
+    return result;
   });
 
   const downloadModel = (tierId) => runAction(`model-${tierId}`, async () => {
@@ -147,21 +166,56 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
 
       {step === 1 && (
         <section className="ai-setup-panel animate-fade">
-          <h3>Ollama installieren</h3>
-          <p>
-            BlueTalk lädt die Ollama-Laufzeit in einen eigenen Ordner unter deinem Benutzerprofil.
-            Beim ersten Mal sind das etwa <strong>{formatBytes(OLLAMA_RUNTIME_DISCLAIMER_BYTES)}</strong> Download.
-          </p>
-          <div className="ai-setup-disclaimer card">
-            <Download size={18} strokeWidth={1.75} aria-hidden />
-            <div>
-              <strong>Download-Hinweis</strong>
-              <p className="text-sm text-muted" style={{ margin: 0 }}>
-                Es werden ca. {formatBytes(OLLAMA_RUNTIME_DISCLAIMER_BYTES)} heruntergeladen.
-                Stelle eine stabile Internetverbindung sicher. Der Vorgang kann einige Minuten dauern.
-              </p>
-            </div>
+          <h3>Ollama auswählen</h3>
+          <div className="ai-runtime-mode-grid">
+            <button
+              type="button"
+              className={`ai-runtime-mode-option card${runtimeMode === OLLAMA_RUNTIME_MODE_BLUETALK ? ' ai-runtime-mode-option--active' : ''}`}
+              onClick={() => selectRuntimeMode(OLLAMA_RUNTIME_MODE_BLUETALK)}
+              disabled={Boolean(action) || runtimeMode === OLLAMA_RUNTIME_MODE_BLUETALK}
+            >
+              <Bot size={20} strokeWidth={1.75} aria-hidden />
+              <span>
+                <strong>BlueTalk-Ollama</strong>
+                <small>Isoliert, eigener Port und sicherer Modellordner</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={`ai-runtime-mode-option card${runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM ? ' ai-runtime-mode-option--active' : ''}`}
+              onClick={() => selectRuntimeMode(OLLAMA_RUNTIME_MODE_SYSTEM)}
+              disabled={Boolean(action) || runtimeMode === OLLAMA_RUNTIME_MODE_SYSTEM}
+            >
+              <Server size={20} strokeWidth={1.75} aria-hidden />
+              <span>
+                <strong>Eigener Ollama</strong>
+                <small>Verwendet deinen lokalen Ollama auf Port 11434</small>
+              </span>
+            </button>
           </div>
+
+          {!usingSystemRuntime ? (
+            <>
+              <p>
+                BlueTalk lädt die Ollama-Laufzeit in einen eigenen Ordner unter deinem Benutzerprofil.
+                Beim ersten Mal sind das etwa <strong>{formatBytes(OLLAMA_RUNTIME_DISCLAIMER_BYTES)}</strong> Download.
+              </p>
+              <div className="ai-setup-disclaimer card">
+                <Download size={18} strokeWidth={1.75} aria-hidden />
+                <div>
+                  <strong>Download-Hinweis</strong>
+                  <p className="text-sm text-muted" style={{ margin: 0 }}>
+                    Es werden ca. {formatBytes(OLLAMA_RUNTIME_DISCLAIMER_BYTES)} heruntergeladen.
+                    Stelle eine stabile Internetverbindung sicher. Der Vorgang kann einige Minuten dauern.
+                  </p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted">
+              BlueTalk verbindet sich mit deinem eigenen Ollama-Server auf 127.0.0.1:11434.
+            </p>
+          )}
 
           {ollamaState?.runtimeStatus === 'error' && (
             <div className="ai-setup-error">{ollamaState.runtimeError}</div>
@@ -178,10 +232,16 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
           )}
 
           <div className="ai-setup-actions">
-            {!runtimeReady && !runtimeBusy && (
+            {!usingSystemRuntime && !runtimeReady && !runtimeBusy && (
               <button type="button" className="btn btn-primary" onClick={downloadRuntime} disabled={Boolean(action)}>
                 {action === 'runtime' ? <Loader2 className="spin" size={16} /> : <Download size={16} />}
                 Ollama herunterladen
+              </button>
+            )}
+            {usingSystemRuntime && !runtimeReady && (
+              <button type="button" className="btn btn-primary" onClick={() => onRefresh?.()} disabled={Boolean(action)}>
+                <Server size={16} strokeWidth={1.75} />
+                Eigenen Ollama prüfen
               </button>
             )}
             {runtimeReady && (
@@ -197,7 +257,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
         <section className="ai-setup-panel animate-fade">
           <h3>Modell wählen</h3>
           <p className="text-sm text-muted">
-            Jedes Modell wird separat in den BlueTalk-Modellordner geladen
+            Jedes Modell wird separat in den aktiven Ollama-Modellordner geladen
             (<code>OLLAMA_MODELS</code>).
           </p>
 
@@ -328,7 +388,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
           <h3>Modell herunterladen</h3>
           <p>
             <strong>{AI_MODEL_TIERS[selectedTier].label}</strong> ({AI_MODEL_TIERS[selectedTier].model})
-            wird in den BlueTalk-Modellordner geladen.
+            wird in den aktiven Ollama-Modellordner geladen.
           </p>
 
           {ollamaState?.modelStatus?.[selectedTier] === 'ready' ? (

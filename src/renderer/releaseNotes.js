@@ -3,6 +3,13 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.17': {
+    title: "What's new in BlueTalk 1.1.17",
+    items: [
+      'Ollama kann jetzt zwischen isoliertem BlueTalk-Ollama und eigenem lokalen Ollama umgeschaltet werden; BlueTalk bleibt die Voreinstellung.',
+      'Der eigene Ollama-Modus nutzt Port 11434 und den normalen Ollama-Modellordner, waehrend BlueTalk weiterhin den sicheren separaten Pfad nutzt.',
+    ],
+  },
   '1.1.16': {
     title: "What's new in BlueTalk 1.1.16",
     items: [

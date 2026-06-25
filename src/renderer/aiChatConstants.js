@@ -4,6 +4,15 @@ export const AI_CHAT_PEER_ID = '__ai_chat__';
 export const AI_CHAT_PEER_PREFIX = '__ai_chat__:';
 
 export const OLLAMA_RUNTIME_DISCLAIMER_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
+export const OLLAMA_DEFAULT_PORT = 32114;
+export const OLLAMA_SYSTEM_PORT = 11434;
+export const OLLAMA_RUNTIME_MODE_BLUETALK = 'bluetalk';
+export const OLLAMA_RUNTIME_MODE_SYSTEM = 'system';
+export const OLLAMA_RUNTIME_MODE_IDS = [
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
+];
+export const OLLAMA_DEFAULT_RUNTIME_MODE = OLLAMA_RUNTIME_MODE_BLUETALK;
 
 export const AI_MODEL_TIERS = {
   fast: {

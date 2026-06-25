@@ -3,7 +3,11 @@ const assert = require('node:assert/strict');
 const {
   AI_CHAT_PEER_ID,
   AI_CHAT_PEER_PREFIX,
+  OLLAMA_DEFAULT_RUNTIME_MODE,
   OLLAMA_DEFAULT_PORT,
+  OLLAMA_RUNTIME_MODE_BLUETALK,
+  OLLAMA_RUNTIME_MODE_SYSTEM,
+  OLLAMA_SYSTEM_PORT,
   AI_MODEL_TIERS,
   AI_CHAT_SYSTEM_PROMPT,
   AI_AGENT_TOOLS,
@@ -17,6 +21,7 @@ const {
   isValidModelTier,
   getModelTier,
   isAiChatPeerId,
+  resolveOllamaRuntimeMode,
 } = require('../src/shared/ai-chat-constants.js');
 
 test('AI_CHAT_PEER_ID is a reserved virtual id', () => {
@@ -50,6 +55,14 @@ test('local tiers reference ollama pull names', () => {
 test('BlueTalk uses a private Ollama port', () => {
   assert.equal(OLLAMA_DEFAULT_PORT, 32114);
   assert.notEqual(OLLAMA_DEFAULT_PORT, 11434);
+  assert.equal(OLLAMA_SYSTEM_PORT, 11434);
+});
+
+test('Ollama runtime mode defaults to BlueTalk but allows system Ollama', () => {
+  assert.equal(OLLAMA_DEFAULT_RUNTIME_MODE, OLLAMA_RUNTIME_MODE_BLUETALK);
+  assert.equal(resolveOllamaRuntimeMode(''), OLLAMA_RUNTIME_MODE_BLUETALK);
+  assert.equal(resolveOllamaRuntimeMode('bad'), OLLAMA_RUNTIME_MODE_BLUETALK);
+  assert.equal(resolveOllamaRuntimeMode(OLLAMA_RUNTIME_MODE_SYSTEM), OLLAMA_RUNTIME_MODE_SYSTEM);
 });
 
 test('AI_CHAT_SYSTEM_PROMPT encodes offline assistant rules', () => {
