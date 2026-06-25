@@ -27,6 +27,7 @@ const RESERVED_IDS = new Set(['__proto__', 'prototype', 'constructor']);
  *   ui            string (optional: renderer entry, default "ui.js")
  *   permissions   string[] (informational; all APIs are currently available)
  *   autoEnable    boolean (default true on first install)
+ *   debugOnly     boolean (only visible/active when settings.debugMode is true)
  *
  * Plugin main-process API (exposed via `host.api`):
  *   store.get(key, default) / set(key, value) / delete(key)   // namespaced per plugin
@@ -160,6 +161,30 @@ class PluginHost extends EventEmitter {
     return this.store.get('plugins.enabled', {}) || {};
   }
 
+  _isDebugMode() {
+    return Boolean(this.store?.get('settings.debugMode', false));
+  }
+
+  _isDebugOnly(manifest) {
+    return manifest?.debugOnly === true;
+  }
+
+  _isPluginVisible(record) {
+    if (!this._isDebugOnly(record.manifest)) return true;
+    return this._isDebugMode();
+  }
+
+  _effectiveEnabled(id, manifest, enabledMap) {
+    const userWantsEnabled =
+      Object.prototype.hasOwnProperty.call(enabledMap, id)
+        ? Boolean(enabledMap[id])
+        : manifest.autoEnable === true;
+    if (this._isDebugOnly(manifest) && !this._isDebugMode()) {
+      return false;
+    }
+    return userWantsEnabled;
+  }
+
   setEnabled(id, enabled) {
     const map = { ...this.getEnabledMap(), [id]: Boolean(enabled) };
     this.store.set('plugins.enabled', map);
@@ -199,10 +224,7 @@ class PluginHost extends EventEmitter {
 
     const existing = this.plugins.get(id);
     const enabledMap = this.getEnabledMap();
-    const shouldEnable =
-      Object.prototype.hasOwnProperty.call(enabledMap, id)
-        ? Boolean(enabledMap[id])
-        : manifest.autoEnable === true;
+    const shouldEnable = this._effectiveEnabled(id, manifest, enabledMap);
 
     const uiFile = resolvePluginEntry(dir, manifest.ui, 'ui.js');
     const mainFile = resolvePluginEntry(dir, manifest.main, 'main.js');
@@ -566,9 +588,24 @@ class PluginHost extends EventEmitter {
     }
   }
 
+  async syncDebugOnlyPlugins() {
+    const enabledMap = this.getEnabledMap();
+    for (const record of this.plugins.values()) {
+      if (!this._isDebugOnly(record.manifest)) continue;
+      const shouldEnable = this._effectiveEnabled(record.manifest.id, record.manifest, enabledMap);
+      if (shouldEnable && !record.enabled) {
+        await this._activate(record);
+      } else if (!shouldEnable && record.enabled) {
+        await this._deactivate(record);
+      }
+    }
+    this._emitChange();
+  }
+
   listPlugins() {
     const out = [];
     for (const [id, record] of this.plugins) {
+      if (!this._isPluginVisible(record)) continue;
       out.push({
         id,
         manifest: { ...record.manifest },
@@ -591,6 +628,9 @@ class PluginHost extends EventEmitter {
   async setPluginEnabled(id, enabled) {
     const record = this.plugins.get(id);
     if (!record) return false;
+    if (enabled && this._isDebugOnly(record.manifest) && !this._isDebugMode()) {
+      return false;
+    }
     if (Boolean(enabled) === record.enabled) {
       this.setEnabled(id, Boolean(enabled));
       return true;

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import {
   Cable,
   Check,
@@ -16,13 +15,11 @@ import {
 import { useApp } from '../../App';
 import { useToast } from '../../components/ToastProvider';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
-import { useRequireSettingsHub } from './useRequireSettingsHub';
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
 
 export default function ConnectionSettingsPage() {
   const { toast } = useToast();
   const { settings, updateSettings, peers } = useApp();
-  const settingsHub = useRequireSettingsHub();
 
   const [peerInfo, setPeerInfo] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -56,10 +53,6 @@ export default function ConnectionSettingsPage() {
     const interval = setInterval(fetchInfo, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  if (!settingsHub) {
-    return <Navigate to="/settings" replace />;
-  }
 
   const change = (key, value) => {
     setLocal((prev) => ({ ...prev, [key]: value }));

@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import { Plus, Smile, Star, Trash2 } from 'lucide-react';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
 import { useToast } from '../../components/ToastProvider';
-import { useRequireSettingsHub } from './useRequireSettingsHub';
 import {
   addSticker,
   computePacksSize,
@@ -22,7 +20,6 @@ import { SETTINGS_ICON_STROKE } from './settingsUtils';
 
 export default function StickersSettingsPage() {
   const toast = useToast();
-  const settingsHub = useRequireSettingsHub();
   const fileInputRef = useRef(null);
   const [packs, setPacks] = useState([]);
   const [favorites, setFavorites] = useState([]);
@@ -106,10 +103,6 @@ export default function StickersSettingsPage() {
     const next = await toggleFavorite(stickerId);
     setFavorites(next);
   };
-
-  if (!settingsHub) {
-    return <Navigate to="/settings" replace />;
-  }
 
   return (
     <div className="page">

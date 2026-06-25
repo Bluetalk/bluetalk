@@ -1,25 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import { Bell, Bug, Moon, Power, Server, Sun } from 'lucide-react';
 import { useApp } from '../../App';
-import FeatureFlagsModal from '../../components/FeatureFlagsModal';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
-import { useRequireSettingsHub } from './useRequireSettingsHub';
 
 export default function ApplicationSettingsPage() {
   const { settings, updateSettings, theme, toggleTheme } = useApp();
-  const settingsHub = useRequireSettingsHub();
   const [local, setLocal] = useState(settings);
-  const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
 
   useEffect(() => {
     setLocal(settings);
   }, [settings]);
-
-  if (!settingsHub) {
-    return <Navigate to="/settings" replace />;
-  }
 
   const change = (key, value) => {
     setLocal((prev) => ({ ...prev, [key]: value }));
@@ -148,30 +139,9 @@ export default function ApplicationSettingsPage() {
                 <span className="toggle-slider" />
               </label>
             </div>
-
-            <div className="toggle-row">
-              <div className="toggle-row-info">
-                <span>Feature flags</span>
-                <span>Experimental performance and behavior toggles (search, detail view, descriptions).</span>
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setFeatureFlagsOpen(true)}
-              >
-                Configure feature flags
-              </button>
-            </div>
           </div>
         </section>
       </div>
-
-      <FeatureFlagsModal
-        open={featureFlagsOpen}
-        onClose={() => setFeatureFlagsOpen(false)}
-        settings={local}
-        updateSettings={updateSettings}
-      />
     </div>
   );
 }

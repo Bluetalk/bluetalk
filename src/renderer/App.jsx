@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, startTransition, createContext, useContext, lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom';
 import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade } from 'lucide-react';
+import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 import ChatsPage from './pages/Chats';
 import RuntimeUnavailablePage from './pages/RuntimeUnavailable';
@@ -13,6 +13,7 @@ import { pluginRuntime } from './plugins/pluginRuntime';
 import ErrorBoundary from './components/ErrorBoundary';
 import VersionWelcomeModal from './components/VersionWelcomeModal';
 import UsernameOnboardingModal from './components/UsernameOnboardingModal';
+import AgentAskUserModal from './components/AgentAskUserModal';
 import { APP_VERSION } from './appVersion';
 import { getReleaseNotesForVersion } from './releaseNotes';
 import {
@@ -26,9 +27,9 @@ import {
   importAesKeyFromRawB64,
   computeE2eeKeyId,
 } from './chatCrypto';
-import { mergeFeatureFlagDefaults, getEffectiveFlag } from './featureFlags';
 import VerticalResizeHandle from './components/VerticalResizeHandle';
 import { base64ByteLength, validateStickerData } from './stickers/stickerStore';
+import { isAiChatPeerId } from './aiChatConstants';
 
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const AccountSettingsPage = lazy(() => import('./pages/settings/AccountSettings'));
@@ -36,6 +37,7 @@ const ConnectionSettingsPage = lazy(() => import('./pages/settings/ConnectionSet
 const UpdatesSettingsPage = lazy(() => import('./pages/settings/UpdatesSettings'));
 const ApplicationSettingsPage = lazy(() => import('./pages/settings/ApplicationSettings'));
 const StickersSettingsPage = lazy(() => import('./pages/settings/StickersSettings'));
+const AiSettingsPage = lazy(() => import('./pages/settings/AiSettings'));
 const NewConnectionsPage = lazy(() => import('./pages/NewConnections'));
 const CloudSyncPage = lazy(() => import('./pages/CloudSync'));
 const LibraryPage = lazy(() => import('./pages/Library'));
@@ -67,9 +69,13 @@ const DEFAULT_APP_SETTINGS = {
   debugMode: false,
   windowsNotifications: true,
   sendReadReceipts: true,
-  featureFlags: mergeFeatureFlagDefaults(),
-  /** Gespeicherte Panel-Breiten (Pixel), nur wirksam mit Feature-Flag `resizableUi`. */
+  /** Gespeicherte Panel-Breiten (Pixel). */
   uiResize: {},
+  /** Eingeklappte Panels (Standard: alles sichtbar). */
+  uiCollapse: {
+    sidebar: false,
+    chatList: false,
+  },
 };
 
 function newChatMessageId() {
@@ -166,8 +172,13 @@ function InboundToastBridge({ toastRef }) {
 }
 
 function TitleBar() {
-  const { peerCount } = useApp();
+  const { peerCount, settings, updateSettings } = useApp();
+  const sidebarCollapsed = settings.uiCollapse?.sidebar === true;
   const [isMaximized, setIsMaximized] = useState(false);
+
+  const toggleSidebarCollapse = useCallback(() => {
+    updateSettings({ uiCollapse: { sidebar: !sidebarCollapsed } });
+  }, [sidebarCollapsed, updateSettings]);
 
   useEffect(() => {
     const api = window.bluetalk?.window;
@@ -188,6 +199,20 @@ function TitleBar() {
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
+        <button
+          type="button"
+          className="tb-btn titlebar-sidebar-toggle"
+          onClick={toggleSidebarCollapse}
+          title={sidebarCollapsed ? 'Seitenleiste einblenden' : 'Seitenleiste einklappen'}
+          aria-label={sidebarCollapsed ? 'Seitenleiste einblenden' : 'Seitenleiste einklappen'}
+          aria-expanded={!sidebarCollapsed}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={15} strokeWidth={2} aria-hidden />
+          ) : (
+            <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
+          )}
+        </button>
         <div className="titlebar-brand">
           <span>BlueTalk</span>
         </div>
@@ -228,7 +253,7 @@ const SIDEBAR_WIDTH_MAX = 280;
 
 function Sidebar() {
   const { settings, updateSettings } = useApp();
-  const resizableUi = getEffectiveFlag(settings, 'resizableUi');
+  const sidebarCollapsed = settings.uiCollapse?.sidebar === true;
   const storedSidebar = settings.uiResize?.sidebar;
   const sidebarCommitted =
     typeof storedSidebar === 'number'
@@ -249,7 +274,7 @@ function Sidebar() {
     return off;
   }, []);
 
-  const sidebarDisplayWidth = resizableUi ? sidebarPreview ?? sidebarCommitted : undefined;
+  const sidebarDisplayWidth = sidebarPreview ?? sidebarCommitted;
 
   const onSidebarResizeBegin = useCallback(() => {
     sidebarDragRef.current = sidebarPreview ?? sidebarCommitted;
@@ -284,11 +309,15 @@ function Sidebar() {
     { to: '/settings', label: 'Settings', icon: SettingsIcon },
   ];
 
+  if (sidebarCollapsed) {
+    return null;
+  }
+
   return (
     <>
       <nav
-        className={`sidebar${resizableUi ? ' sidebar--resizable' : ''}`}
-        style={sidebarDisplayWidth != null ? { width: sidebarDisplayWidth } : undefined}
+        className="sidebar sidebar--resizable"
+        style={{ width: sidebarDisplayWidth }}
       >
         <div className="sidebar-nav">
           {links.map(({ to, label, icon: Icon }) => (
@@ -330,14 +359,12 @@ function Sidebar() {
           </div>
         </div>
       </nav>
-      {resizableUi ? (
-        <VerticalResizeHandle
-          onBegin={onSidebarResizeBegin}
-          onDelta={onSidebarResizeDelta}
-          onCommit={commitSidebarWidth}
-          onDoubleClick={resetSidebarWidth}
-        />
-      ) : null}
+      <VerticalResizeHandle
+        onBegin={onSidebarResizeBegin}
+        onDelta={onSidebarResizeDelta}
+        onCommit={commitSidebarWidth}
+        onDoubleClick={resetSidebarWidth}
+      />
     </>
   );
 }
@@ -348,10 +375,14 @@ export default function App() {
   const [chatMeta, setChatMeta] = useState({});
   const [loadedChats, setLoadedChats] = useState({});
   const [messages, setMessages] = useState({});
+  const [aiChatProgress, setAiChatProgress] = useState(null);
+  const [aiChatPendingPeerId, setAiChatPendingPeerId] = useState(null);
+  const [agentAskUser, setAgentAskUser] = useState(null);
   const [theme, setTheme] = useState('dark');
   const [settings, setSettings] = useState({ ...DEFAULT_APP_SETTINGS });
   const messageCacheRef = useRef({});
   const deliveryTimersRef = useRef(new Map());
+  const activeAiChatRequestRef = useRef(null);
   const settingsRef = useRef(settings);
   const contactsRef = useRef([]);
   const ownEcdhPrivateRef = useRef(null);
@@ -935,10 +966,13 @@ export default function App() {
 
         const stored = storedSettings && typeof storedSettings === 'object' ? storedSettings : {};
         let mergedSettings = { ...DEFAULT_APP_SETTINGS, ...stored };
-        mergedSettings.featureFlags = mergeFeatureFlagDefaults(stored.featureFlags);
         mergedSettings.uiResize = {
           ...(DEFAULT_APP_SETTINGS.uiResize || {}),
           ...(stored.uiResize && typeof stored.uiResize === 'object' ? stored.uiResize : {}),
+        };
+        mergedSettings.uiCollapse = {
+          ...(DEFAULT_APP_SETTINGS.uiCollapse || {}),
+          ...(stored.uiCollapse && typeof stored.uiCollapse === 'object' ? stored.uiCollapse : {}),
         };
         const displayNameTrim = (mergedSettings.displayName || '').trim();
         if (mergedSettings.onboardingUsernameDone !== true && displayNameTrim && displayNameTrim !== 'Anonymous') {
@@ -1007,7 +1041,35 @@ export default function App() {
         setChatLastViewedPeerTs({});
         if (window.bluetalk) window.bluetalk.store.set('chatLastViewedPeerTs', {});
         window.location.hash = '#/';
+        return;
       }
+      if (kind === 'ai-chat') {
+        void window.bluetalk.messages.getMeta().then((meta) => {
+          setChatMeta(meta || {});
+          setMessages((prev) => {
+            const next = { ...prev };
+            for (const peerId of Object.keys(next)) {
+              if (isAiChatPeerId(peerId)) delete next[peerId];
+            }
+            return next;
+          });
+          setLoadedChats((prev) => {
+            const next = { ...prev };
+            for (const peerId of Object.keys(next)) {
+              if (isAiChatPeerId(peerId)) delete next[peerId];
+            }
+            return next;
+          });
+        });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.bluetalk?.ollama?.onAskUser) return undefined;
+    return window.bluetalk.ollama.onAskUser((data) => {
+      if (!data || !data.requestId) return;
+      setAgentAskUser(data);
     });
   }, []);
 
@@ -1050,6 +1112,194 @@ export default function App() {
 
   const sendMessage = useCallback((peerId, payload) => {
     if (!window.bluetalk || !peerId) return Promise.resolve(false);
+
+    if (isAiChatPeerId(peerId)) {
+      const outgoing = typeof payload === 'string'
+        ? { kind: 'chat', content: payload }
+        : { kind: 'chat', ...payload };
+
+      if (outgoing.kind !== 'chat' || !String(outgoing.content || '').trim()) {
+        return Promise.resolve(false);
+      }
+
+      const messageId = newChatMessageId();
+      const createdAt = Date.now();
+      const selfMessage = {
+        ...outgoing,
+        sender: settings.displayName,
+        messageId,
+        timestamp: createdAt,
+        from: 'self',
+        deliveryStatus: 'pending',
+      };
+
+      startTransition(() => {
+        setMessages((prev) => ({
+          ...prev,
+          [peerId]: [...(prev[peerId] || []), selfMessage],
+        }));
+        setChatMeta((prev) => ({
+          ...prev,
+          [peerId]: {
+            count: (prev[peerId]?.count || 0) + 1,
+            lastMessage: selfMessage,
+          },
+        }));
+      });
+
+      return (async () => {
+        if (activeAiChatRequestRef.current) {
+          return { ok: false, error: 'chat_busy' };
+        }
+
+        try {
+          const meta = await window.bluetalk.messages.append(peerId, selfMessage);
+          if (meta?.count) {
+            setChatMeta((prev) => ({ ...prev, [peerId]: meta }));
+          }
+          await applyMessagePatch(peerId, messageId, { deliveryStatus: 'delivered' });
+          setMessages((prev) => {
+            const list = prev[peerId] || [];
+            return {
+              ...prev,
+              [peerId]: list.map((item) =>
+                item?.messageId === messageId ? { ...item, deliveryStatus: 'delivered' } : item
+              ),
+            };
+          });
+
+          const requestId =
+            typeof crypto?.randomUUID === 'function'
+              ? crypto.randomUUID()
+              : `ai-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          activeAiChatRequestRef.current = requestId;
+          setAiChatPendingPeerId(peerId);
+          setAiChatProgress({ peerId, requestId, thinking: '', content: '', toolEvents: [], tps: 0, genTimeMs: 0 });
+          let result;
+          let lastAiUpdate = { thinking: '', content: '', tps: 0, genTimeMs: 0, toolEvents: [], segments: [] };
+          let progressRafId = null;
+          const flushAiProgress = () => {
+            progressRafId = null;
+            setAiChatProgress({ peerId, requestId, ...lastAiUpdate });
+          };
+          const scheduleAiProgress = (update) => {
+            const toolEvents = Array.isArray(update.toolResults) && update.toolResults?.length
+              ? [...(lastAiUpdate.toolEvents || []), ...update.toolResults]
+              : (lastAiUpdate.toolEvents || []);
+            lastAiUpdate = {
+              thinking: update.thinking || '',
+              content: update.content || '',
+              tps: typeof update.tps === 'number' ? update.tps : 0,
+              genTimeMs: typeof update.genTimeMs === 'number' ? update.genTimeMs : 0,
+              toolEvents,
+              segments: Array.isArray(update.segments) ? update.segments : (lastAiUpdate.segments || []),
+            };
+            const immediate = Boolean(update.done)
+              || (Array.isArray(update.toolResults) && update.toolResults.length > 0);
+            if (immediate) {
+              if (progressRafId != null) {
+                cancelAnimationFrame(progressRafId);
+                progressRafId = null;
+              }
+              flushAiProgress();
+              return;
+            }
+            if (progressRafId == null) {
+              progressRafId = requestAnimationFrame(flushAiProgress);
+            }
+          };
+          try {
+            result = await window.bluetalk.ollama.chat(
+              { peerId, prompt: outgoing.content, requestId },
+              scheduleAiProgress
+            );
+          } finally {
+            if (progressRafId != null) {
+              cancelAnimationFrame(progressRafId);
+              progressRafId = null;
+            }
+            if (activeAiChatRequestRef.current === requestId) {
+              activeAiChatRequestRef.current = null;
+            }
+            setAiChatPendingPeerId((current) => (current === peerId ? null : current));
+            setAiChatProgress((current) => (current?.requestId === requestId ? null : current));
+          }
+          if (result?.error === 'chat_aborted') {
+            const thinking = String(lastAiUpdate.thinking || '').trim();
+            const content = String(lastAiUpdate.content || '').trim();
+            const assistantMessage = {
+              kind: 'chat',
+              content,
+              thinking: thinking || undefined,
+              toolEvents: lastAiUpdate.toolEvents?.length ? lastAiUpdate.toolEvents : undefined,
+              segments: lastAiUpdate.segments?.length ? lastAiUpdate.segments : undefined,
+              aiStats:
+                lastAiUpdate.tps > 0 || lastAiUpdate.genTimeMs > 0
+                  ? { tps: lastAiUpdate.tps, genTimeMs: lastAiUpdate.genTimeMs }
+                  : undefined,
+              aiStopped: true,
+              sender: 'KI-Assistent',
+              messageId: newChatMessageId(),
+              timestamp: Date.now(),
+              from: 'peer',
+            };
+            const replyMeta = await window.bluetalk.messages.append(peerId, assistantMessage);
+            setMessages((prev) => ({
+              ...prev,
+              [peerId]: [...(prev[peerId] || []), assistantMessage],
+            }));
+            if (replyMeta?.count) {
+              setChatMeta((prev) => ({ ...prev, [peerId]: replyMeta }));
+            }
+            return { ok: false, error: 'chat_aborted' };
+          }
+          // Akzeptiere Ergebnis, wenn entweder Text vorhanden ist ODER Segmente
+          // (Thinking/Tools) — kleine Modelle beenden oft ohne finale Textantwort.
+          const resultSegments = Array.isArray(result?.message?.segments) ? result.message.segments : null;
+          const hasResultContent = Boolean(result?.ok)
+            && (result?.message?.content?.trim() || (resultSegments && resultSegments.length));
+          if (!hasResultContent) {
+            await applyMessagePatch(peerId, messageId, { deliveryStatus: 'scheduled' });
+            return { ok: false, error: result?.error || 'chat_failed' };
+          }
+
+          const assistantMessage = {
+            kind: 'chat',
+            content: result.message.content || '',
+            thinking: result.message.thinking || undefined,
+            toolEvents: result.message.toolEvents || undefined,
+            segments: resultSegments || undefined,
+            aiStats: result.message.stats || undefined,
+            sender: result.message.sender || 'KI-Assistent',
+            model: result.message.model || '',
+            messageId: newChatMessageId(),
+            timestamp: Date.now(),
+            from: 'peer',
+          };
+          const replyMeta = await window.bluetalk.messages.append(peerId, assistantMessage);
+          setMessages((prev) => ({
+            ...prev,
+            [peerId]: [...(prev[peerId] || []), assistantMessage],
+          }));
+          if (replyMeta?.count) {
+            setChatMeta((prev) => ({ ...prev, [peerId]: replyMeta }));
+          }
+          return { ok: true };
+        } catch (error) {
+          console.error('AI chat failed:', error);
+          const message = error?.message || 'chat_failed';
+          if (message !== 'chat_aborted') {
+            await applyMessagePatch(peerId, messageId, { deliveryStatus: 'scheduled' });
+          }
+          return {
+            ok: false,
+            error: /No handler registered for 'ollama:chat'|ERR_HANDLER_NOT_REGISTERED/i.test(message)
+              ? 'ollama_handler_missing'
+              : message,
+          };
+        }
+      })();
+    }
 
     if (contactsRef.current.some((c) => {
       if (c?.id !== peerId) return false;
@@ -1327,7 +1577,6 @@ export default function App() {
    */
   const setContactNotificationMute = useCallback((contactId, opts = {}) => {
     if (!contactId) return;
-    if (!getEffectiveFlag(settingsRef.current, 'contactNotificationMute')) return;
     if (opts.clear) {
       upsertContact({ id: contactId, notifyMutedManual: false, notifyMutedUntil: undefined });
       return;
@@ -1405,13 +1654,15 @@ export default function App() {
   const deleteChat = useCallback(async (peerId) => {
     if (!window.bluetalk || !peerId) return false;
 
-    try {
-      await window.bluetalk.peer.send(peerId, {
-        kind: 'chat-deleted',
-        sender: settingsRef.current.displayName,
-      });
-    } catch {
-      /* Peer evtl. offline */
+    if (!isAiChatPeerId(peerId)) {
+      try {
+        await window.bluetalk.peer.send(peerId, {
+          kind: 'chat-deleted',
+          sender: settingsRef.current.displayName,
+        });
+      } catch {
+        /* Peer evtl. offline */
+      }
     }
 
     await window.bluetalk.messages.deleteChat(peerId);
@@ -1443,23 +1694,30 @@ export default function App() {
       delete updated[peerId];
       return updated;
     });
-    removeContact(peerId);
+    if (isAiChatPeerId(peerId)) {
+      const agents = await window.bluetalk.store.get('aiChat.agents', []);
+      if (Array.isArray(agents)) {
+        await window.bluetalk.store.set('aiChat.agents', agents.filter((agent) => agent?.id !== peerId));
+      }
+    } else {
+      removeContact(peerId);
+    }
     return true;
   }, [removeContact]);
 
   const updateSettings = useCallback((newSettings) => {
     setSettings((prev) => {
       const merged = { ...prev, ...newSettings };
-      if (newSettings.featureFlags && typeof newSettings.featureFlags === 'object') {
-        merged.featureFlags = mergeFeatureFlagDefaults({
-          ...(prev.featureFlags || {}),
-          ...newSettings.featureFlags,
-        });
-      }
       if (newSettings.uiResize && typeof newSettings.uiResize === 'object') {
         merged.uiResize = {
           ...(prev.uiResize || {}),
           ...newSettings.uiResize,
+        };
+      }
+      if (newSettings.uiCollapse && typeof newSettings.uiCollapse === 'object') {
+        merged.uiCollapse = {
+          ...(prev.uiCollapse || {}),
+          ...newSettings.uiCollapse,
         };
       }
       if (window.bluetalk) {
@@ -1484,6 +1742,51 @@ export default function App() {
     setShowUsernameOnboarding(false);
   }, [updateSettings]);
 
+  const cancelAiChat = useCallback(async () => {
+    const requestId = activeAiChatRequestRef.current || aiChatProgress?.requestId;
+    if (!requestId || !window.bluetalk?.ollama?.abortChat) return false;
+    try {
+      const result = await window.bluetalk.ollama.abortChat(requestId);
+      return result?.ok === true;
+    } catch {
+      return false;
+    }
+  }, [aiChatProgress?.requestId]);
+
+  const clearAiChatContext = useCallback(async (peerId) => {
+    if (!window.bluetalk || !peerId || !isAiChatPeerId(peerId)) return false;
+
+    if (aiChatPendingPeerId === peerId) {
+      await cancelAiChat();
+    }
+
+    await window.bluetalk.messages.deleteChat(peerId);
+    if (window.bluetalk.ollama?.clearAgentContext) {
+      await window.bluetalk.ollama.clearAgentContext(peerId);
+    }
+
+    setMessages((prev) => {
+      const updated = { ...prev };
+      delete updated[peerId];
+      messageCacheRef.current = updated;
+      return updated;
+    });
+    setChatMeta((prev) => {
+      const updated = { ...prev };
+      delete updated[peerId];
+      return updated;
+    });
+    setLoadedChats((prev) => {
+      const updated = { ...prev };
+      delete updated[peerId];
+      return updated;
+    });
+    setAiChatProgress((current) => (current?.peerId === peerId ? null : current));
+    setAiChatPendingPeerId((current) => (current === peerId ? null : current));
+
+    return true;
+  }, [aiChatPendingPeerId, cancelAiChat]);
+
   const versionWelcomeNotes = getReleaseNotesForVersion(APP_VERSION);
 
   const ctx = {
@@ -1492,6 +1795,9 @@ export default function App() {
     chatMeta,
     loadedChats,
     messages,
+    aiChatProgress,
+    aiChatPendingPeerId,
+    isAiChatPending: (peerId) => Boolean(peerId && aiChatPendingPeerId === peerId),
     settings,
     theme,
     peerCount: peers.length,
@@ -1499,6 +1805,8 @@ export default function App() {
     chatLastViewedPeerTs,
     markPeerChatViewed,
     sendMessage,
+    cancelAiChat,
+    clearAiChatContext,
     sendReadReceipt,
     loadChatMessages,
     connectToAddress,
@@ -1601,6 +1909,7 @@ export default function App() {
                     <Route path="/settings/updates" element={<UpdatesSettingsPage />} />
                     <Route path="/settings/application" element={<ApplicationSettingsPage />} />
                     <Route path="/settings/stickers" element={<StickersSettingsPage />} />
+                    <Route path="/settings/ai" element={<AiSettingsPage />} />
                     <Route path="/cloud-sync" element={<CloudSyncPage />} />
                     <Route path="/plugins" element={<PluginsPage />} />
                     <Route path="/plugin/:tabId" element={<PluginTabView />} />
@@ -1609,6 +1918,20 @@ export default function App() {
                 </main>
               </div>
               <PluginScreenHost />
+              <AgentAskUserModal
+                open={Boolean(agentAskUser)}
+                question={agentAskUser?.question}
+                onSubmit={(answer) => {
+                  const rid = agentAskUser?.requestId;
+                  if (rid) window.bluetalk?.ollama?.replyAskUser?.(rid, answer);
+                  setAgentAskUser(null);
+                }}
+                onCancel={() => {
+                  const rid = agentAskUser?.requestId;
+                  if (rid) window.bluetalk?.ollama?.replyAskUser?.(rid, '');
+                  setAgentAskUser(null);
+                }}
+              />
             </div>
                 )}
               />

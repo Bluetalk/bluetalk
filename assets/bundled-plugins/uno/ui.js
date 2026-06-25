@@ -296,18 +296,18 @@
     }
 
     function ensureDrawPile() {
-      if (drawPile.length > 0) return;
-      if (discardPile.length <= 1) return;
+      if (drawPile.length > 0) return true;
+      if (discardPile.length <= 1) return false;
       const top = discardPile.pop();
       drawPile = shuffle(discardPile);
       discardPile = top ? [top] : [];
+      return drawPile.length > 0;
     }
 
     function drawCardsFor(player, count) {
       const drawn = [];
       for (let i = 0; i < count; i++) {
-        ensureDrawPile();
-        if (!drawPile.length) break;
+        if (!ensureDrawPile()) break;
         const card = drawPile.pop();
         player.hand.push(card);
         drawn.push(card);
@@ -412,14 +412,17 @@
 
     function forceDrawStack(peerId) {
       const p = players.find((x) => x.peerId === peerId);
-      if (!p || pendingDrawStack <= 0) return;
+      if (!p) return;
+      if (pendingDrawStack <= 0) return;
       const count = pendingDrawStack;
-      drawCardsFor(p, count);
+      const drawn = drawCardsFor(p, count);
       pendingDrawStack = 0;
       pendingDrawType = null;
       drewCanPass = null;
       emitEvent('draw', peerId, null, null);
-      message = `${p.name} zieht ${count} Karten.`;
+      message = drawn.length === count
+        ? `${p.name} zieht ${count} Karten.`
+        : `${p.name} zieht ${drawn.length} Karten (Stapel erschöpft).`;
       toActIdx = nextIndex(playerIndex(peerId), 1);
       scheduleTurnTimer();
     }
@@ -524,6 +527,7 @@
       const idx = playerIndex(peerId);
       if (idx < 0) return;
       if (peerId === selfId) return;
+      if (idx < toActIdx) toActIdx -= 1;
       players.splice(idx, 1);
       if (toActIdx >= players.length) toActIdx = 0;
       if (dealerIdx >= players.length) dealerIdx = Math.max(0, players.length - 1);
@@ -535,16 +539,41 @@
       pushState();
     }
 
+    function kickPlayer(peerId) {
+      if (peerId === selfId) return false;
+      const idx = playerIndex(peerId);
+      if (idx < 0) return false;
+      const name = players[idx].name;
+      sendWire(peerId, { wire: 'kicked', gameId, reason: 'Du wurdest vom Host aus dem Spiel entfernt.' });
+      removePlayer(peerId);
+      message = `${name} wurde vom Host entfernt.`;
+      checkpoint('kick');
+      pushState();
+      return true;
+    }
+
     function pickStarterCard() {
+      const skipped = [];
       while (drawPile.length) {
         const card = drawPile.pop();
         if (!isSpecialStartCard(card)) {
           discardPile.push(card);
           activeColor = card.color;
+          if (skipped.length) drawPile = shuffle([...drawPile, ...skipped]);
           return card;
         }
-        drawPile.unshift(card);
-        drawPile = shuffle(drawPile);
+        skipped.push(card);
+      }
+      if (skipped.length) {
+        const card = skipped[0];
+        discardPile.push(card);
+        if (card.color === 'wild') {
+          activeColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+        } else {
+          activeColor = card.color;
+        }
+        drawPile = shuffle(skipped.slice(1));
+        return card;
       }
       return null;
     }
@@ -700,9 +729,12 @@
       const player = players[idx];
       const drawn = drawCardsFor(player, 1);
       if (!drawn.length) {
-        message = 'Keine Karten mehr im Stapel.';
+        message = 'Keine Karten mehr im Stapel — Zug wird übersprungen.';
+        drewCanPass = null;
+        toActIdx = nextIndex(toActIdx, 1);
+        scheduleTurnTimer();
         pushState();
-        return false;
+        return true;
       }
       emitEvent('draw', peerId, drawn[0], null);
       const top = topCard();
@@ -845,6 +877,7 @@
       startGame,
       onWire,
       removePlayer,
+      kickPlayer,
       publicState,
       pushState,
       applyAction: (pid, a) => applyAction(pid, a),
@@ -964,6 +997,14 @@
       myHand = [];
       tryPump();
       rootRender?.();
+    }
+    if (w.wire === 'kicked' && (!w.gameId || w.gameId === clientState?.gameId)) {
+      api.notify.toast?.({ title: 'UNO', message: w.reason || 'Du wurdest aus dem Spiel entfernt.' });
+      clientState = null;
+      myHand = [];
+      tryPump();
+      rootRender?.();
+      void window.bluetalk?.uno?.closeGameWindow?.();
     }
   }
 
@@ -1156,6 +1197,8 @@
         hostRef?.invitePeer(payload.peerId);
       } else if (payload.type === 'save_game') {
         hostRef?.saveNow();
+      } else if (payload.type === 'kick_player' && payload.peerId) {
+        hostRef?.kickPlayer(payload.peerId);
       }
     });
   }

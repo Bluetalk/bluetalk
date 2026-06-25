@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import { ArrowUpCircle, Download, RefreshCw, RotateCw } from 'lucide-react';
 import { useApp } from '../../App';
 import { APP_VERSION } from '../../appVersion';
@@ -11,11 +10,9 @@ import {
   getUpdateStatusLabel,
   SETTINGS_ICON_STROKE,
 } from './settingsUtils';
-import { useRequireSettingsHub } from './useRequireSettingsHub';
 
 export default function UpdatesSettingsPage() {
   const { settings, updateSettings } = useApp();
-  const settingsHub = useRequireSettingsHub();
   const [local, setLocal] = useState(settings);
   const [updaterState, setUpdaterState] = useState(null);
   const [updateAction, setUpdateAction] = useState('');
@@ -50,10 +47,6 @@ export default function UpdatesSettingsPage() {
       unsubscribe?.();
     };
   }, []);
-
-  if (!settingsHub) {
-    return <Navigate to="/settings" replace />;
-  }
 
   const change = (key, value) => {
     setLocal((prev) => ({ ...prev, [key]: value }));

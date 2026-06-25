@@ -13,6 +13,7 @@ import {
   SquareStack,
   UserPlus,
   Users,
+  UserX,
   Volume2,
   VolumeX,
   X,
@@ -96,11 +97,39 @@ function usePokerState() {
   };
 }
 
-function Card3D({ label, hidden = false, animate = false, compact = false }) {
+function Card3D({ label, hidden = false, animate = false, compact = false, peekOnHover = false }) {
   const normalized = String(label || '');
   const suit = hidden ? '' : normalized.slice(-1);
   const rank = hidden ? '' : normalized.slice(0, -1);
   const red = RED_SUITS.has(suit);
+  const faceContent = (
+    <>
+      <div className="poker-card-corner poker-card-tl"><strong>{rank}</strong><span>{suit}</span></div>
+      <div className="poker-card-center">{suit}</div>
+      <div className="poker-card-corner poker-card-br"><strong>{rank}</strong><span>{suit}</span></div>
+    </>
+  );
+
+  if (peekOnHover && !hidden && normalized) {
+    return (
+      <div
+        className={`poker-card-3d poker-card-peek${animate ? ' poker-card-deal' : ''}${red ? ' poker-card-red' : ''}`}
+        role="img"
+        tabIndex={0}
+        aria-label={`Verdeckte Karte – ${rank} ${suit} (Hover zum Ansehen)`}
+      >
+        <div className="poker-card-peek-inner">
+          <div className="poker-card-peek-face poker-card-peek-back poker-card-back">
+            <div className="poker-card-pattern"><span>BT</span></div>
+          </div>
+          <div className={`poker-card-peek-face poker-card-peek-front${red ? ' poker-card-red' : ''}`}>
+            {faceContent}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`poker-card-3d${animate ? ' poker-card-deal' : ''}${hidden ? ' poker-card-back' : ''}${compact ? ' poker-card-compact' : ''}${red ? ' poker-card-red' : ''}`}
@@ -110,11 +139,7 @@ function Card3D({ label, hidden = false, animate = false, compact = false }) {
       {hidden ? (
         <div className="poker-card-pattern"><span>BT</span></div>
       ) : (
-        <>
-          <div className="poker-card-corner poker-card-tl"><strong>{rank}</strong><span>{suit}</span></div>
-          <div className="poker-card-center">{suit}</div>
-          <div className="poker-card-corner poker-card-br"><strong>{rank}</strong><span>{suit}</span></div>
-        </>
+        faceContent
       )}
     </div>
   );
@@ -185,7 +210,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
   );
 }
 
-function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onRemoveChips, onAddBot, onRemoveBot }) {
+function PlayerManagement({ snapshot, isHost, selfId, onInvite, onGrantChips, onRemoveChips, onKickPlayer, onAddBot, onRemoveBot }) {
   const players = snapshot?.public?.players || [];
   const inviteCandidates = snapshot?.inviteCandidates || [];
   const [amounts, setAmounts] = useState({});
@@ -205,12 +230,12 @@ function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onRemoveCh
         </div>
       </section>
       <section>
-        <div className="poker-panel-heading"><div><h3>Chips & Spielstände</h3><p>Als Host kannst du Chips hinzufügen oder zwischen Händen entfernen. Der Stand wird automatisch gespeichert.</p></div></div>
+        <div className="poker-panel-heading"><div><h3>Am Tisch</h3><p>Spieler entfernen oder Chips verwalten.</p></div></div>
         <div className="poker-manage-list">
           {players.map((player) => (
             <div key={player.peerId} className="poker-manage-row poker-manage-player">
               <div><strong>{player.name}</strong><span>{formatChips(player.chips)} Chips{player.pendingChips > 0 ? ` · +${formatChips(player.pendingChips)} nächste Hand` : ''} · {player.stats?.handsWon || 0}/{player.stats?.handsPlayed || 0} Hände gewonnen</span></div>
-              {isHost ? (
+              {isHost && player.peerId !== selfId ? (
                 <div className="poker-chip-grant">
                   <input
                     type="number"
@@ -221,6 +246,7 @@ function PlayerManagement({ snapshot, isHost, onInvite, onGrantChips, onRemoveCh
                   />
                   <button type="button" className="poker-btn-ghost" onClick={() => onGrantChips(player.peerId, amounts[player.peerId] ?? 500)}><Coins size={14} /> Geben</button>
                   <button type="button" className="poker-btn-ghost" onClick={() => onRemoveChips(player.peerId, amounts[player.peerId] ?? 500)}><Coins size={14} /> Nehmen</button>
+                  <button type="button" className="poker-btn-ghost poker-btn-kick" onClick={() => onKickPlayer(player.peerId)} title={`${player.name} entfernen`}><UserX size={14} /> Entfernen</button>
                 </div>
               ) : null}
             </div>
@@ -316,7 +342,7 @@ function GameTable({ snapshot, selfId, onAction }) {
       </div>
       <div className="poker-player-self">
         <PlayerAvatar player={selfPlayer || { name: 'Du', chips: 0 }} isDealer={pub?.dealerSeat === selfPlayer?.seat} isActive={canAct} isHost={selfId === pub?.hostPeerId} self />
-        <div className="poker-hole-cards">{snapshot?.myHole?.length ? snapshot.myHole.map((card) => <Card3D key={card} label={cardLabelFromRaw(card)} animate />) : <><Card3D hidden /><Card3D hidden /></>}</div>
+        <div className="poker-hole-cards">{snapshot?.myHole?.length ? snapshot.myHole.map((card) => <Card3D key={card} label={cardLabelFromRaw(card)} animate peekOnHover />) : <><Card3D hidden /><Card3D hidden /></>}</div>
         {canAct ? <div className="poker-action-bar">
           <div className="poker-action-info"><strong>Du bist am Zug</strong>{toCall > 0 ? <span className="poker-tocall">Zu zahlen: {formatChips(toCall)}</span> : <span>Du kannst checken.</span>}</div>
           {bounds.canRaise ? <div className="poker-raise-picker"><label htmlFor="poker-raise-value">Erhöhen auf</label><input id="poker-raise-value" type="number" min={minRaiseTo} max={maxRaiseTo} value={raiseTo} onChange={(event) => setRaiseTo(Math.max(minRaiseTo, Math.min(maxRaiseTo, Number(event.target.value) || minRaiseTo)))} /><input type="range" aria-label="Raise-Betrag" min={minRaiseTo} max={maxRaiseTo} step={Math.max(1, pub?.settings?.smallBlind || 1)} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /></div> : null}
@@ -429,7 +455,7 @@ export default function PokerGamePage() {
       </main>
       {panel === 'help' ? <OverlayPanel title="Poker kurz erklärt" onClose={() => setPanel('')}><PokerGuide /></OverlayPanel> : null}
       {panel === 'settings' ? <OverlayPanel title="Tischeinstellungen" onClose={() => setPanel('')}><SettingsPanel settings={pub.settings} isHost={isHost} onUpdate={(settings) => send({ type: 'update_settings', settings })} /></OverlayPanel> : null}
-      {panel === 'players' ? <OverlayPanel title="Spieler verwalten" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} isHost={isHost} onInvite={(peerId) => send({ type: 'invite', peerId })} onGrantChips={(peerId, amount) => send({ type: 'admin_add_chips', peerId, amount })} onRemoveChips={(peerId, amount) => send({ type: 'admin_remove_chips', peerId, amount })} onAddBot={() => send({ type: 'add_bot' })} onRemoveBot={() => send({ type: 'remove_bot' })} /></OverlayPanel> : null}
+      {panel === 'players' ? <OverlayPanel title="Spieler verwalten" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} isHost={isHost} selfId={selfId} onInvite={(peerId) => send({ type: 'invite', peerId })} onGrantChips={(peerId, amount) => send({ type: 'admin_add_chips', peerId, amount })} onRemoveChips={(peerId, amount) => send({ type: 'admin_remove_chips', peerId, amount })} onKickPlayer={(peerId) => send({ type: 'kick_player', peerId })} onAddBot={() => send({ type: 'add_bot' })} onRemoveBot={() => send({ type: 'remove_bot' })} /></OverlayPanel> : null}
     </div>
   );
 }
