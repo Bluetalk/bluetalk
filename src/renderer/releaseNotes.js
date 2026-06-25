@@ -3,6 +3,22 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.15': {
+    title: "What's new in BlueTalk 1.1.15",
+    items: [
+      'Neuer lokaler KI-Chat mit Ollama-Setup, Modellverwaltung, Cloud-Auswahl und optionalem Agent-Modus mit Werkzeugen.',
+      'Agenten behalten Modus, Arbeitsverzeichnis und Thinking-Einstellungen beim Bearbeiten zuverlaessig bei.',
+      'Agent-Dateiwerkzeuge, Web-Fetch und Tool-Schleifen wurden gegen Ausbrueche, lokale/private URLs und Endloslaeufe gehaertet.',
+      'UNO, Poker und Theme Studio erhalten weitere Bedien- und Stabilitaetsverbesserungen.',
+    ],
+  },
+  '1.1.14': {
+    title: "What's new in BlueTalk 1.1.14",
+    items: [
+      'Alle verbleibenden Feature-Flags sind fest eingebaut: Ungelesen-Badges in der Chat-Liste, größenverstellbare Seitenleiste und Chat-Liste, Kontakt-Stummschaltung für Mitteilungen und der Settings-Hub.',
+      'Das Feature-Flags-Panel in den Einstellungen entfällt; die Legacy-Einstellungsseite wurde entfernt.',
+    ],
+  },
   '1.1.13': {
     title: "What's new in BlueTalk 1.1.13",
     items: [

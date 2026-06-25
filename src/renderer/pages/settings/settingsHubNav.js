@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Blocks, Plug, Server, Smile, User } from 'lucide-react';
+import { ArrowUpCircle, Blocks, Bot, Plug, Server, Smile, User } from 'lucide-react';
 
 export const SETTINGS_HUB_NAV = [
   {
@@ -18,6 +18,12 @@ export const SETTINGS_HUB_NAV = [
     icon: Smile,
     title: 'Sticker',
     subtitle: 'Erstellen, Favoriten und Packs verwalten',
+  },
+  {
+    to: '/settings/ai',
+    icon: Bot,
+    title: 'AI Chat',
+    subtitle: 'Ollama, Modelle und lokale Dateien',
   },
   {
     to: '/plugins',

@@ -649,6 +649,10 @@ body:has(.uno-game-root) {
 
 .uno-invite-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .uno-invite-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; }
+.uno-player-management { display: flex; flex-direction: column; gap: 20px; }
+.uno-panel-subheading { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+.uno-btn-kick { color: #fca5a5; border-color: rgba(248,113,113,.35); }
+.uno-btn-kick:hover { background: rgba(248,113,113,.12); color: #fecaca; }
 .uno-panel-note { font-size: 13px; color: rgba(200, 210, 225, 0.6); }
 .uno-guide { font-size: 13px; line-height: 1.5; color: rgba(200, 210, 225, 0.85); }
 .uno-guide ul { padding-left: 18px; }

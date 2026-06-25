@@ -10,6 +10,7 @@ import {
   Settings,
   SquareStack,
   Users,
+  UserX,
   Volume2,
   VolumeX,
   X,
@@ -372,6 +373,16 @@ function GameTable({ snapshot, selfId, onAction }) {
           onPlay={handlePlay}
           animatingId={animatingId}
         />
+        {hand.length === 1 && !selfPlayer?.saidUno ? (
+          <div className="uno-action-bar uno-uno-call-bar">
+            <div className="uno-action-info">
+              <strong>Nur noch eine Karte — ruf UNO, bevor der nächste Spieler zieht!</strong>
+            </div>
+            <div className="uno-actions">
+              <button type="button" className="uno-act-uno" onClick={() => onAction({ type: 'callUno' })}>UNO! rufen</button>
+            </div>
+          </div>
+        ) : null}
         {canAct && !needsColor ? (
           <div className="uno-action-bar">
             <div className="uno-action-info">
@@ -379,9 +390,6 @@ function GameTable({ snapshot, selfId, onAction }) {
               {pub?.drewCanPass === selfId ? <span>Gespielte Karte legen oder passen.</span> : null}
             </div>
             <div className="uno-actions">
-              {hand.length === 1 ? (
-                <button type="button" className="uno-act-uno" onClick={() => onAction({ type: 'callUno' })}>UNO!</button>
-              ) : null}
               {pub?.drewCanPass === selfId ? (
                 <button type="button" className="uno-act-pass" onClick={() => onAction({ type: 'pass' })}>Passen</button>
               ) : (
@@ -438,18 +446,44 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
   );
 }
 
-function PlayerManagement({ snapshot, onInvite }) {
+function PlayerManagement({ snapshot, isHost, selfId, onInvite, onKickPlayer }) {
+  const players = snapshot?.public?.players || [];
   const candidates = snapshot?.inviteCandidates || [];
-  if (!candidates.length) return <p className="uno-panel-note">Keine verbundenen Kontakte zum Einladen.</p>;
+  const kickable = isHost ? players.filter((p) => p.peerId !== selfId) : [];
+
   return (
-    <ul className="uno-invite-list">
-      {candidates.map((c) => (
-        <li key={c.peerId}>
-          <span>{c.name}</span>
-          <button type="button" className="uno-btn-ghost" onClick={() => onInvite(c.peerId)}>Einladen</button>
-        </li>
-      ))}
-    </ul>
+    <div className="uno-player-management">
+      {kickable.length ? (
+        <section>
+          <h3 className="uno-panel-subheading">Am Tisch</h3>
+          <ul className="uno-invite-list">
+            {kickable.map((player) => (
+              <li key={player.peerId}>
+                <span>{player.name}</span>
+                <button type="button" className="uno-btn-ghost uno-btn-kick" onClick={() => onKickPlayer(player.peerId)} title={`${player.name} entfernen`}>
+                  <UserX size={14} /> Entfernen
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section>
+        <h3 className="uno-panel-subheading">Einladen</h3>
+        {candidates.length ? (
+          <ul className="uno-invite-list">
+            {candidates.map((c) => (
+              <li key={c.peerId}>
+                <span>{c.name}</span>
+                <button type="button" className="uno-btn-ghost" onClick={() => onInvite(c.peerId)}>Einladen</button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="uno-panel-note">Keine verbundenen Kontakte zum Einladen.</p>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -560,7 +594,7 @@ export default function UnoGamePage() {
       </main>
       {panel === 'help' ? <OverlayPanel title="UNO — Kurz erklärt" onClose={() => setPanel('')}><UnoGuide /></OverlayPanel> : null}
       {panel === 'settings' ? <OverlayPanel title="Einstellungen" onClose={() => setPanel('')}><SettingsPanel settings={pub.settings} isHost={isHost} onUpdate={(s) => send({ type: 'update_settings', settings: s })} /></OverlayPanel> : null}
-      {panel === 'players' ? <OverlayPanel title="Spieler einladen" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} onInvite={(peerId) => send({ type: 'invite', peerId })} /></OverlayPanel> : null}
+      {panel === 'players' ? <OverlayPanel title="Spieler verwalten" onClose={() => setPanel('')}><PlayerManagement snapshot={snapshot} isHost={isHost} selfId={selfId} onInvite={(peerId) => send({ type: 'invite', peerId })} onKickPlayer={(peerId) => send({ type: 'kick_player', peerId })} /></OverlayPanel> : null}
     </div>
   );
 }

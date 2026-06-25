@@ -455,6 +455,64 @@
       pushState();
     }
 
+    function kickPlayer(peerId) {
+      if (peerId === selfId) return false;
+      const i = players.findIndex((p) => p.peerId === peerId);
+      if (i < 0) return false;
+      const player = players[i];
+      const name = player.name;
+      sendWire(peerId, { wire: 'kicked', tableId, reason: 'Du wurdest vom Host vom Tisch entfernt.' });
+
+      const activeHand = player.inHand && phase !== 'lobby' && phase !== 'between';
+      if (activeHand && !player.folded) {
+        const wasToAct = peerId === players[toActIdx]?.peerId;
+        player.folded = true;
+        acted.add(peerId);
+        if (awardUncontested()) {
+          const idxAfter = players.findIndex((p) => p.peerId === peerId);
+          if (idxAfter >= 0) {
+            players.splice(idxAfter, 1);
+            if (idxAfter < dealerIdx) dealerIdx -= 1;
+            if (dealerIdx >= players.length) dealerIdx = Math.max(0, players.length - 1);
+          }
+          if (players.length === 0) {
+            phase = 'lobby';
+            street = 'idle';
+          }
+          message = `${name} wurde vom Host entfernt.`;
+          checkpoint('kick');
+          pushState();
+          return true;
+        }
+        if (wasToAct) {
+          toActIdx = nextLiveSeat(toActIdx);
+          let guard = 0;
+          while (guard++ < players.length + 2) {
+            const nx = players[toActIdx];
+            if (nx && nx.inHand && !nx.folded && !nx.allIn) break;
+            toActIdx = nextLiveSeat(toActIdx);
+          }
+          scheduleTurnTimer();
+        }
+      }
+
+      const idx = players.findIndex((p) => p.peerId === peerId);
+      if (idx < 0) return true;
+      if (idx < dealerIdx) dealerIdx -= 1;
+      if (idx < toActIdx) toActIdx -= 1;
+      players.splice(idx, 1);
+      if (dealerIdx >= players.length) dealerIdx = Math.max(0, players.length - 1);
+      if (toActIdx >= players.length) toActIdx = Math.max(0, players.length - 1);
+      if (players.length === 0) {
+        phase = 'lobby';
+        street = 'idle';
+      }
+      message = `${name} wurde vom Host entfernt.`;
+      checkpoint('kick');
+      pushState();
+      return true;
+    }
+
     function activeInHand() {
       return players.filter((p) => p.inHand && !p.folded);
     }
@@ -1021,6 +1079,7 @@
       startHand,
       onWire,
       removePlayer,
+      kickPlayer,
       publicState,
       pushState,
       applyAction: (pid, a) => applyAction(pid, a),
@@ -1143,6 +1202,14 @@
       myHole = [];
       tryPump();
       rootRender?.();
+    }
+    if (w.wire === 'kicked' && (!w.tableId || w.tableId === clientState?.tableId)) {
+      api.notify.toast?.({ title: 'Poker', message: w.reason || 'Du wurdest vom Tisch entfernt.' });
+      clientState = null;
+      myHole = [];
+      tryPump();
+      rootRender?.();
+      void window.bluetalk?.poker?.closeGameWindow?.();
     }
   }
 
@@ -1622,6 +1689,8 @@
         hostRef?.addChips(payload.peerId, payload.amount);
       } else if (payload.type === 'admin_remove_chips' && payload.peerId) {
         hostRef?.removeChips(payload.peerId, payload.amount);
+      } else if (payload.type === 'kick_player' && payload.peerId) {
+        hostRef?.kickPlayer(payload.peerId);
       } else if (payload.type === 'save_game') {
         hostRef?.saveNow();
       }

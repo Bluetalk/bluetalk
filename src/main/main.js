@@ -8,8 +8,9 @@ const { PeerServer, normalizeConnectAddress } = require(path.join(__dirname, '..
 const { APIServer } = require(path.join(__dirname, '..', 'shared', 'api-server.js'));
 const Store = require(path.join(__dirname, '..', 'shared', 'store.js'));
 const { isPeerNotificationMuted } = require(path.join(__dirname, '..', 'shared', 'contactNotificationMute.js'));
-const { getEffectiveFlag } = require(path.join(__dirname, '..', 'shared', 'featureFlags.js'));
 const { PluginHost } = require(path.join(__dirname, 'plugin-host.js'));
+const { OllamaManager } = require(path.join(__dirname, 'ollama-manager.js'));
+const { AI_MODEL_TIERS } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
 
 let mainWindow = null;
 /** Separates Fenster für das Poker-Plugin (Spieltisch). */
@@ -20,6 +21,7 @@ let tray = null;
 let peerServer = null;
 let apiServer = null;
 let pluginHost = null;
+let ollamaManager = null;
 let store = null;
 /** Last port the REST API successfully bound to; used to avoid unnecessary restarts. */
 let lastApiServerPort = null;
@@ -655,6 +657,7 @@ function handleSettingsMutation() {
   scheduleAutoUpdateChecks();
   applyLaunchAtLoginSetting();
   restartApiServerIfPortChanged();
+  void pluginHost?.syncDebugOnlyPlugins?.();
   // Only reconnect if peer server is fully started
   if (peerServer?.port > 0) {
     peerServer.reconnectContactsFromStore();
@@ -856,8 +859,6 @@ function isContactBlockedInStore(peerId) {
 
 function isContactNotificationMutedInStore(peerId) {
   if (!store || !peerId) return false;
-  const settings = store.get('settings', {});
-  if (!getEffectiveFlag(settings, 'contactNotificationMute')) return false;
   return isPeerNotificationMuted(store.get('contacts', []), peerId);
 }
 
@@ -1240,6 +1241,11 @@ async function clearStoredChatMessagesOnly() {
   }
 }
 
+function broadcastOllamaState(state) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('ollama:state', state);
+}
+
 function setupIPC() {
   ipcMain.handle('window:minimize', (event) => windowFromIpcEvent(event)?.minimize());
   ipcMain.handle('window:maximize', (event) => {
@@ -1427,9 +1433,16 @@ function setupIPC() {
   ipcMain.handle('library:getMediaData', (_, peerId, messageId) => getLibraryMediaData(peerId, messageId));
 
   ipcMain.handle('peer:getInfo', () => peerServer?.getInfo() ?? { id: '', name: '', port: 0, ports: [], addresses: [], endpoints: [], peers: [], hostedFiles: [] });
-  ipcMain.handle('peer:connect', (_, address) => {
-    if (!peerServer) throw new Error('Peer server not ready');
-    return peerServer.connectTo(address);
+  ipcMain.handle('peer:connect', async (_, address) => {
+    if (!peerServer) {
+      return { ok: false, error: 'Peer server not ready' };
+    }
+    try {
+      const peer = await peerServer.connectTo(address);
+      return { ok: true, peer };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Connection failed' };
+    }
   });
   ipcMain.handle('peer:disconnect', (_, peerId) => {
     if (!peerServer) throw new Error('Peer server not ready');
@@ -1537,6 +1550,125 @@ function setupIPC() {
   ipcMain.handle('updater:check', async () => checkForAppUpdates('manual'));
   ipcMain.handle('updater:download', async () => downloadAppUpdate());
   ipcMain.handle('updater:install', () => installDownloadedUpdate());
+
+  ipcMain.handle('ollama:getState', async () => {
+    if (!ollamaManager) return null;
+    return ollamaManager.refreshState();
+  });
+  ipcMain.handle('ollama:getModelCatalog', () => AI_MODEL_TIERS);
+  ipcMain.handle('ollama:downloadRuntime', async () => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    const state = await ollamaManager.downloadRuntime();
+    return { ok: state.runtimeStatus === 'ready', state };
+  });
+  ipcMain.handle('ollama:selectModelTier', async (_, tierId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.selectModelTier(tierId);
+  });
+  ipcMain.handle('ollama:selectCloudModel', async (_, cloudModelId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.selectCloudModel(cloudModelId);
+  });
+  ipcMain.handle('ollama:downloadModel', async (_, tierId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.downloadModel(tierId);
+  });
+  ipcMain.handle('ollama:deleteModel', async (_, tierId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.deleteModel(tierId);
+  });
+  ipcMain.handle('ollama:openModelsDir', async () => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.openModelsDir();
+  });
+  ipcMain.handle('ollama:getStoragePaths', () => {
+    if (!ollamaManager) return null;
+    return ollamaManager.getStoragePaths();
+  });
+  ipcMain.handle('ollama:chat', async (event, payload) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    const { requestId, ...rest } = payload || {};
+    return ollamaManager.chat({
+      ...rest,
+      requestId,
+      onProgress: (update) => {
+        if (event.sender.isDestroyed()) return;
+        event.sender.send('ollama:chat-progress', update);
+      },
+      askUser: ({ peerId, requestId: rid, question }) => {
+        return new Promise((resolve) => {
+          if (!event.sender || event.sender.isDestroyed()) {
+            resolve('');
+            return;
+          }
+          const replyChannel = `ollama:ask-user-reply:${rid}`;
+          let settled = false;
+          const done = (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+              ipcMain.removeListener(replyChannel, onReply);
+            } catch {
+              /* ignore */
+            }
+            resolve(String(value || ''));
+          };
+          const timer = setTimeout(() => done(''), 3 * 60 * 1000);
+          const onReply = (_e, data) => {
+            if (!data || data.requestId !== rid) return;
+            done(data.answer);
+          };
+          ipcMain.on(replyChannel, onReply);
+          // Wenn der renderer den Kanal nicht kennt (alter Build), löst
+          // der Timeout nach 3 Min. auf — der Agent fährt dann ohne
+          // Antwort fort statt endlos zu hängen.
+          try {
+            event.sender.send('ollama:ask-user', { peerId, requestId: rid, question });
+          } catch (e) {
+            done('');
+          }
+        });
+      },
+    });
+  });
+  ipcMain.handle('ollama:abortChat', async (_, requestId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.abortChat(requestId);
+  });
+  ipcMain.handle('ollama:clearAgentContext', async (_, peerId) => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.clearAgentContext(peerId);
+  });
+  ipcMain.handle('ollama:startCloudSignIn', async () => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.startCloudSignIn();
+  });
+  ipcMain.handle('ollama:confirmCloudAuth', async () => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    return ollamaManager.confirmCloudAuth();
+  });
+  ipcMain.handle('ollama:resetAndDelete', async () => {
+    if (!ollamaManager) return { ok: false, error: 'not_ready' };
+    try {
+      const result = await ollamaManager.resetAndDelete();
+      mainWindow?.webContents?.send('app:data-cleared', { kind: 'ai-chat' });
+      return result;
+    } catch (e) {
+      console.error('[Ollama] resetAndDelete failed:', e);
+      return { ok: false, error: e?.message || 'reset_failed' };
+    }
+  });
+
+  ipcMain.handle('agent:pickFolder', async () => {
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (!target) return { ok: false, error: 'no_window' };
+    const { canceled, filePaths } = await dialog.showOpenDialog(target, {
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    return { ok: true, path: filePaths[0] };
+  });
 
   ipcMain.handle('app:clearCache', async () => {
     try {
@@ -1720,6 +1852,14 @@ if (!gotSingleInstanceLock) {
       mainWindowRef: () => mainWindow,
       isAppInForegroundRef: isAppInForeground,
     });
+    ollamaManager = new OllamaManager({
+      store,
+      onStateChange: broadcastOllamaState,
+      invokePluginCommand: (pluginId, commandId, args) => pluginHost
+        ? pluginHost.invokeCommand(pluginId, commandId, args)
+        : Promise.resolve({ ok: false, error: 'not_ready' }),
+    });
+    ollamaManager.init().catch((e) => console.error('[Ollama] init failed:', e));
     (async () => {
       try {
         await seedBundledPlugins(pluginHost);
@@ -1749,6 +1889,7 @@ app.on('before-quit', () => {
   } catch {
     /* ignore */
   }
+  ollamaManager?.stop().catch(() => {});
 });
 
 app.on('window-all-closed', () => {
@@ -1760,6 +1901,7 @@ app.on('window-all-closed', () => {
   peerServer?.stop();
   apiServer?.stop();
   pluginHost?.stop().catch(() => {});
+  ollamaManager?.stop().catch(() => {});
   app.quit();
 });
 

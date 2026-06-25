@@ -43,6 +43,19 @@ const DISCOVERY_INTERVAL = 5000;
 const DISCOVERY_MAGIC = 'BLUETALK_V2';
 const CONNECTION_TIMEOUT_MS = 3000;
 const HANDSHAKE_TIMEOUT_MS = 5000;
+
+function normalizeConnectError(error) {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  if (
+    !message
+    || message === 'Opening handshake has timed out'
+    || message === 'Peer handshake timed out'
+    || message === 'Connection closed before handshake completed'
+  ) {
+    return new Error('Connection failed');
+  }
+  return error instanceof Error ? error : new Error(message);
+}
 const TCP_KEEP_ALIVE_DELAY_MS = 15000;
 const HEARTBEAT_INTERVAL_MS = 25000;
 const HEARTBEAT_TIMEOUT_MS = 75000;
@@ -682,7 +695,7 @@ class PeerServer extends EventEmitter {
     }
 
     cancelOutstanding();
-    throw lastError || new Error('Connection failed');
+    throw normalizeConnectError(lastError) || new Error('Connection failed');
   }
 
   _connectToCandidateWs(candidate, descriptor, operation) {
@@ -837,7 +850,7 @@ class PeerServer extends EventEmitter {
 
       socket.once('close', cleanup);
       socket.once('error', (error) => {
-        if (!settled) finishReject(error);
+        if (!settled) finishReject(normalizeConnectError(error));
       });
     });
   }

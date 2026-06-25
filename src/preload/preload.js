@@ -33,7 +33,16 @@ contextBridge.exposeInMainWorld('bluetalk', {
   // Peer networking
   peer: {
     getInfo: () => ipcRenderer.invoke('peer:getInfo'),
-    connect: (address) => ipcRenderer.invoke('peer:connect', address),
+    connect: async (address) => {
+      const result = await ipcRenderer.invoke('peer:connect', address);
+      if (result?.ok === false) {
+        throw new Error(result.error || 'Connection failed');
+      }
+      if (result?.ok === true) {
+        return result.peer;
+      }
+      return result;
+    },
     normalizeAddress: (raw) => ipcRenderer.invoke('peer:normalizeAddress', raw),
     reconnectContacts: () => ipcRenderer.invoke('peer:reconnectContacts'),
     resetAllConnections: () => ipcRenderer.invoke('peer:resetAllConnections'),
@@ -75,6 +84,60 @@ contextBridge.exposeInMainWorld('bluetalk', {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
+  },
+
+  /** Lokaler KI-Chat über Ollama (Runtime + Modell-Downloads) */
+  ollama: {
+    getState: () => ipcRenderer.invoke('ollama:getState'),
+    getModelCatalog: () => ipcRenderer.invoke('ollama:getModelCatalog'),
+    downloadRuntime: () => ipcRenderer.invoke('ollama:downloadRuntime'),
+    selectModelTier: (tierId) => ipcRenderer.invoke('ollama:selectModelTier', tierId),
+    selectCloudModel: (cloudModelId) => ipcRenderer.invoke('ollama:selectCloudModel', cloudModelId),
+    downloadModel: (tierId) => ipcRenderer.invoke('ollama:downloadModel', tierId),
+    deleteModel: (tierId) => ipcRenderer.invoke('ollama:deleteModel', tierId),
+    openModelsDir: () => ipcRenderer.invoke('ollama:openModelsDir'),
+    getStoragePaths: () => ipcRenderer.invoke('ollama:getStoragePaths'),
+    chat: (payload = {}, onProgress) => {
+      const requestId = payload.requestId || (typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const listener = (_, data) => {
+        if (data?.requestId !== requestId) return;
+        onProgress?.(data);
+      };
+      if (typeof onProgress === 'function') {
+        ipcRenderer.on('ollama:chat-progress', listener);
+      }
+      return ipcRenderer
+        .invoke('ollama:chat', { ...payload, requestId })
+        .finally(() => {
+          if (typeof onProgress === 'function') {
+            ipcRenderer.removeListener('ollama:chat-progress', listener);
+          }
+        });
+    },
+    abortChat: (requestId) => ipcRenderer.invoke('ollama:abortChat', requestId),
+    clearAgentContext: (peerId) => ipcRenderer.invoke('ollama:clearAgentContext', peerId),
+    onAskUser: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('ollama:ask-user', listener);
+      return () => ipcRenderer.removeListener('ollama:ask-user', listener);
+    },
+    replyAskUser: (requestId, answer) =>
+      ipcRenderer.send(`ollama:ask-user-reply:${requestId}`, { requestId, answer }),
+    startCloudSignIn: () => ipcRenderer.invoke('ollama:startCloudSignIn'),
+    confirmCloudAuth: () => ipcRenderer.invoke('ollama:confirmCloudAuth'),
+    resetAndDelete: () => ipcRenderer.invoke('ollama:resetAndDelete'),
+  },
+
+  /** Agent-Modus: Ordnerauswahl für das Arbeitsverzeichnis eines KI-Agenten. */
+  agent: {
+    pickFolder: async () => {
+      const result = await ipcRenderer.invoke('agent:pickFolder');
+      if (result?.ok) return result.path;
+      return null;
+    },
   },
 
   /** Poker-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
@@ -168,6 +231,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
       'peer:discovered',
       'peers:list-sync',
       'updater:state',
+      'ollama:state',
       'app:data-cleared',
       'plugins:event',
       'plugins:changed',

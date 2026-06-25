@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import { Trash2, User } from 'lucide-react';
 import { useApp } from '../../App';
 import { useToast } from '../../components/ToastProvider';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
-import { useRequireSettingsHub } from './useRequireSettingsHub';
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
 
 const MAX_AVATAR_BYTES = 380 * 1024;
@@ -29,7 +27,6 @@ function readImageDataUrl(file) {
 export default function AccountSettingsPage() {
   const { toast } = useToast();
   const { settings, updateSettings } = useApp();
-  const settingsHub = useRequireSettingsHub();
 
   const [peerInfo, setPeerInfo] = useState(null);
   const [local, setLocal] = useState(settings);
@@ -51,10 +48,6 @@ export default function AccountSettingsPage() {
     const interval = setInterval(fetchInfo, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  if (!settingsHub) {
-    return <Navigate to="/settings" replace />;
-  }
 
   const change = (key, value) => {
     setLocal((prev) => ({ ...prev, [key]: value }));
