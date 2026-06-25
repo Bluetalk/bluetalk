@@ -3,6 +3,13 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.16': {
+    title: "What's new in BlueTalk 1.1.16",
+    items: [
+      'Hotfix: Der lokale Ollama-Server nutzt jetzt einen eigenen BlueTalk-Port und uebernimmt nicht mehr versehentlich einen global laufenden Ollama-Dienst.',
+      'Auf Windows werden Modell-Dateien bei Unicode-Profilpfaden in einen sicheren BlueTalk-Modellordner gelegt; alternativ kann BLUETALK_OLLAMA_MODELS gesetzt werden.',
+    ],
+  },
   '1.1.15': {
     title: "What's new in BlueTalk 1.1.15",
     items: [
