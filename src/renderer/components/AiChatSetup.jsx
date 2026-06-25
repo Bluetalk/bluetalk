@@ -30,6 +30,8 @@ const TIER_ICONS = {
 
 function ProgressBlock({ label, percent, downloadedBytes, totalBytes, busy }) {
   const safePercent = Math.max(0, Math.min(100, percent || 0));
+  const safeDownloadedBytes = Math.max(0, downloadedBytes || 0);
+  const safeTotalBytes = Math.max(0, totalBytes || 0);
   return (
     <div className="ai-setup-progress">
       <div className="ai-setup-progress-head">
@@ -39,13 +41,25 @@ function ProgressBlock({ label, percent, downloadedBytes, totalBytes, busy }) {
       <div className="updater-progress-bar" role="progressbar" aria-valuenow={safePercent} aria-valuemin={0} aria-valuemax={100}>
         <div className="updater-progress-fill" style={{ width: `${safePercent}%` }} />
       </div>
-      {totalBytes > 0 && (
+      {safeTotalBytes > 0 && (
         <div className="text-sm text-muted ai-setup-progress-meta">
-          {formatBytes(downloadedBytes)} / {formatBytes(totalBytes)}
+          {formatBytes(safeDownloadedBytes)} / {formatBytes(safeTotalBytes)}
         </div>
       )}
     </div>
   );
+}
+
+function modelProgressLabel(status) {
+  const text = String(status || '').toLowerCase();
+  if (text === 'success') return 'Modell bereit';
+  if (text === 'download_starting') return 'Download wird vorbereitet...';
+  if (text.includes('pulling manifest')) return 'Manifest wird geladen...';
+  if (text.startsWith('pulling ')) return 'Modelldatei wird geladen...';
+  if (text.includes('verifying')) return 'Download wird geprueft...';
+  if (text.includes('writing manifest')) return 'Modell wird gespeichert...';
+  if (text.includes('removing')) return 'Alte Modelldateien werden bereinigt...';
+  return 'Modell wird geladen...';
 }
 
 export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }) {
@@ -294,10 +308,10 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
                   </div>
                   {tierBusy && (
                     <ProgressBlock
-                      label="Modell wird geladen…"
+                      label={modelProgressLabel(ollamaState?.modelProgressStatus?.[tier.id])}
                       percent={ollamaState?.modelPercent?.[tier.id]}
-                      downloadedBytes={0}
-                      totalBytes={tier.estimatedSizeBytes}
+                      downloadedBytes={ollamaState?.modelDownloadedBytes?.[tier.id]}
+                      totalBytes={ollamaState?.modelTotalBytes?.[tier.id]}
                       busy
                     />
                   )}
@@ -404,10 +418,10 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
             <>
               {(ollamaState?.modelStatus?.[selectedTier] === 'downloading' || action === `model-${selectedTier}`) && (
                 <ProgressBlock
-                  label="Modell wird heruntergeladen…"
+                  label={modelProgressLabel(ollamaState?.modelProgressStatus?.[selectedTier])}
                   percent={ollamaState?.modelPercent?.[selectedTier]}
-                  downloadedBytes={0}
-                  totalBytes={AI_MODEL_TIERS[selectedTier].estimatedSizeBytes}
+                  downloadedBytes={ollamaState?.modelDownloadedBytes?.[selectedTier]}
+                  totalBytes={ollamaState?.modelTotalBytes?.[selectedTier]}
                   busy
                 />
               )}

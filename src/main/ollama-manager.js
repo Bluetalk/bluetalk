@@ -158,6 +158,9 @@ class OllamaManager {
       selectedModelTier: '',
       modelStatus: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, 'missing'])),
       modelPercent: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, 0])),
+      modelDownloadedBytes: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, 0])),
+      modelTotalBytes: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, 0])),
+      modelProgressStatus: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, ''])),
       modelError: Object.fromEntries(AI_MODEL_TIER_IDS.map((id) => [id, ''])),
       cloudAuth: false,
       selectedCloudModelId: getDefaultCloudModelId(),
@@ -547,20 +550,38 @@ class OllamaManager {
 
     const modelStatus = { ...this.state.modelStatus, [tierId]: 'downloading' };
     const modelPercent = { ...this.state.modelPercent, [tierId]: 0 };
+    const modelDownloadedBytes = { ...this.state.modelDownloadedBytes, [tierId]: 0 };
+    const modelTotalBytes = { ...this.state.modelTotalBytes, [tierId]: 0 };
+    const modelProgressStatus = { ...this.state.modelProgressStatus, [tierId]: 'download_starting' };
     const modelError = { ...this.state.modelError, [tierId]: '' };
-    this._broadcast({ modelStatus, modelPercent, modelError });
+    this._broadcast({ modelStatus, modelPercent, modelDownloadedBytes, modelTotalBytes, modelProgressStatus, modelError });
 
     try {
-      await this._pullModel(tier.model, (percent) => {
-        this._broadcast({
+      await this._pullModel(tier.model, (progress) => {
+        const patch = {
           modelStatus: { ...this.state.modelStatus, [tierId]: 'downloading' },
-          modelPercent: { ...this.state.modelPercent, [tierId]: percent },
-        });
+        };
+        if (typeof progress?.percent === 'number') {
+          patch.modelPercent = { ...this.state.modelPercent, [tierId]: progress.percent };
+        }
+        if (typeof progress?.downloadedBytes === 'number') {
+          patch.modelDownloadedBytes = { ...this.state.modelDownloadedBytes, [tierId]: progress.downloadedBytes };
+        }
+        if (typeof progress?.totalBytes === 'number') {
+          patch.modelTotalBytes = { ...this.state.modelTotalBytes, [tierId]: progress.totalBytes };
+        }
+        if (typeof progress?.status === 'string') {
+          patch.modelProgressStatus = { ...this.state.modelProgressStatus, [tierId]: progress.status };
+        }
+        this._broadcast(patch);
       });
 
+      const finalTotalBytes = this.state.modelTotalBytes?.[tierId] || 0;
       this._broadcast({
         modelStatus: { ...this.state.modelStatus, [tierId]: 'ready' },
         modelPercent: { ...this.state.modelPercent, [tierId]: 100 },
+        modelDownloadedBytes: { ...this.state.modelDownloadedBytes, [tierId]: finalTotalBytes },
+        modelProgressStatus: { ...this.state.modelProgressStatus, [tierId]: 'success' },
         modelError: { ...this.state.modelError, [tierId]: '' },
       });
     } catch (error) {
@@ -598,7 +619,10 @@ class OllamaManager {
 
     const modelStatus = { ...this.state.modelStatus, [tierId]: 'missing' };
     const modelPercent = { ...this.state.modelPercent, [tierId]: 0 };
-    this._broadcast({ modelStatus, modelPercent });
+    const modelDownloadedBytes = { ...this.state.modelDownloadedBytes, [tierId]: 0 };
+    const modelTotalBytes = { ...this.state.modelTotalBytes, [tierId]: 0 };
+    const modelProgressStatus = { ...this.state.modelProgressStatus, [tierId]: '' };
+    this._broadcast({ modelStatus, modelPercent, modelDownloadedBytes, modelTotalBytes, modelProgressStatus });
     return this.refreshState().then((state) => ({ ok: true, state }));
   }
 
@@ -1562,11 +1586,20 @@ class OllamaManager {
               if (!line.trim()) continue;
               try {
                 const evt = JSON.parse(line);
+                const status = typeof evt.status === 'string' ? evt.status : '';
                 if (typeof evt.completed === 'number' && typeof evt.total === 'number' && evt.total > 0) {
-                  onProgress?.(Math.min(100, Math.round((evt.completed / evt.total) * 100)));
+                  const downloadedBytes = Math.max(0, Math.min(evt.completed, evt.total));
+                  onProgress?.({
+                    percent: Math.min(100, Math.round((downloadedBytes / evt.total) * 100)),
+                    downloadedBytes,
+                    totalBytes: evt.total,
+                    status,
+                  });
+                } else if (status) {
+                  onProgress?.({ status });
                 }
                 if (evt.status === 'success') {
-                  onProgress?.(100);
+                  onProgress?.({ percent: 100, status: 'success' });
                 }
               } catch {
                 /* ignore malformed chunk */

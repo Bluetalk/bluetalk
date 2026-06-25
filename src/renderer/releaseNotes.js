@@ -3,6 +3,12 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.18': {
+    title: "What's new in BlueTalk 1.1.18",
+    items: [
+      'Hotfix: Der Modell-Download zeigt jetzt echte Ollama-Bytes und echte Stream-Phasen statt einer geschaetzten Modellgroesse.',
+    ],
+  },
   '1.1.17': {
     title: "What's new in BlueTalk 1.1.17",
     items: [
