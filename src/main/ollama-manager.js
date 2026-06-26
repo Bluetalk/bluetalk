@@ -30,6 +30,7 @@ const {
   resolveCloudModelId,
   resolveActiveModelName,
   isAiChatPeerId,
+  isBluetalkAgentTool,
   resolveThinkOption,
   resolveAgentThinkingMode,
   resolveOllamaRuntimeMode,
@@ -112,6 +113,13 @@ class OllamaManager {
     askUser,
     readBluetalkMessages,
     sendBluetalkMessage,
+    listBluetalkContacts,
+    listBluetalkPeers,
+    listBluetalkChats,
+    getBluetalkContact,
+    getBluetalkSelf,
+    listBluetalkPlugins,
+    connectBluetalkPeer,
     getContactLabel,
   }) {
     this.store = store;
@@ -125,6 +133,27 @@ class OllamaManager {
       : null;
     this.sendBluetalkMessage = typeof sendBluetalkMessage === 'function'
       ? sendBluetalkMessage
+      : null;
+    this.listBluetalkContacts = typeof listBluetalkContacts === 'function'
+      ? listBluetalkContacts
+      : null;
+    this.listBluetalkPeers = typeof listBluetalkPeers === 'function'
+      ? listBluetalkPeers
+      : null;
+    this.listBluetalkChats = typeof listBluetalkChats === 'function'
+      ? listBluetalkChats
+      : null;
+    this.getBluetalkContact = typeof getBluetalkContact === 'function'
+      ? getBluetalkContact
+      : null;
+    this.getBluetalkSelf = typeof getBluetalkSelf === 'function'
+      ? getBluetalkSelf
+      : null;
+    this.listBluetalkPlugins = typeof listBluetalkPlugins === 'function'
+      ? listBluetalkPlugins
+      : null;
+    this.connectBluetalkPeer = typeof connectBluetalkPeer === 'function'
+      ? connectBluetalkPeer
       : null;
     this.getContactLabel = typeof getContactLabel === 'function'
       ? getContactLabel
@@ -802,11 +831,32 @@ class OllamaManager {
       sendBluetalkMessage: this.sendBluetalkMessage
         ? (opts) => this.sendBluetalkMessage(opts)
         : undefined,
+      listBluetalkContacts: this.listBluetalkContacts
+        ? (opts) => this.listBluetalkContacts(opts)
+        : undefined,
+      listBluetalkPeers: this.listBluetalkPeers
+        ? () => this.listBluetalkPeers()
+        : undefined,
+      listBluetalkChats: this.listBluetalkChats
+        ? (opts) => this.listBluetalkChats(opts)
+        : undefined,
+      getBluetalkContact: this.getBluetalkContact
+        ? (opts) => this.getBluetalkContact(opts)
+        : undefined,
+      getBluetalkSelf: this.getBluetalkSelf
+        ? () => this.getBluetalkSelf()
+        : undefined,
+      listBluetalkPlugins: this.listBluetalkPlugins
+        ? () => this.listBluetalkPlugins()
+        : undefined,
+      connectBluetalkPeer: this.connectBluetalkPeer
+        ? (opts) => this.connectBluetalkPeer(opts)
+        : undefined,
     };
     const tierTools = agentEnabled
       ? getToolsForTier(state.selectedModelTier).filter((tool) => {
         const name = tool.function.name;
-        if ((name === 'read_bluetalk_messages' || name === 'send_bluetalk_message') && !allowBluetalkMessaging) {
+        if (isBluetalkAgentTool(name) && !allowBluetalkMessaging) {
           return false;
         }
         return true;

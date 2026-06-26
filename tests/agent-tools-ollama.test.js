@@ -209,6 +209,52 @@ test('messaging tools require agent permission and user confirmation', async () 
   assert.equal(allowed.messages[0].content, 'Hi');
 });
 
+test('bluetalk navigation tools require agent permission', async () => {
+  const denied = await executeToolCall(
+    { function: { name: 'list_bluetalk_contacts', arguments: {} } },
+    { workDir: os.tmpdir(), allowBluetalkMessaging: false }
+  );
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'messaging_not_enabled');
+
+  const allowed = await executeToolCall(
+    { function: { name: 'get_bluetalk_self', arguments: {} } },
+    {
+      workDir: os.tmpdir(),
+      allowBluetalkMessaging: true,
+      getBluetalkSelf: () => ({ ok: true, peerId: 'self-id', displayName: 'Agent-User' }),
+    }
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.peerId, 'self-id');
+});
+
+test('connect_bluetalk_peer requires user confirmation', async () => {
+  const blocked = await executeToolCall(
+    { function: { name: 'connect_bluetalk_peer', arguments: { address: '127.0.0.1:19876' } } },
+    {
+      workDir: os.tmpdir(),
+      allowBluetalkMessaging: true,
+      askUser: async () => 'nein',
+      connectBluetalkPeer: () => ({ ok: true }),
+    }
+  );
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'permission_denied');
+
+  const allowed = await executeToolCall(
+    { function: { name: 'connect_bluetalk_peer', arguments: { address: '127.0.0.1:19876' } } },
+    {
+      workDir: os.tmpdir(),
+      allowBluetalkMessaging: true,
+      askUser: async () => 'ja',
+      connectBluetalkPeer: ({ address }) => ({ ok: true, peer: { id: 'peer-x', address } }),
+    }
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.peer.id, 'peer-x');
+});
+
 test('web_fetch blocks local and private network targets', async () => {
   const loopback = await executeToolCall(
     { function: { name: 'web_fetch', arguments: { url: 'http://127.0.0.1:11434/api/tags' } } },

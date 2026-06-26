@@ -623,6 +623,8 @@ async function spawn_subagent({ task, tools } = {}, ctx) {
 }
 
 async function bluetalk_command({ pluginId, commandId, args } = {}, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
   if (!ctx.invokePluginCommand) {
     return { ok: false, error: 'plugin_host_unavailable' };
   }
@@ -664,25 +666,43 @@ function validateMessagingPeerId(peerId) {
   return { ok: true, peerId: id };
 }
 
-async function ensureMessagingPermission(ctx, { action, peerId, preview, limit }) {
+async function ensureMessagingPermission(ctx, { action, peerId, preview, limit, address }) {
   if (!ctx.allowBluetalkMessaging) {
     return {
       ok: false,
       error: 'messaging_not_enabled',
-      hint: 'BlueTalk-Nachrichten sind für diesen Agenten deaktiviert. Aktiviere die Option beim Erstellen des Agenten.',
+      hint: 'BlueTalk-Nutzung ist für diesen Agenten deaktiviert. Aktiviere die Option beim Erstellen des Agenten.',
     };
   }
   if (typeof ctx.askUser !== 'function') {
     return { ok: false, error: 'permission_unavailable' };
   }
   const label = contactLabel(ctx, peerId);
-  const question = action === 'send'
-    ? `Der Agent möchte an „${label}“ folgende Nachricht senden:\n\n${String(preview || '').slice(0, 800)}\n\nErlauben? (Antworte mit ja oder nein)`
-    : `Der Agent möchte bis zu ${Math.max(1, Number(limit) || 20)} Nachrichten von „${label}“ lesen.\n\nErlauben? (Antworte mit ja oder nein)`;
+  let question;
+  if (action === 'send') {
+    question = `Der Agent möchte an „${label}“ folgende Nachricht senden:\n\n${String(preview || '').slice(0, 800)}\n\nErlauben? (Antworte mit ja oder nein)`;
+  } else if (action === 'reply') {
+    question = `Der Agent möchte an „${label}“ folgende Antwort senden (als Zitat-Antwort):\n\n${String(preview || '').slice(0, 800)}\n\nErlauben? (Antworte mit ja oder nein)`;
+  } else if (action === 'connect') {
+    question = `Der Agent möchte eine Verbindung zu folgender Adresse aufbauen:\n\n${String(address || '').slice(0, 240)}\n\nErlauben? (Antworte mit ja oder nein)`;
+  } else {
+    question = `Der Agent möchte bis zu ${Math.max(1, Number(limit) || 20)} Nachrichten von „${label}“ lesen.\n\nErlauben? (Antworte mit ja oder nein)`;
+  }
   const reply = await ctx.askUser(question);
   const answer = normalizeAskUserReply(reply);
   if (!isAffirmativeAnswer(answer)) {
     return { ok: false, error: 'permission_denied', answered: Boolean(answer) };
+  }
+  return { ok: true };
+}
+
+function ensureBluetalkAccess(ctx) {
+  if (!ctx.allowBluetalkMessaging) {
+    return {
+      ok: false,
+      error: 'messaging_not_enabled',
+      hint: 'BlueTalk-Nutzung ist für diesen Agenten deaktiviert. Aktiviere die Option beim Erstellen des Agenten.',
+    };
   }
   return { ok: true };
 }
@@ -726,6 +746,99 @@ async function send_bluetalk_message({ peer_id, content } = {}, ctx) {
   return ctx.sendBluetalkMessage({ peerId, content: text });
 }
 
+async function send_bluetalk_reply({ peer_id, content, reply_to_message_id } = {}, ctx) {
+  const peerCheck = validateMessagingPeerId(peer_id);
+  if (!peerCheck.ok) return peerCheck;
+  const peerId = peerCheck.peerId;
+  const text = String(content ?? '').trim();
+  if (!text) return { ok: false, error: 'empty_content' };
+  const replyId = String(reply_to_message_id || '').trim();
+  if (!replyId) return { ok: false, error: 'missing_reply_to_message_id' };
+  const permission = await ensureMessagingPermission(ctx, {
+    action: 'reply',
+    peerId,
+    preview: text,
+  });
+  if (!permission.ok) return permission;
+  if (typeof ctx.sendBluetalkMessage !== 'function') {
+    return { ok: false, error: 'send_unavailable' };
+  }
+  return ctx.sendBluetalkMessage({ peerId, content: text, replyToMessageId: replyId });
+}
+
+async function list_bluetalk_contacts({ query, include_blocked } = {}, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  if (typeof ctx.listBluetalkContacts !== 'function') {
+    return { ok: false, error: 'contacts_unavailable' };
+  }
+  return ctx.listBluetalkContacts({ query, includeBlocked: Boolean(include_blocked) });
+}
+
+async function list_bluetalk_peers(_args, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  if (typeof ctx.listBluetalkPeers !== 'function') {
+    return { ok: false, error: 'peers_unavailable' };
+  }
+  return ctx.listBluetalkPeers();
+}
+
+async function list_bluetalk_chats({ query, limit } = {}, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  if (typeof ctx.listBluetalkChats !== 'function') {
+    return { ok: false, error: 'chats_unavailable' };
+  }
+  return ctx.listBluetalkChats({ query, limit });
+}
+
+async function get_bluetalk_contact({ peer_id } = {}, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  const peerCheck = validateMessagingPeerId(peer_id);
+  if (!peerCheck.ok) return peerCheck;
+  if (typeof ctx.getBluetalkContact !== 'function') {
+    return { ok: false, error: 'contact_unavailable' };
+  }
+  return ctx.getBluetalkContact({ peerId: peerCheck.peerId });
+}
+
+async function get_bluetalk_self(_args, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  if (typeof ctx.getBluetalkSelf !== 'function') {
+    return { ok: false, error: 'self_unavailable' };
+  }
+  return ctx.getBluetalkSelf();
+}
+
+async function list_bluetalk_plugins(_args, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  if (typeof ctx.listBluetalkPlugins !== 'function') {
+    return { ok: false, error: 'plugins_unavailable' };
+  }
+  return ctx.listBluetalkPlugins();
+}
+
+async function connect_bluetalk_peer({ address } = {}, ctx) {
+  const access = ensureBluetalkAccess(ctx);
+  if (!access.ok) return access;
+  const addr = String(address || '').trim();
+  if (!addr) return { ok: false, error: 'missing_address' };
+  const permission = await ensureMessagingPermission(ctx, {
+    action: 'connect',
+    peerId: addr,
+    address: addr,
+  });
+  if (!permission.ok) return permission;
+  if (typeof ctx.connectBluetalkPeer !== 'function') {
+    return { ok: false, error: 'connect_unavailable' };
+  }
+  return ctx.connectBluetalkPeer({ address: addr });
+}
+
 const TOOL_HANDLERS = {
   list_files,
   search_files,
@@ -742,6 +855,14 @@ const TOOL_HANDLERS = {
   bluetalk_command,
   read_bluetalk_messages,
   send_bluetalk_message,
+  send_bluetalk_reply,
+  list_bluetalk_contacts,
+  list_bluetalk_peers,
+  list_bluetalk_chats,
+  get_bluetalk_contact,
+  get_bluetalk_self,
+  list_bluetalk_plugins,
+  connect_bluetalk_peer,
 };
 
 /**

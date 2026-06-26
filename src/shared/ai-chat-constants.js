@@ -153,7 +153,17 @@ const AI_AGENT_SYSTEM_PROMPT_BASE = `Du bist der KI-Agent in BlueTalk, einer Pee
 - Kleine Änderung → edit_file; neue Datei → write_file
 - Shell/Build/Test/git → run_command; Live-Doku/API → web_fetch
 - Nutzer-Entscheidung nötig → ask_user; große Teilaufgabe → spawn_subagent
-- Kontext merken → memory; BlueTalk-intern → bluetalk_command
+- Kontext merken → memory
+- BlueTalk: Kontakte/Chats → list_bluetalk_contacts / list_bluetalk_chats; Nachrichten → read/send_bluetalk_message; Plugins → list_bluetalk_plugins + bluetalk_command
+
+## BlueTalk-Nutzung (wenn aktiviert)
+- Orientierung: list_bluetalk_contacts, list_bluetalk_chats, list_bluetalk_peers, get_bluetalk_self
+- Kontakt-Details: get_bluetalk_contact (peer_id)
+- Nachrichten lesen/senden: read_bluetalk_messages / send_bluetalk_message — jeweils nur nach Nutzer-Bestätigung
+- Antworten auf eine Nachricht: send_bluetalk_reply mit reply_to_message_id
+- Neuen Peer verbinden: connect_bluetalk_peer — nur nach Nutzer-Bestätigung
+- Plugin-Aktionen: list_bluetalk_plugins zum Entdecken, bluetalk_command zum Ausführen
+- Nutze echte peer_id-Werte aus list_bluetalk_contacts — keine KI-Chat-IDs
 
 ## Code-Qualität (immer einhalten)
 - Schreibe korrekt strukturierten, standardkonformen Code — keine Strukturfehler, die ein simpler Check finden würde.
@@ -593,9 +603,145 @@ const AI_AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_bluetalk_contacts',
+      description:
+        'Listet gespeicherte BlueTalk-Kontakte mit Anzeigename, Online-Status und letzter Nachricht. ' +
+        'NUTZE: um peer_id-Werte zu finden, bevor du Chats liest oder Nachrichten sendest. ' +
+        'Optional filterbar per query (Name, Nickname oder ID).',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Optional: Suchbegriff für Name/Nickname/ID.' },
+          include_blocked: {
+            type: 'boolean',
+            description: 'Optional: auch blockierte Kontakte anzeigen (Standard: false).',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_bluetalk_peers',
+      description:
+        'Listet aktuell verbundene/online BlueTalk-Peers (nicht nur gespeicherte Kontakte). ' +
+        'NUTZE: um zu sehen, wer gerade erreichbar ist.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_bluetalk_chats',
+      description:
+        'Listet Chats mit Metadaten (letzte Nachricht, Anzahl, Kontaktname, Online). ' +
+        'NUTZE: für einen Überblick über aktive Unterhaltungen — sortiert nach Aktivität.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Optional: Filter nach Kontaktname oder peer_id.' },
+          limit: { type: 'integer', description: 'Max. Anzahl (1–50, Standard: 20).' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_bluetalk_contact',
+      description:
+        'Liefert Details zu einem BlueTalk-Kontakt (Name, Nickname, Adresse, E2EE, blockiert, letzte Nachricht). ' +
+        'NUTZE: wenn du die peer_id kennst und mehr Kontext brauchst.',
+      parameters: {
+        type: 'object',
+        properties: {
+          peer_id: { type: 'string', description: 'Peer-ID des Kontakts.' },
+        },
+        required: ['peer_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_bluetalk_self',
+      description:
+        'Liefert Informationen über den eigenen BlueTalk-Account (peer_id, Anzeigename, Endpunkte, verbundene Peers). ' +
+        'NUTZE: wenn du wissen musst, wer „du" in BlueTalk bist oder wie du erreichbar bist.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_bluetalk_plugins',
+      description:
+        'Listet installierte BlueTalk-Plugins mit Status und verfügbaren Command-IDs. ' +
+        'NUTZE: bevor du bluetalk_command aufrufst — so siehst du pluginId und commandId.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'connect_bluetalk_peer',
+      description:
+        'Verbindet zu einem BlueTalk-Peer über Adresse (host:port oder Endpunkt-URL). ' +
+        'NUTZE: wenn der Nutzer einen neuen Kontakt hinzufügen oder eine bekannte Adresse erreichen will. ' +
+        'VORAUSSETZUNG: Nutzer bestätigt die Verbindung.',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Peer-Adresse, z. B. host:19876 oder ws://…' },
+        },
+        required: ['address'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_bluetalk_reply',
+      description:
+        'Sendet eine Antwort auf eine bestimmte Nachricht in einem BlueTalk-Chat (Zitat-Antwort). ' +
+        'NUTZE: wenn der Nutzer gezielt auf eine Nachricht antworten möchte. ' +
+        'VORAUSSETZUNG: Messaging erlaubt; Nutzer bestätigt vor dem Senden.',
+      parameters: {
+        type: 'object',
+        properties: {
+          peer_id: { type: 'string', description: 'Peer-ID des Kontakts.' },
+          content: { type: 'string', description: 'Text der Antwort.' },
+          reply_to_message_id: { type: 'string', description: 'messageId der Nachricht, auf die geantwortet wird.' },
+        },
+        required: ['peer_id', 'content', 'reply_to_message_id'],
+      },
+    },
+  },
 ];
 
 const AI_AGENT_TOOL_NAMES = AI_AGENT_TOOLS.map((t) => t.function.name);
+
+const BLUETALK_AGENT_TOOL_NAMES = [
+  'list_bluetalk_contacts',
+  'list_bluetalk_peers',
+  'list_bluetalk_chats',
+  'get_bluetalk_contact',
+  'get_bluetalk_self',
+  'list_bluetalk_plugins',
+  'connect_bluetalk_peer',
+  'read_bluetalk_messages',
+  'send_bluetalk_message',
+  'send_bluetalk_reply',
+  'bluetalk_command',
+];
+
+function isBluetalkAgentTool(name) {
+  return BLUETALK_AGENT_TOOL_NAMES.includes(String(name || ''));
+}
 
 /**
  * Werkzeug-Sätze pro Modell-Stufe. Kleinere Modelle bekommen nur die
@@ -605,11 +751,18 @@ const AI_AGENT_TOOL_NAMES = AI_AGENT_TOOLS.map((t) => t.function.name);
  */
 const AI_AGENT_TOOL_SETS = {
   fast: ['list_files', 'read_file', 'extract_file', 'write_file', 'run_command', 'memory'],
-  normal: ['list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'memory', 'ask_user', 'read_bluetalk_messages', 'send_bluetalk_message'],
+  normal: [
+    'list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command',
+    'memory', 'ask_user',
+    'list_bluetalk_contacts', 'list_bluetalk_peers', 'list_bluetalk_chats', 'get_bluetalk_contact', 'get_bluetalk_self',
+    'read_bluetalk_messages', 'send_bluetalk_message', 'send_bluetalk_reply',
+  ],
   'normal+': [
     'list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file',
     'run_command', 'web_fetch', 'memory', 'ask_user', 'bluetalk_command',
-    'read_bluetalk_messages', 'send_bluetalk_message',
+    'list_bluetalk_contacts', 'list_bluetalk_peers', 'list_bluetalk_chats', 'get_bluetalk_contact', 'get_bluetalk_self',
+    'list_bluetalk_plugins', 'connect_bluetalk_peer',
+    'read_bluetalk_messages', 'send_bluetalk_message', 'send_bluetalk_reply',
   ],
   smart: AI_AGENT_TOOL_NAMES,
   cloud: AI_AGENT_TOOL_NAMES,
@@ -638,8 +791,16 @@ const AI_AGENT_TOOL_PROMPT_HINTS = {
   ask_user: 'Nutzer im Chat eine Rückfrage stellen und auf Antwort warten',
   spawn_subagent: 'Teilaufgabe an isolierten Sub-Agenten delegieren',
   bluetalk_command: 'BlueTalk-Plugin-Befehl ausführen (Spiele, Theme, …)',
+  list_bluetalk_contacts: 'BlueTalk-Kontakte auflisten (peer_id finden)',
+  list_bluetalk_peers: 'Aktuell verbundene BlueTalk-Peers anzeigen',
+  list_bluetalk_chats: 'Chat-Übersicht mit letzter Nachricht',
+  get_bluetalk_contact: 'Details zu einem BlueTalk-Kontakt',
+  get_bluetalk_self: 'Eigene BlueTalk-Identität und Endpunkte',
+  list_bluetalk_plugins: 'Installierte Plugins und Commands auflisten',
+  connect_bluetalk_peer: 'Neuen Peer verbinden (mit Nutzer-Bestätigung)',
   read_bluetalk_messages: 'BlueTalk-Chatverlauf lesen (mit Nutzer-Erlaubnis)',
   send_bluetalk_message: 'BlueTalk-Nachricht senden (mit Nutzer-Erlaubnis)',
+  send_bluetalk_reply: 'Antwort auf eine Nachricht senden (mit Nutzer-Erlaubnis)',
 };
 
 /**
@@ -1024,6 +1185,8 @@ module.exports = {
   AI_AGENT_TOOL_NAMES,
   AI_AGENT_TOOL_SETS,
   AI_AGENT_TOOL_PROMPT_HINTS,
+  BLUETALK_AGENT_TOOL_NAMES,
+  isBluetalkAgentTool,
   AI_AGENT_MODES,
   AI_AGENT_MODE_IDS,
   AI_AGENT_DEFAULT_MODE_ID,

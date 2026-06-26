@@ -201,7 +201,7 @@ test('agent tools define the core capabilities plus extensions', () => {
     assert.ok(AI_AGENT_TOOL_NAMES.includes(name), `core tool present: ${name}`);
   }
   // Neue Erweiterungs-Tools
-  for (const name of ['search_files', 'grep_files', 'edit_file', 'web_fetch', 'memory', 'ask_user', 'spawn_subagent', 'extract_file', 'read_bluetalk_messages', 'send_bluetalk_message']) {
+  for (const name of ['search_files', 'grep_files', 'edit_file', 'web_fetch', 'memory', 'ask_user', 'spawn_subagent', 'extract_file', 'read_bluetalk_messages', 'send_bluetalk_message', 'send_bluetalk_reply', 'list_bluetalk_contacts', 'list_bluetalk_peers', 'list_bluetalk_chats', 'get_bluetalk_contact', 'get_bluetalk_self', 'list_bluetalk_plugins', 'connect_bluetalk_peer']) {
     assert.ok(AI_AGENT_TOOL_NAMES.includes(name), `extension tool present: ${name}`);
   }
   for (const tool of AI_AGENT_TOOLS) {
@@ -235,9 +235,15 @@ test('getToolsForTier filters tools by model tier', () => {
   assert.ok(names(normalPlus).includes('web_fetch'));
   assert.ok(!names(normalPlus).includes('spawn_subagent'));
 
-  // Normal hat edit_file, keinen Web-Fetch
+  // Normal hat edit_file, keinen Web-Fetch, aber BlueTalk-Navigation
   assert.ok(names(normal).includes('edit_file'));
+  assert.ok(names(normal).includes('list_bluetalk_contacts'));
   assert.ok(!names(normal).includes('web_fetch'));
+  assert.ok(!names(normal).includes('connect_bluetalk_peer'));
+
+  // Normal+ hat Plugin- und Connect-Tools
+  assert.ok(names(normalPlus).includes('list_bluetalk_plugins'));
+  assert.ok(names(normalPlus).includes('connect_bluetalk_peer'));
 
   // Fallback für unbekannte Stufe
   assert.deepEqual(getToolsForTier('unknown').map((t) => t.function.name), getToolsForTier('normal').map((t) => t.function.name));

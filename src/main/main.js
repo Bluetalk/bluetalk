@@ -11,7 +11,7 @@ const Store = require(path.join(__dirname, '..', 'shared', 'store.js'));
 const { isPeerNotificationMuted } = require(path.join(__dirname, '..', 'shared', 'contactNotificationMute.js'));
 const { PluginHost } = require(path.join(__dirname, 'plugin-host.js'));
 const { OllamaManager } = require(path.join(__dirname, 'ollama-manager.js'));
-const { AI_MODEL_TIERS } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
+const { AI_MODEL_TIERS, isAiChatPeerId } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
 
 let mainWindow = null;
 /** Separates Fenster für das Poker-Plugin (Spieltisch). */
@@ -896,7 +896,185 @@ function readBluetalkMessagesForAgent({ peerId, limit, skip }) {
   };
 }
 
-function requestAgentSendMessage({ peerId, content }) {
+function getOnlinePeerIdSet() {
+  const set = new Set();
+  const peers = peerServer?.getPeers?.() || [];
+  for (const peer of peers) {
+    if (peer?.id) set.add(peer.id);
+  }
+  return set;
+}
+
+function summarizeContactForAgent(contact, { onlinePeerIds, chatMeta }) {
+  if (!contact?.id || contact.id === 'self') return null;
+  const displayName = contact.nickname || contact.name || contact.id;
+  const meta = chatMeta[contact.id] || null;
+  return {
+    id: contact.id,
+    name: contact.name || contact.id,
+    nickname: contact.nickname || '',
+    displayName,
+    address: contact.address || '',
+    pinned: Boolean(contact.pinned),
+    blocked: Boolean(contact.blocked),
+    blockedByPeer: Boolean(contact.blockedByPeer),
+    e2eeEnabled: contact.e2eeEnabled !== false,
+    online: onlinePeerIds.has(contact.id),
+    hasOutgoing: Boolean(contact.hasOutgoing),
+    pendingMessageRequest: Boolean(contact.pendingMessageRequest),
+    bio: contact.bio || '',
+    profilePicture: Boolean(contact.profilePicture),
+    lastMessage: meta?.lastMessage ? summarizeMessageForAgent(meta.lastMessage) : null,
+    messageCount: meta?.count || 0,
+  };
+}
+
+function listBluetalkContactsForAgent({ query, includeBlocked } = {}) {
+  const contacts = store?.get('contacts', []) || [];
+  const chatMeta = getChatMessageMeta();
+  const onlinePeerIds = getOnlinePeerIdSet();
+  const q = String(query || '').trim().toLowerCase();
+  let list = contacts
+    .map((c) => summarizeContactForAgent(c, { onlinePeerIds, chatMeta }))
+    .filter(Boolean);
+  if (!includeBlocked) {
+    list = list.filter((c) => !c.blocked && !c.blockedByPeer);
+  }
+  if (q) {
+    list = list.filter((c) =>
+      `${c.displayName} ${c.name} ${c.nickname} ${c.id} ${c.address}`.toLowerCase().includes(q)
+    );
+  }
+  list.sort((a, b) => {
+    const aTs = a.lastMessage?.timestamp || 0;
+    const bTs = b.lastMessage?.timestamp || 0;
+    return bTs - aTs;
+  });
+  return { ok: true, contacts: list, total: list.length };
+}
+
+function listBluetalkPeersForAgent() {
+  const peers = (peerServer?.getPeers?.() || []).map((peer) => ({
+    id: peer.id,
+    name: peer.name || peer.id,
+    bio: peer.bio || '',
+    address: peer.address || '',
+    port: peer.port,
+    ports: peer.ports || [],
+    profilePicture: Boolean(peer.profilePicture),
+  }));
+  return { ok: true, peers, total: peers.length };
+}
+
+function listBluetalkChatsForAgent({ query, limit } = {}) {
+  const contacts = store?.get('contacts', []) || [];
+  const chatMeta = getChatMessageMeta();
+  const onlinePeerIds = getOnlinePeerIdSet();
+  const q = String(query || '').trim().toLowerCase();
+  const max = Math.min(50, Math.max(1, Number(limit) || 20));
+
+  const contactById = new Map(contacts.filter((c) => c?.id).map((c) => [c.id, c]));
+  const chatIds = new Set([
+    ...contacts.map((c) => c.id).filter(Boolean),
+    ...Object.keys(chatMeta || {}),
+  ]);
+  chatIds.delete('self');
+
+  let chats = [];
+  for (const peerId of chatIds) {
+    if (isAiChatPeerId(peerId)) continue;
+    const contact = contactById.get(peerId) || { id: peerId, name: peerId };
+    const summary = summarizeContactForAgent(contact, { onlinePeerIds, chatMeta });
+    if (!summary) continue;
+    if (!summary.messageCount && !summary.hasOutgoing && !summary.blocked) continue;
+    chats.push({
+      peerId,
+      displayName: summary.displayName,
+      online: summary.online,
+      messageCount: summary.messageCount,
+      lastMessage: summary.lastMessage,
+      pinned: summary.pinned,
+      blocked: summary.blocked,
+    });
+  }
+  if (q) {
+    chats = chats.filter((c) =>
+      `${c.displayName} ${c.peerId}`.toLowerCase().includes(q)
+    );
+  }
+  chats.sort((a, b) => {
+    const aTs = a.lastMessage?.timestamp || 0;
+    const bTs = b.lastMessage?.timestamp || 0;
+    return bTs - aTs;
+  });
+  return { ok: true, chats: chats.slice(0, max), total: chats.length };
+}
+
+function getBluetalkContactForAgent({ peerId }) {
+  const id = String(peerId || '').trim();
+  if (!id) return { ok: false, error: 'missing_peer_id' };
+  if (isAiChatPeerId(id)) {
+    return { ok: false, error: 'invalid_peer_id', hint: 'Nur echte BlueTalk-Kontakte.' };
+  }
+  const contacts = store?.get('contacts', []) || [];
+  const contact = contacts.find((c) => c?.id === id) || { id, name: id };
+  const chatMeta = getChatMessageMeta();
+  const onlinePeerIds = getOnlinePeerIdSet();
+  const summary = summarizeContactForAgent(contact, { onlinePeerIds, chatMeta });
+  if (!summary) return { ok: false, error: 'not_found' };
+  return { ok: true, contact: summary };
+}
+
+function getBluetalkSelfForAgent() {
+  const settings = store?.get('settings', {}) || {};
+  const info = peerServer?.getInfo?.() || {};
+  return {
+    ok: true,
+    peerId: info.id || store?.get('peerId', '') || '',
+    displayName: settings.displayName || info.name || '',
+    name: info.name || '',
+    port: info.port || 0,
+    ports: info.ports || [],
+    endpoints: info.endpoints || [],
+    addresses: info.addresses || [],
+    connectedPeerCount: peerServer?.getPeers?.()?.length ?? 0,
+  };
+}
+
+function listBluetalkPluginsForAgent() {
+  if (!pluginHost) return { ok: false, error: 'not_ready' };
+  const plugins = pluginHost.listPluginsForAgent();
+  return { ok: true, plugins, total: plugins.length };
+}
+
+function buildReplyToFromStore(peerId, messageId) {
+  const messages = getStoredChatMessages(peerId);
+  const msg = messages.find((m) => m?.messageId === messageId);
+  if (!msg) return null;
+  const settings = store?.get('settings', {}) || {};
+  const preview = msg.kind === 'file'
+    ? `Datei: ${msg.fileName || 'Anhang'}`
+    : msg.kind === 'sticker'
+      ? 'Sticker'
+      : String(msg.content || '').slice(0, 240);
+  return {
+    messageId: msg.messageId,
+    sender: msg.from === 'self'
+      ? (settings.displayName || 'Du')
+      : (msg.sender || 'Kontakt'),
+    preview,
+    timestamp: msg.timestamp,
+  };
+}
+
+function requestAgentSendMessage({ peerId, content, replyToMessageId }) {
+  let replyTo = null;
+  if (replyToMessageId) {
+    replyTo = buildReplyToFromStore(peerId, replyToMessageId);
+    if (!replyTo) {
+      return Promise.resolve({ ok: false, error: 'reply_message_not_found' });
+    }
+  }
   return new Promise((resolve) => {
     const win = mainWindow;
     if (!win || win.isDestroyed()) {
@@ -924,9 +1102,47 @@ function requestAgentSendMessage({ peerId, content }) {
     };
     ipcMain.on(replyChannel, onReply);
     try {
-      win.webContents.send('agent:send-message', { requestId, peerId, content });
+      win.webContents.send('agent:send-message', { requestId, peerId, content, replyTo });
     } catch (e) {
       done({ ok: false, error: e?.message || 'send_failed' });
+    }
+  });
+}
+
+function requestAgentConnectPeer({ address }) {
+  const addr = String(address || '').trim();
+  if (!addr) return Promise.resolve({ ok: false, error: 'missing_address' });
+
+  return new Promise((resolve) => {
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) {
+      resolve({ ok: false, error: 'renderer_unavailable' });
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const replyChannel = `agent:connect-peer-reply:${requestId}`;
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ipcMain.removeListener(replyChannel, onReply);
+      } catch {
+        /* ignore */
+      }
+      resolve(result && typeof result === 'object' ? result : { ok: false, error: 'invalid_reply' });
+    };
+    const timer = setTimeout(() => done({ ok: false, error: 'connect_timeout' }), 45_000);
+    const onReply = (_event, data) => {
+      if (!data || data.requestId !== requestId) return;
+      done(data.result);
+    };
+    ipcMain.on(replyChannel, onReply);
+    try {
+      win.webContents.send('agent:connect-peer', { requestId, address: addr });
+    } catch (e) {
+      done({ ok: false, error: e?.message || 'connect_failed' });
     }
   });
 }
@@ -1937,6 +2153,13 @@ if (!gotSingleInstanceLock) {
         : Promise.resolve({ ok: false, error: 'not_ready' }),
       readBluetalkMessages: readBluetalkMessagesForAgent,
       sendBluetalkMessage: requestAgentSendMessage,
+      listBluetalkContacts: listBluetalkContactsForAgent,
+      listBluetalkPeers: listBluetalkPeersForAgent,
+      listBluetalkChats: listBluetalkChatsForAgent,
+      getBluetalkContact: getBluetalkContactForAgent,
+      getBluetalkSelf: getBluetalkSelfForAgent,
+      listBluetalkPlugins: listBluetalkPluginsForAgent,
+      connectBluetalkPeer: requestAgentConnectPeer,
       getContactLabel: getContactLabelFromStore,
     });
     ollamaManager.init().catch((e) => console.error('[Ollama] init failed:', e));

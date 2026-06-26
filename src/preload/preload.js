@@ -143,6 +143,10 @@ contextBridge.exposeInMainWorld('bluetalk', {
       if (!requestId) return;
       ipcRenderer.send(`agent:send-message-reply:${requestId}`, { requestId, result });
     },
+    connectPeerReply: ({ requestId, result }) => {
+      if (!requestId) return;
+      ipcRenderer.send(`agent:connect-peer-reply:${requestId}`, { requestId, result });
+    },
   },
 
   /** Poker-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
@@ -243,6 +247,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
       'plugins:message',
       'plugins:contacts-updated',
       'agent:send-message',
+      'agent:connect-peer',
     ];
     if (validChannels.includes(channel)) {
       const listener = (_, ...args) => callback(...args);

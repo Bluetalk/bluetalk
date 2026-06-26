@@ -1317,6 +1317,14 @@ const TOOL_LABELS = {
   run_command: 'Führt aus',
   read_bluetalk_messages: 'Liest Chat',
   send_bluetalk_message: 'Sendet',
+  send_bluetalk_reply: 'Antwortet',
+  list_bluetalk_contacts: 'Kontakte',
+  list_bluetalk_peers: 'Online-Peers',
+  list_bluetalk_chats: 'Chats',
+  get_bluetalk_contact: 'Kontakt-Info',
+  get_bluetalk_self: 'Eigene Info',
+  list_bluetalk_plugins: 'Plugins',
+  connect_bluetalk_peer: 'Verbindet',
   ask_user: 'Rückfrage',
   spawn_subagent: 'Sub-Agent',
   bluetalk_command: 'BlueTalk',
@@ -1328,7 +1336,10 @@ function toolArgPreview(name, args) {
     if (name === 'read_file' || name === 'write_file' || name === 'extract_file') return a.path || '';
     if (name === 'list_files' || name === 'search_files' || name === 'grep_files') return a.path || a.pattern || '.';
     if (name === 'run_command') return a.command || a.cmd || '';
-    if (name === 'read_bluetalk_messages' || name === 'send_bluetalk_message') return a.peer_id || '';
+    if (name === 'read_bluetalk_messages' || name === 'send_bluetalk_message' || name === 'send_bluetalk_reply') return a.peer_id || '';
+    if (name === 'connect_bluetalk_peer') return a.address || '';
+    if (name === 'get_bluetalk_contact') return a.peer_id || '';
+    if (name === 'list_bluetalk_contacts' || name === 'list_bluetalk_chats') return a.query || '';
     if (name === 'ask_user') return a.question || '';
     if (name === 'spawn_subagent') return a.task || '';
     if (name === 'bluetalk_command') {

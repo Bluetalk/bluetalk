@@ -179,9 +179,9 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
                 disabled={creating}
               />
               <span>
-                BlueTalk-Nachrichten lesen und senden erlauben
+                BlueTalk-Nutzung erlauben
                 <span className="text-sm text-muted" style={{ display: 'block', marginTop: 4 }}>
-                  Der Agent kann Chats lesen und Nachrichten versenden — jeweils nur nach deiner Bestätigung im Dialog.
+                  Der Agent kann Kontakte und Chats einsehen, Nachrichten lesen/senden, Peers verbinden und Plugins nutzen — sensible Aktionen nur nach deiner Bestätigung.
                 </span>
               </span>
             </label>

@@ -1502,26 +1502,6 @@ export default function App() {
 
   sendMessageRef.current = sendMessage;
 
-  useEffect(() => {
-    if (!window.bluetalk?.on || !window.bluetalk?.agent?.sendMessageReply) return undefined;
-    const unsub = window.bluetalk.on('agent:send-message', async (payload) => {
-      const { requestId, peerId, content } = payload || {};
-      let result = { ok: false, error: 'invalid_request' };
-      try {
-        const sent = await sendMessageRef.current?.(peerId, { kind: 'chat', content: String(content || '') });
-        if (sent && typeof sent === 'object') {
-          result = sent.ok === false ? sent : { ok: true, ...sent };
-        } else {
-          result = { ok: sent === true };
-        }
-      } catch (e) {
-        result = { ok: false, error: e?.message || 'send_failed' };
-      }
-      window.bluetalk.agent.sendMessageReply({ requestId, result });
-    });
-    return unsub;
-  }, []);
-
   const markPeerChatViewed = useCallback((peerId, upToPeerMessageTimestamp) => {
     if (!peerId || typeof upToPeerMessageTimestamp !== 'number' || upToPeerMessageTimestamp <= 0) return;
     setChatLastViewedPeerTs((prev) => {
@@ -1568,6 +1548,53 @@ export default function App() {
 
     return peerInfo;
   }, [upsertContact]);
+
+  useEffect(() => {
+    if (!window.bluetalk?.on || !window.bluetalk?.agent?.sendMessageReply) return undefined;
+    const unsubSend = window.bluetalk.on('agent:send-message', async (payload) => {
+      const { requestId, peerId, content, replyTo } = payload || {};
+      let result = { ok: false, error: 'invalid_request' };
+      try {
+        const outgoing = { kind: 'chat', content: String(content || '') };
+        if (replyTo && typeof replyTo === 'object') {
+          outgoing.replyTo = replyTo;
+        }
+        const sent = await sendMessageRef.current?.(peerId, outgoing);
+        if (sent && typeof sent === 'object') {
+          result = sent.ok === false ? sent : { ok: true, ...sent };
+        } else {
+          result = { ok: sent === true };
+        }
+      } catch (e) {
+        result = { ok: false, error: e?.message || 'send_failed' };
+      }
+      window.bluetalk.agent.sendMessageReply({ requestId, result });
+    });
+    const unsubConnect = window.bluetalk?.agent?.connectPeerReply
+      ? window.bluetalk.on('agent:connect-peer', async (payload) => {
+        const { requestId, address } = payload || {};
+        let result = { ok: false, error: 'invalid_request' };
+        try {
+          const peerInfo = await connectToAddress(address);
+          result = {
+            ok: true,
+            peer: {
+              id: peerInfo?.id,
+              name: peerInfo?.name || peerInfo?.id,
+              address: String(address || '').trim(),
+            },
+          };
+        } catch (e) {
+          result = { ok: false, error: e?.message || 'connect_failed' };
+        }
+        window.bluetalk.agent.connectPeerReply({ requestId, result });
+      })
+      : () => {};
+    return () => {
+      unsubSend?.();
+      unsubConnect?.();
+    };
+  }, [connectToAddress]);
 
   const refreshDiscovery = useCallback(async () => {
     if (!window.bluetalk) return;

@@ -621,6 +621,26 @@ class PluginHost extends EventEmitter {
     return out;
   }
 
+  /** Für Agent-Tools: Plugins inkl. registrierter Command-IDs. */
+  listPluginsForAgent() {
+    const out = [];
+    for (const [id, record] of this.plugins) {
+      if (!this._isPluginVisible(record)) continue;
+      out.push({
+        id,
+        name: record.manifest?.name || id,
+        description: record.manifest?.description || '',
+        enabled: record.enabled,
+        hasMain: Boolean(record.mainFile && fs.existsSync(record.mainFile)),
+        hasUi: Boolean(record.ui),
+        commands: [...record.commands.keys()],
+        lastError: record.lastError || '',
+      });
+    }
+    out.sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+    return out;
+  }
+
   getPlugin(id) {
     return this.listPlugins().find((p) => p.id === id) || null;
   }
