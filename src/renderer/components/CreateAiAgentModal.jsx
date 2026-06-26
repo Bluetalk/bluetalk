@@ -20,6 +20,7 @@ const DEFAULT_FORM = {
   agentMode: AI_AGENT_DEFAULT_MODE_ID,
   agentWorkDir: '',
   thinkingMode: AI_THINKING_DEFAULT_MODE_ID,
+  allowBluetalkMessaging: false,
 };
 
 export default function CreateAiAgentModal({ open, onClose, onCreate, creating = false }) {
@@ -49,6 +50,7 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
       agentMode: mode,
       agentWorkDir: form.agentWorkDir.trim(),
       thinkingMode: isValidThinkingMode(form.thinkingMode) ? form.thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
+      allowBluetalkMessaging: Boolean(form.allowBluetalkMessaging),
     });
   };
 
@@ -166,6 +168,23 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
                 Der Agent liest und schreibt Dateien und führt Befehle in diesem Ordner aus.
               </span>
             </div>
+          ) : null}
+
+          {isAgent ? (
+            <label className="agent-permission-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(form.allowBluetalkMessaging)}
+                onChange={(e) => setForm((prev) => ({ ...prev, allowBluetalkMessaging: e.target.checked }))}
+                disabled={creating}
+              />
+              <span>
+                BlueTalk-Nachrichten lesen und senden erlauben
+                <span className="text-sm text-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Der Agent kann Chats lesen und Nachrichten versenden — jeweils nur nach deiner Bestätigung im Dialog.
+                </span>
+              </span>
+            </label>
           ) : null}
 
           <div className="input-group">

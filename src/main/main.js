@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, dialog, session, shell } = require('electron');
+const crypto = require('crypto');
 const fs = require('fs/promises');
 const { autoUpdater } = require('electron-updater');
 const net = require('net');
@@ -860,6 +861,74 @@ function isContactBlockedInStore(peerId) {
 function isContactNotificationMutedInStore(peerId) {
   if (!store || !peerId) return false;
   return isPeerNotificationMuted(store.get('contacts', []), peerId);
+}
+
+function getContactLabelFromStore(peerId) {
+  const contacts = store?.get('contacts', []) || [];
+  const contact = contacts.find((entry) => entry?.id === peerId);
+  return contact?.nickname || contact?.name || peerId;
+}
+
+function summarizeMessageForAgent(message) {
+  if (!message || typeof message !== 'object') return null;
+  const { fileData, localPreviewUrl, ...summary } = message;
+  return {
+    messageId: summary.messageId,
+    from: summary.from,
+    kind: summary.kind,
+    content: summary.content,
+    sender: summary.sender,
+    timestamp: summary.timestamp,
+    fileName: summary.fileName,
+    fileSize: summary.fileSize,
+  };
+}
+
+function readBluetalkMessagesForAgent({ peerId, limit, skip }) {
+  const batch = getChatMessageBatch(peerId, { limit, skip });
+  return {
+    ok: true,
+    peerId,
+    messages: batch.messages.map(summarizeMessageForAgent).filter(Boolean),
+    total: batch.total,
+    hasMore: batch.hasMore,
+    remaining: batch.remaining,
+  };
+}
+
+function requestAgentSendMessage({ peerId, content }) {
+  return new Promise((resolve) => {
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) {
+      resolve({ ok: false, error: 'renderer_unavailable' });
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const replyChannel = `agent:send-message-reply:${requestId}`;
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ipcMain.removeListener(replyChannel, onReply);
+      } catch {
+        /* ignore */
+      }
+      resolve(result && typeof result === 'object' ? result : { ok: false, error: 'invalid_reply' });
+    };
+    const timer = setTimeout(() => done({ ok: false, error: 'send_timeout' }), 30_000);
+    const onReply = (_event, data) => {
+      if (!data || data.requestId !== requestId) return;
+      done(data.result);
+    };
+    ipcMain.on(replyChannel, onReply);
+    try {
+      win.webContents.send('agent:send-message', { requestId, peerId, content });
+    } catch (e) {
+      done({ ok: false, error: e?.message || 'send_failed' });
+    }
+  });
 }
 
 function queueIncomingChatNotification(data) {
@@ -1791,7 +1860,11 @@ function setupIPC() {
           && data.kind !== 'poker'
           && data.kind !== 'uno'
         ) {
-          if (!isContactBlockedInStore(data.from) && !isContactNotificationMutedInStore(data.from)) {
+          if (
+            data.kind !== 'encrypted-chat-e2ee'
+            && !isContactBlockedInStore(data.from)
+            && !isContactNotificationMutedInStore(data.from)
+          ) {
             queueIncomingChatNotification(data);
           }
         }
@@ -1862,6 +1935,9 @@ if (!gotSingleInstanceLock) {
       invokePluginCommand: (pluginId, commandId, args) => pluginHost
         ? pluginHost.invokeCommand(pluginId, commandId, args)
         : Promise.resolve({ ok: false, error: 'not_ready' }),
+      readBluetalkMessages: readBluetalkMessagesForAgent,
+      sendBluetalkMessage: requestAgentSendMessage,
+      getContactLabel: getContactLabelFromStore,
     });
     ollamaManager.init().catch((e) => console.error('[Ollama] init failed:', e));
     (async () => {

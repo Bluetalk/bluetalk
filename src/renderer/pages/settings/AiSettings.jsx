@@ -82,7 +82,7 @@ export default function AiSettingsPage() {
     });
   };
 
-  const createAiAgent = async ({ name, personality, personalityCustom, agentMode, agentWorkDir, thinkingMode }) => {
+  const createAiAgent = async ({ name, personality, personalityCustom, agentMode, agentWorkDir, thinkingMode, allowBluetalkMessaging }) => {
     if (!window.bluetalk?.store || creatingAgent) return;
     if (!setupComplete) {
       toast({
@@ -108,6 +108,7 @@ export default function AiSettingsPage() {
           agentMode: agentMode || 'off',
           agentWorkDir: agentWorkDir || '',
           thinkingMode: isValidThinkingMode(thinkingMode) ? thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
+          allowBluetalkMessaging: Boolean(allowBluetalkMessaging),
           createdAt: Date.now(),
         },
       ]);

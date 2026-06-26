@@ -548,6 +548,51 @@ const AI_AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'read_bluetalk_messages',
+      description:
+        'Liest den Nachrichtenverlauf eines BlueTalk-Kontakts aus dem lokalen Chat (bereits entschlüsselt). ' +
+        'NUTZE: um Konversationen nachzulesen oder Kontext aus Chats zu holen. ' +
+        'VORAUSSETZUNG: Messaging muss für diesen Agenten erlaubt sein; der Nutzer bestätigt jeden Lesezugriff. ' +
+        'Nur echte Kontakt-Peer-IDs — keine KI-Chats.',
+      parameters: {
+        type: 'object',
+        properties: {
+          peer_id: { type: 'string', description: 'Peer-ID des BlueTalk-Kontakts.' },
+          limit: {
+            type: 'integer',
+            description: 'Maximale Anzahl Nachrichten (1–100). Standard: 20.',
+          },
+          skip: {
+            type: 'integer',
+            description: 'Optional: Anzahl neuester Nachrichten überspringen (Pagination).',
+          },
+        },
+        required: ['peer_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_bluetalk_message',
+      description:
+        'Sendet eine Textnachricht an einen BlueTalk-Kontakt (E2EE wird im Client angewendet, wenn aktiv). ' +
+        'NUTZE: wenn der Nutzer möchte, dass der Agent jemandem schreibt. ' +
+        'VORAUSSETZUNG: Messaging muss für diesen Agenten erlaubt sein; der Nutzer bestätigt jede Nachricht vor dem Senden. ' +
+        'Nur echte Kontakt-Peer-IDs — keine KI-Chats.',
+      parameters: {
+        type: 'object',
+        properties: {
+          peer_id: { type: 'string', description: 'Peer-ID des BlueTalk-Kontakts.' },
+          content: { type: 'string', description: 'Text der Nachricht.' },
+        },
+        required: ['peer_id', 'content'],
+      },
+    },
+  },
 ];
 
 const AI_AGENT_TOOL_NAMES = AI_AGENT_TOOLS.map((t) => t.function.name);
@@ -560,10 +605,11 @@ const AI_AGENT_TOOL_NAMES = AI_AGENT_TOOLS.map((t) => t.function.name);
  */
 const AI_AGENT_TOOL_SETS = {
   fast: ['list_files', 'read_file', 'extract_file', 'write_file', 'run_command', 'memory'],
-  normal: ['list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'memory', 'ask_user'],
+  normal: ['list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'memory', 'ask_user', 'read_bluetalk_messages', 'send_bluetalk_message'],
   'normal+': [
     'list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file',
     'run_command', 'web_fetch', 'memory', 'ask_user', 'bluetalk_command',
+    'read_bluetalk_messages', 'send_bluetalk_message',
   ],
   smart: AI_AGENT_TOOL_NAMES,
   cloud: AI_AGENT_TOOL_NAMES,
@@ -592,6 +638,8 @@ const AI_AGENT_TOOL_PROMPT_HINTS = {
   ask_user: 'Nutzer im Chat eine Rückfrage stellen und auf Antwort warten',
   spawn_subagent: 'Teilaufgabe an isolierten Sub-Agenten delegieren',
   bluetalk_command: 'BlueTalk-Plugin-Befehl ausführen (Spiele, Theme, …)',
+  read_bluetalk_messages: 'BlueTalk-Chatverlauf lesen (mit Nutzer-Erlaubnis)',
+  send_bluetalk_message: 'BlueTalk-Nachricht senden (mit Nutzer-Erlaubnis)',
 };
 
 /**
@@ -647,6 +695,10 @@ function isAgentModeEnabled(agent) {
 function resolveAgentWorkDir(agent) {
   const raw = typeof agent?.agentWorkDir === 'string' ? agent.agentWorkDir.trim() : '';
   return raw || '';
+}
+
+function resolveAllowBluetalkMessaging(agent) {
+  return Boolean(agent?.allowBluetalkMessaging);
 }
 
 /**
@@ -994,6 +1046,7 @@ module.exports = {
   isValidAgentMode,
   isAgentModeEnabled,
   resolveAgentWorkDir,
+  resolveAllowBluetalkMessaging,
   isValidThinkingMode,
   resolveThinkOption,
   resolveAgentThinkingMode,

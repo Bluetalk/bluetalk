@@ -30,6 +30,8 @@ import {
 import VerticalResizeHandle from './components/VerticalResizeHandle';
 import { base64ByteLength, validateStickerData } from './stickers/stickerStore';
 import { isAiChatPeerId } from './aiChatConstants';
+import { isContactNotificationMuted } from './contactNotificationMute';
+import { buildMessageNotificationPreview } from './utils/messageNotificationPreview';
 
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const AccountSettingsPage = lazy(() => import('./pages/settings/AccountSettings'));
@@ -391,6 +393,7 @@ export default function App() {
   const e2eeReadyPeersRef = useRef(new Set());
   const e2eeHandshakeSentRef = useRef(new Set());
   const e2eeHandshakePromisesRef = useRef(new Map());
+  const sendMessageRef = useRef(null);
   const [peerReadReceipts, setPeerReadReceipts] = useState({});
   /** Höchster Zeitstempel einer Peer-Nachricht, die der Nutzer im Chat „gesehen“ hat (lokale UI, nicht E2EE-Read-Receipt). */
   const [chatLastViewedPeerTs, setChatLastViewedPeerTs] = useState({});
@@ -829,6 +832,13 @@ export default function App() {
               timestamp: typeof inner.timestamp === 'number' ? inner.timestamp : normalized.timestamp,
               from: fromId,
             };
+            const contact = contactsRef.current.find((entry) => entry?.id === fromId);
+            if (!isContactNotificationMuted(contact)) {
+              void window.bluetalk?.notify?.show?.({
+                title: contact?.nickname || contact?.name || normalized.sender || fromId,
+                body: buildMessageNotificationPreview(normalized),
+              });
+            }
           } catch (e) {
             console.error('E2EE decrypt failed:', e);
             return;
@@ -1485,6 +1495,28 @@ export default function App() {
 
     return sendPromise;
   }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake]);
+
+  sendMessageRef.current = sendMessage;
+
+  useEffect(() => {
+    if (!window.bluetalk?.on || !window.bluetalk?.agent?.sendMessageReply) return undefined;
+    const unsub = window.bluetalk.on('agent:send-message', async (payload) => {
+      const { requestId, peerId, content } = payload || {};
+      let result = { ok: false, error: 'invalid_request' };
+      try {
+        const sent = await sendMessageRef.current?.(peerId, { kind: 'chat', content: String(content || '') });
+        if (sent && typeof sent === 'object') {
+          result = sent.ok === false ? sent : { ok: true, ...sent };
+        } else {
+          result = { ok: sent === true };
+        }
+      } catch (e) {
+        result = { ok: false, error: e?.message || 'send_failed' };
+      }
+      window.bluetalk.agent.sendMessageReply({ requestId, result });
+    });
+    return unsub;
+  }, []);
 
   const markPeerChatViewed = useCallback((peerId, upToPeerMessageTimestamp) => {
     if (!peerId || typeof upToPeerMessageTimestamp !== 'number' || upToPeerMessageTimestamp <= 0) return;

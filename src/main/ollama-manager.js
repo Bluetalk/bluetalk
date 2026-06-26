@@ -21,6 +21,7 @@ const {
   resolveAgentPersonality,
   isAgentModeEnabled,
   resolveAgentWorkDir,
+  resolveAllowBluetalkMessaging,
   getModelTier,
   isValidModelTier,
   getCloudModel,
@@ -106,13 +107,30 @@ const {
 } = require(path.join(__dirname, 'ai-stream-segments.js'));
 
 class OllamaManager {
-  constructor({ store, onStateChange, invokePluginCommand, askUser }) {
+  constructor({
+    store,
+    onStateChange,
+    invokePluginCommand,
+    askUser,
+    readBluetalkMessages,
+    sendBluetalkMessage,
+    getContactLabel,
+  }) {
     this.store = store;
     this.onStateChange = onStateChange || (() => {});
     this.invokePluginCommand = typeof invokePluginCommand === 'function'
       ? invokePluginCommand
       : null;
     this.askUser = typeof askUser === 'function' ? askUser : null;
+    this.readBluetalkMessages = typeof readBluetalkMessages === 'function'
+      ? readBluetalkMessages
+      : null;
+    this.sendBluetalkMessage = typeof sendBluetalkMessage === 'function'
+      ? sendBluetalkMessage
+      : null;
+    this.getContactLabel = typeof getContactLabel === 'function'
+      ? getContactLabel
+      : null;
     this.userDataDir = app.getPath('userData');
     this.baseDir = path.join(this.userDataDir, 'ollama');
     this.runtimeDir = path.join(this.baseDir, RUNTIME_DIR_NAME);
@@ -699,7 +717,7 @@ class OllamaManager {
       });
     };
 
-    const { agentEnabled, workDir, thinkingMode } = this._resolveAgentContext(peerId);
+    const { agentEnabled, workDir, thinkingMode, allowBluetalkMessaging } = this._resolveAgentContext(peerId);
     const thinkOpt = this._thinkOption({ model, tierId: state.selectedModelTier, thinkingMode });
     const askUserHandler = async (question) => {
       const result = await this._runAskUser({ peerId, requestId, question, askUser });
@@ -715,8 +733,24 @@ class OllamaManager {
       subagentRunner: (opts) => this._runSubagent({ ...opts, parentTier: state.selectedModelTier }),
       subagentTier: state.selectedModelTier,
       askUser: askUserHandler,
+      allowBluetalkMessaging,
+      getContactLabel: (id) => (this.getContactLabel ? this.getContactLabel(id) : id),
+      readBluetalkMessages: this.readBluetalkMessages
+        ? (opts) => this.readBluetalkMessages(opts)
+        : undefined,
+      sendBluetalkMessage: this.sendBluetalkMessage
+        ? (opts) => this.sendBluetalkMessage(opts)
+        : undefined,
     };
-    const tierTools = agentEnabled ? getToolsForTier(state.selectedModelTier) : [];
+    const tierTools = agentEnabled
+      ? getToolsForTier(state.selectedModelTier).filter((tool) => {
+        const name = tool.function.name;
+        if ((name === 'read_bluetalk_messages' || name === 'send_bluetalk_message') && !allowBluetalkMessaging) {
+          return false;
+        }
+        return true;
+      })
+      : [];
     const tierToolNames = tierTools.map((t) => t.function.name);
 
     try {
@@ -977,7 +1011,8 @@ class OllamaManager {
     const workDirRaw = resolveAgentWorkDir(agent);
     const workDir = workDirRaw || defaultWorkDir();
     const thinkingMode = resolveAgentThinkingMode(agent);
-    return { personality, agentEnabled, workDir, agent, thinkingMode };
+    const allowBluetalkMessaging = resolveAllowBluetalkMessaging(agent);
+    return { personality, agentEnabled, workDir, agent, thinkingMode, allowBluetalkMessaging };
   }
 
   /**

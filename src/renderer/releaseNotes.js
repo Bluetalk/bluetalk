@@ -3,6 +3,14 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.19': {
+    title: "What's new in BlueTalk 1.1.19",
+    items: [
+      'KI-Agenten können optional BlueTalk-Nachrichten lesen und senden — jeweils nur nach deiner Bestätigung.',
+      'Neues Tool extract_file, erweiterte read_file/run_command-Tools und LaTeX-Formeln werden im Chat korrekt gerendert.',
+      'Benachrichtigungen für verschlüsselte Nachrichten zeigen den Klartext statt „New encrypted message“.',
+    ],
+  },
   '1.1.18': {
     title: "What's new in BlueTalk 1.1.18",
     items: [

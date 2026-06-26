@@ -12,6 +12,7 @@ const {
   getToolsForTier,
   getSystemPromptForTier,
   AI_CHAT_DEFAULT_TIER_ID,
+  isAiChatPeerId,
 } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
 
 /**
@@ -628,6 +629,94 @@ async function bluetalk_command({ pluginId, commandId, args } = {}, ctx) {
   }
 }
 
+function isAffirmativeAnswer(text) {
+  const answer = String(text || '').trim().toLowerCase();
+  if (!answer) return false;
+  return ['ja', 'yes', 'y', 'ok', 'j', 'klar', 'gerne'].some((word) => answer === word || answer.startsWith(`${word} `));
+}
+
+function contactLabel(ctx, peerId) {
+  if (typeof ctx.getContactLabel === 'function') {
+    return ctx.getContactLabel(peerId) || peerId;
+  }
+  return peerId;
+}
+
+function validateMessagingPeerId(peerId) {
+  const id = String(peerId || '').trim();
+  if (!id) return { ok: false, error: 'missing_peer_id' };
+  if (isAiChatPeerId(id)) {
+    return {
+      ok: false,
+      error: 'invalid_peer_id',
+      hint: 'Nur echte BlueTalk-Kontakte — keine KI-Chat-Peer-IDs.',
+    };
+  }
+  return { ok: true, peerId: id };
+}
+
+async function ensureMessagingPermission(ctx, { action, peerId, preview, limit }) {
+  if (!ctx.allowBluetalkMessaging) {
+    return {
+      ok: false,
+      error: 'messaging_not_enabled',
+      hint: 'BlueTalk-Nachrichten sind für diesen Agenten deaktiviert. Aktiviere die Option beim Erstellen des Agenten.',
+    };
+  }
+  if (typeof ctx.askUser !== 'function') {
+    return { ok: false, error: 'permission_unavailable' };
+  }
+  const label = contactLabel(ctx, peerId);
+  const question = action === 'send'
+    ? `Der Agent möchte an „${label}“ folgende Nachricht senden:\n\n${String(preview || '').slice(0, 800)}\n\nErlauben? (Antworte mit ja oder nein)`
+    : `Der Agent möchte bis zu ${Math.max(1, Number(limit) || 20)} Nachrichten von „${label}“ lesen.\n\nErlauben? (Antworte mit ja oder nein)`;
+  const reply = await ctx.askUser(question);
+  const answer = normalizeAskUserReply(reply);
+  if (!isAffirmativeAnswer(answer)) {
+    return { ok: false, error: 'permission_denied', answered: Boolean(answer) };
+  }
+  return { ok: true };
+}
+
+async function read_bluetalk_messages({ peer_id, limit, skip } = {}, ctx) {
+  const peerCheck = validateMessagingPeerId(peer_id);
+  if (!peerCheck.ok) return peerCheck;
+  const peerId = peerCheck.peerId;
+  const messageLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const permission = await ensureMessagingPermission(ctx, {
+    action: 'read',
+    peerId,
+    limit: messageLimit,
+  });
+  if (!permission.ok) return permission;
+  if (typeof ctx.readBluetalkMessages !== 'function') {
+    return { ok: false, error: 'read_unavailable' };
+  }
+  return ctx.readBluetalkMessages({
+    peerId,
+    limit: messageLimit,
+    skip: Math.max(0, Number(skip) || 0),
+  });
+}
+
+async function send_bluetalk_message({ peer_id, content } = {}, ctx) {
+  const peerCheck = validateMessagingPeerId(peer_id);
+  if (!peerCheck.ok) return peerCheck;
+  const peerId = peerCheck.peerId;
+  const text = String(content ?? '').trim();
+  if (!text) return { ok: false, error: 'empty_content' };
+  const permission = await ensureMessagingPermission(ctx, {
+    action: 'send',
+    peerId,
+    preview: text,
+  });
+  if (!permission.ok) return permission;
+  if (typeof ctx.sendBluetalkMessage !== 'function') {
+    return { ok: false, error: 'send_unavailable' };
+  }
+  return ctx.sendBluetalkMessage({ peerId, content: text });
+}
+
 const TOOL_HANDLERS = {
   list_files,
   search_files,
@@ -642,6 +731,8 @@ const TOOL_HANDLERS = {
   ask_user,
   spawn_subagent,
   bluetalk_command,
+  read_bluetalk_messages,
+  send_bluetalk_message,
 };
 
 /**

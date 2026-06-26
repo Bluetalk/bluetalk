@@ -201,7 +201,7 @@ test('agent tools define the core capabilities plus extensions', () => {
     assert.ok(AI_AGENT_TOOL_NAMES.includes(name), `core tool present: ${name}`);
   }
   // Neue Erweiterungs-Tools
-  for (const name of ['search_files', 'grep_files', 'edit_file', 'web_fetch', 'memory', 'ask_user', 'spawn_subagent', 'extract_file']) {
+  for (const name of ['search_files', 'grep_files', 'edit_file', 'web_fetch', 'memory', 'ask_user', 'spawn_subagent', 'extract_file', 'read_bluetalk_messages', 'send_bluetalk_message']) {
     assert.ok(AI_AGENT_TOOL_NAMES.includes(name), `extension tool present: ${name}`);
   }
   for (const tool of AI_AGENT_TOOLS) {

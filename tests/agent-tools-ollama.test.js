@@ -164,6 +164,51 @@ test('run_command accepts cmd alias parameter', async () => {
   }
 });
 
+test('messaging tools require agent permission and user confirmation', async () => {
+  const denied = await executeToolCall(
+    { function: { name: 'send_bluetalk_message', arguments: { peer_id: 'peer-a', content: 'Hallo' } } },
+    { workDir: os.tmpdir(), allowBluetalkMessaging: false, askUser: async () => 'ja' }
+  );
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'messaging_not_enabled');
+
+  let asked = '';
+  const blocked = await executeToolCall(
+    { function: { name: 'read_bluetalk_messages', arguments: { peer_id: 'peer-a', limit: 5 } } },
+    {
+      workDir: os.tmpdir(),
+      allowBluetalkMessaging: true,
+      getContactLabel: () => 'Alice',
+      askUser: async (question) => {
+        asked = question;
+        return 'nein';
+      },
+      readBluetalkMessages: () => ({ ok: true, messages: [] }),
+    }
+  );
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'permission_denied');
+  assert.ok(asked.includes('Alice'));
+
+  const allowed = await executeToolCall(
+    { function: { name: 'read_bluetalk_messages', arguments: { peer_id: 'peer-a', limit: 2 } } },
+    {
+      workDir: os.tmpdir(),
+      allowBluetalkMessaging: true,
+      askUser: async () => 'ja',
+      readBluetalkMessages: ({ peerId, limit }) => ({
+        ok: true,
+        peerId,
+        messages: [{ content: 'Hi' }],
+        total: 1,
+        limit,
+      }),
+    }
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.messages[0].content, 'Hi');
+});
+
 test('web_fetch blocks local and private network targets', async () => {
   const loopback = await executeToolCall(
     { function: { name: 'web_fetch', arguments: { url: 'http://127.0.0.1:11434/api/tags' } } },

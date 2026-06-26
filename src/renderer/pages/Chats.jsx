@@ -102,6 +102,7 @@ function normalizeAiAgent(agent) {
     agentMode: isValidAgentMode(agent.agentMode) ? agent.agentMode : AI_AGENT_DEFAULT_MODE_ID,
     agentWorkDir: typeof agent.agentWorkDir === 'string' ? agent.agentWorkDir.trim() : '',
     thinkingMode: isValidThinkingMode(agent.thinkingMode) ? agent.thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
+    allowBluetalkMessaging: Boolean(agent.allowBluetalkMessaging),
     createdAt: Number(agent.createdAt) || Date.now(),
   };
 }
@@ -1313,6 +1314,8 @@ const TOOL_LABELS = {
   grep_files: 'Grep',
   edit_file: 'Bearbeitet',
   run_command: 'Führt aus',
+  read_bluetalk_messages: 'Liest Chat',
+  send_bluetalk_message: 'Sendet',
   ask_user: 'Rückfrage',
   bluetalk_command: 'BlueTalk',
 };
@@ -1323,6 +1326,7 @@ function toolArgPreview(name, args) {
     if (name === 'read_file' || name === 'write_file' || name === 'extract_file') return a.path || '';
     if (name === 'list_files' || name === 'search_files' || name === 'grep_files') return a.path || a.pattern || '.';
     if (name === 'run_command') return a.command || a.cmd || '';
+    if (name === 'read_bluetalk_messages' || name === 'send_bluetalk_message') return a.peer_id || '';
     if (name === 'ask_user') return a.question || '';
     if (name === 'bluetalk_command') {
       const bits = [a.pluginId, a.commandId].filter(Boolean);

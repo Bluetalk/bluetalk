@@ -204,6 +204,10 @@ export function resolveAgentWorkDir(agent) {
   return raw || '';
 }
 
+export function resolveAllowBluetalkMessaging(agent) {
+  return Boolean(agent?.allowBluetalkMessaging);
+}
+
 export function isAiChatPeerId(peerId) {
   return peerId === AI_CHAT_PEER_ID || String(peerId || '').startsWith(AI_CHAT_PEER_PREFIX);
 }

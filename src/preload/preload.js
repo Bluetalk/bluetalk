@@ -139,6 +139,10 @@ contextBridge.exposeInMainWorld('bluetalk', {
       if (result?.ok) return result.path;
       return null;
     },
+    sendMessageReply: ({ requestId, result }) => {
+      if (!requestId) return;
+      ipcRenderer.send(`agent:send-message-reply:${requestId}`, { requestId, result });
+    },
   },
 
   /** Poker-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
@@ -238,6 +242,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
       'plugins:changed',
       'plugins:message',
       'plugins:contacts-updated',
+      'agent:send-message',
     ];
     if (validChannels.includes(channel)) {
       const listener = (_, ...args) => callback(...args);
