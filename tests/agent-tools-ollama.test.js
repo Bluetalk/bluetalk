@@ -107,6 +107,63 @@ test('file tools keep absolute paths inside the agent workdir', async () => {
   }
 });
 
+test('read_file supports line range extraction', async () => {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bt-agent-read-'));
+  const filePath = path.join(workDir, 'sample.txt');
+  try {
+    await fs.writeFile(filePath, 'alpha\nbeta\ngamma\ndelta\n', 'utf8');
+
+    const full = await executeToolCall(
+      { function: { name: 'read_file', arguments: { path: 'sample.txt' } } },
+      { workDir }
+    );
+    assert.equal(full.ok, true);
+    assert.equal(full.content, 'alpha\nbeta\ngamma\ndelta\n');
+
+    const slice = await executeToolCall(
+      { function: { name: 'read_file', arguments: { path: 'sample.txt', start_line: 2, end_line: 3 } } },
+      { workDir }
+    );
+    assert.equal(slice.ok, true);
+    assert.equal(slice.content, 'beta\ngamma');
+    assert.deepEqual(slice.line_range, { start_line: 2, end_line: 3 });
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test('extract_file returns matching lines by regex pattern', async () => {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bt-agent-extract-'));
+  const filePath = path.join(workDir, 'notes.txt');
+  try {
+    await fs.writeFile(filePath, 'TODO: fix\nDONE: ok\nTODO: review\n', 'utf8');
+
+    const extracted = await executeToolCall(
+      { function: { name: 'extract_file', arguments: { path: 'notes.txt', pattern: 'TODO:' } } },
+      { workDir }
+    );
+    assert.equal(extracted.ok, true);
+    assert.equal(extracted.content, 'TODO: fix\nTODO: review');
+    assert.equal(extracted.matched_lines, 2);
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test('run_command accepts cmd alias parameter', async () => {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bt-agent-cmd-'));
+  try {
+    const result = await executeToolCall(
+      { function: { name: 'run_command', arguments: { cmd: process.platform === 'win32' ? 'echo hello-cmd' : 'echo hello-cmd' } } },
+      { workDir }
+    );
+    assert.equal(result.ok, true);
+    assert.ok(String(result.stdout).includes('hello-cmd'));
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+});
+
 test('web_fetch blocks local and private network targets', async () => {
   const loopback = await executeToolCall(
     { function: { name: 'web_fetch', arguments: { url: 'http://127.0.0.1:11434/api/tags' } } },

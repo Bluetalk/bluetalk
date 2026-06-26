@@ -292,13 +292,60 @@ const AI_AGENT_TOOLS = [
     function: {
       name: 'read_file',
       description:
-        'Liest den vollständigen Inhalt einer Datei als UTF-8-Text. ' +
+        'Liest den Inhalt einer Datei als UTF-8-Text-String zurück. ' +
         'NUTZE: um Quelltext, Konfiguration oder Dokumente zu inspizieren. ' +
+        'Optional können Zeilenbereiche extrahiert werden (start_line/end_line/max_lines). ' +
+        'Für Regex-basierte Extraktion nutze extract_file. ' +
         'NICHT NUTZEN: um zu prüfen, ob eine Datei existiert — dafür list_files oder search_files.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Dateipfad (relativ zum Arbeitsverzeichnis oder absolut).' },
+          start_line: {
+            type: 'integer',
+            description: 'Optional: erste Zeile (1-basiert), ab der gelesen wird.',
+          },
+          end_line: {
+            type: 'integer',
+            description: 'Optional: letzte Zeile (1-basiert, inklusive), bis zu der gelesen wird.',
+          },
+          max_lines: {
+            type: 'integer',
+            description: 'Optional: maximale Anzahl Zeilen ab start_line.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'extract_file',
+      description:
+        'Extrahiert Text aus einer Datei als String — entweder per Zeilenbereich oder per Regex-Muster. ' +
+        'NUTZE: bei großen Dateien, wenn nur ein Ausschnitt relevant ist, oder um passende Zeilen zu finden. ' +
+        'Für den vollständigen Dateiinhalt ohne Filter reicht read_file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Dateipfad (relativ zum Arbeitsverzeichnis oder absolut).' },
+          start_line: {
+            type: 'integer',
+            description: 'Optional: erste Zeile (1-basiert). Standard: 1.',
+          },
+          end_line: {
+            type: 'integer',
+            description: 'Optional: letzte Zeile (1-basiert, inklusive).',
+          },
+          max_lines: {
+            type: 'integer',
+            description: 'Optional: maximale Anzahl zurückgegebener Zeilen.',
+          },
+          pattern: {
+            type: 'string',
+            description: 'Optional: Regex — liefert nur Zeilen, die dem Muster entsprechen.',
+          },
         },
         required: ['path'],
       },
@@ -377,16 +424,27 @@ const AI_AGENT_TOOLS = [
     function: {
       name: 'run_command',
       description:
-        'Führt einen Shell-Befehl im Arbeitsverzeichnis aus und gibt stdout/stderr sowie den Exit-Code zurück. ' +
-        'NUTZE: für Builds, Tests, git, Skripte und Befehle, die echte Seiteneffekte haben. ' +
+        'Führt einen Shell-/CMD-Befehl im Arbeitsverzeichnis aus und gibt stdout/stderr sowie den Exit-Code als String zurück. ' +
+        'NUTZE: für Builds, Tests, git, npm, Windows-CMD, PowerShell, Bash-Skripte und Befehle mit echten Seiteneffekten. ' +
         'VORSICHT: Bestätige destruktive Befehle (rm, Formatierungen, Systemänderungen) vorher mit dem Nutzer. ' +
-        'Timeout: 60 s. Große Ausgaben werden gekürzt.',
+        'Standard-Timeout: 60 s (max. 120 s). Große Ausgaben werden gekürzt.',
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: 'Der auszuführende Shell-Befehl.' },
+          command: { type: 'string', description: 'Der auszuführende Shell-/CMD-Befehl.' },
+          cmd: {
+            type: 'string',
+            description: 'Alias für command — derselbe Befehl (nur eines von command/cmd nötig).',
+          },
+          cwd: {
+            type: 'string',
+            description: 'Optional: Unterverzeichnis im Arbeitsverzeichnis, in dem der Befehl ausgeführt wird.',
+          },
+          timeout_ms: {
+            type: 'integer',
+            description: 'Optional: Timeout in Millisekunden (1000–120000). Standard: 60000.',
+          },
         },
-        required: ['command'],
       },
     },
   },
@@ -501,10 +559,10 @@ const AI_AGENT_TOOL_NAMES = AI_AGENT_TOOLS.map((t) => t.function.name);
  * Modelle nicht durch zu viele Tools überfordert.
  */
 const AI_AGENT_TOOL_SETS = {
-  fast: ['list_files', 'read_file', 'write_file', 'run_command', 'memory'],
-  normal: ['list_files', 'search_files', 'read_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'memory', 'ask_user'],
+  fast: ['list_files', 'read_file', 'extract_file', 'write_file', 'run_command', 'memory'],
+  normal: ['list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'memory', 'ask_user'],
   'normal+': [
-    'list_files', 'search_files', 'read_file', 'grep_files', 'write_file', 'edit_file',
+    'list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file',
     'run_command', 'web_fetch', 'memory', 'ask_user', 'bluetalk_command',
   ],
   smart: AI_AGENT_TOOL_NAMES,
@@ -523,11 +581,12 @@ function getToolsForTier(tierId) {
 const AI_AGENT_TOOL_PROMPT_HINTS = {
   list_files: 'Verzeichnisinhalt auflisten — Orientierung vor dem Lesen',
   search_files: 'Dateien per Glob-Muster finden (z. B. "**/*.js")',
-  read_file: 'Dateiinhalt lesen — Pflicht vor edit_file',
+  read_file: 'Dateiinhalt als String lesen — Pflicht vor edit_file',
+  extract_file: 'Textausschnitt aus Datei extrahieren (Zeilenbereich oder Regex)',
   grep_files: 'Text/Regex in Dateien suchen — schneller als alles blind lesen',
   write_file: 'Neue Datei erstellen oder Datei komplett überschreiben',
   edit_file: 'Gezielte Änderung in bestehender Datei (exakter old_string)',
-  run_command: 'Shell-Befehl ausführen (Build, Test, git, npm, …)',
+  run_command: 'Shell-/CMD-Befehl ausführen (Build, Test, git, npm, …)',
   web_fetch: 'HTTP/HTTPS-URL abrufen — Live-Doku, APIs, öffentliche Seiten',
   memory: 'Persistente Notizen lesen/schreiben (über Chats hinweg)',
   ask_user: 'Nutzer im Chat eine Rückfrage stellen und auf Antwort warten',

@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import { normalizeChatMarkdown } from '../utils/normalizeChatMarkdown.js';
 import {
   Archive,
   Ban,
@@ -238,10 +242,6 @@ const COMPOSER_TEXTAREA_MAX_HEIGHT = 400;
 function getComposerTextareaMaxHeight() {
   if (typeof window === 'undefined') return COMPOSER_TEXTAREA_MAX_HEIGHT;
   return Math.min(COMPOSER_TEXTAREA_MAX_HEIGHT, Math.floor(window.innerHeight * 0.45));
-}
-
-function normalizeChatMarkdown(text) {
-  return String(text || '').replace(/(?<!\n)\n(?!\n)/g, '  \n');
 }
 
 function getMessagePreviewText(message, debugMode = false) {
@@ -717,7 +717,8 @@ function MarkdownBody({ text, className = '' }) {
   return (
     <div className={`msg-markdown${className ? ` ${className}` : ''}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noopener noreferrer">
@@ -1305,8 +1306,12 @@ function summarizeToolResult(result, max = 240) {
 
 const TOOL_LABELS = {
   read_file: 'Liest',
+  extract_file: 'Extrahiert',
   write_file: 'Schreibt',
   list_files: 'Listet',
+  search_files: 'Sucht',
+  grep_files: 'Grep',
+  edit_file: 'Bearbeitet',
   run_command: 'Führt aus',
   ask_user: 'Rückfrage',
   bluetalk_command: 'BlueTalk',
@@ -1315,9 +1320,9 @@ const TOOL_LABELS = {
 function toolArgPreview(name, args) {
   try {
     const a = typeof args === 'string' ? JSON.parse(args) : (args || {});
-    if (name === 'read_file' || name === 'write_file') return a.path || '';
-    if (name === 'list_files') return a.path || '.';
-    if (name === 'run_command') return a.command || '';
+    if (name === 'read_file' || name === 'write_file' || name === 'extract_file') return a.path || '';
+    if (name === 'list_files' || name === 'search_files' || name === 'grep_files') return a.path || a.pattern || '.';
+    if (name === 'run_command') return a.command || a.cmd || '';
     if (name === 'ask_user') return a.question || '';
     if (name === 'bluetalk_command') {
       const bits = [a.pluginId, a.commandId].filter(Boolean);

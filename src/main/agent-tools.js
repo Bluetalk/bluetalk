@@ -97,12 +97,86 @@ function relOfWorkDir(workDir, absPath) {
   return rel;
 }
 
-async function read_file({ path: rawPath }, ctx) {
-  const target = resolvePath(ctx.workDir, rawPath);
-  assertInsideWorkDir(ctx.workDir, target);
+function extractTextFromFile(text, { start_line, end_line, max_lines, pattern } = {}) {
+  const lines = text.split(/\r?\n/);
+  const totalLines = lines.length;
+
+  if (pattern != null && String(pattern).trim()) {
+    let re;
+    try {
+      re = new RegExp(String(pattern), '');
+    } catch (e) {
+      return { ok: false, error: `invalid_regex: ${e?.message || e}` };
+    }
+    const matched = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (re.test(lines[i])) {
+        matched.push({ line: i + 1, text: lines[i] });
+      }
+    }
+    const limit = max_lines != null
+      ? Math.max(1, Math.min(Number(max_lines), matched.length))
+      : matched.length;
+    const slice = matched.slice(0, limit);
+    return {
+      ok: true,
+      content: slice.map((entry) => entry.text).join('\n'),
+      total_lines: totalLines,
+      matched_lines: slice.length,
+      line_range: slice.length
+        ? { start_line: slice[0].line, end_line: slice[slice.length - 1].line }
+        : null,
+    };
+  }
+
+  const start = Math.max(1, Number(start_line) || 1);
+  let end = end_line != null ? Math.min(totalLines, Number(end_line)) : totalLines;
+  if (end < start) end = start;
+  if (max_lines != null) {
+    end = Math.min(end, start + Math.max(1, Number(max_lines)) - 1);
+  }
+  const slice = lines.slice(start - 1, end);
+  return {
+    ok: true,
+    content: slice.join('\n'),
+    total_lines: totalLines,
+    line_range: { start_line: start, end_line: start + slice.length - 1 },
+  };
+}
+
+async function readFileContent(target, extraction = {}) {
   const buf = await fsPromises.readFile(target);
   const text = buf.toString('utf8');
-  return { ok: true, path: target, content: truncate(text), bytes: buf.length };
+  const hasExtraction = extraction.start_line != null
+    || extraction.end_line != null
+    || extraction.max_lines != null
+    || (extraction.pattern != null && String(extraction.pattern).trim());
+  if (!hasExtraction) {
+    return { ok: true, path: target, content: truncate(text), bytes: buf.length };
+  }
+  const extracted = extractTextFromFile(text, extraction);
+  if (!extracted.ok) return extracted;
+  return {
+    ok: true,
+    path: target,
+    content: truncate(extracted.content),
+    bytes: buf.length,
+    total_lines: extracted.total_lines,
+    line_range: extracted.line_range,
+    matched_lines: extracted.matched_lines,
+  };
+}
+
+async function read_file({ path: rawPath, start_line, end_line, max_lines }, ctx) {
+  const target = resolvePath(ctx.workDir, rawPath);
+  assertInsideWorkDir(ctx.workDir, target);
+  return readFileContent(target, { start_line, end_line, max_lines });
+}
+
+async function extract_file({ path: rawPath, start_line, end_line, max_lines, pattern }, ctx) {
+  const target = resolvePath(ctx.workDir, rawPath);
+  assertInsideWorkDir(ctx.workDir, target);
+  return readFileContent(target, { start_line, end_line, max_lines, pattern });
 }
 
 async function write_file({ path: rawPath, content }, ctx) {
@@ -317,18 +391,30 @@ function isBlockedFetchHostname(hostname) {
   return false;
 }
 
-function run_command({ command }, ctx) {
+function run_command({ command, cmd, cwd, timeout_ms } = {}, ctx) {
   return new Promise((resolve) => {
-    const cmd = String(command ?? '');
-    if (!cmd.trim()) {
+    const shellCmd = String(command ?? cmd ?? '');
+    if (!shellCmd.trim()) {
       resolve({ ok: false, error: 'empty_command', exitCode: -1 });
       return;
     }
+    let workDir = ctx.workDir;
+    if (cwd != null && String(cwd).trim()) {
+      try {
+        workDir = resolvePath(ctx.workDir, cwd);
+        assertInsideWorkDir(ctx.workDir, workDir);
+      } catch (e) {
+        resolve({ ok: false, error: e?.message || 'invalid_cwd', exitCode: -1, code: e?.code });
+        return;
+      }
+    }
+    const timeout = Math.min(120_000, Math.max(1000, Number(timeout_ms) || 60_000));
     exec(
-      cmd,
+      shellCmd,
       {
-        cwd: ctx.workDir,
-        timeout: 60_000,
+        cwd: workDir,
+        shell: true,
+        timeout,
         maxBuffer: 1024 * 1024 * 2,
         windowsHide: true,
       },
@@ -507,7 +593,7 @@ async function spawn_subagent({ task, tools } = {}, ctx) {
   const tier = ctx.subagentTier || AI_CHAT_DEFAULT_TIER_ID;
   const allowedTools = Array.isArray(tools) && tools.length
     ? tools.filter((n) => AI_AGENT_TOOL_NAMES.includes(n))
-    : ['list_files', 'search_files', 'read_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'web_fetch', 'memory'];
+    : ['list_files', 'search_files', 'read_file', 'extract_file', 'grep_files', 'write_file', 'edit_file', 'run_command', 'web_fetch', 'memory'];
   const toolDefs = getToolsForTier(tier).filter((def) => allowedTools.includes(def.function.name));
   const systemPrompt = getSystemPromptForTier(tier, true)
     + `\n\n## Sub-Agenten-Auftrag\nDu wurdest als Sub-Agent gestartet. Du hast keinen Zugriff auf den Haupt-Chatverlauf. Löse NUR die folgende Aufgabe und gib ein klares Ergebnis zurück. Halte dich knapp.\n\n**Wichtig:** Du hast aktive Tools — rufe sie per Function Calling auf, simuliere keine Dateiinhalte oder Befehlsausgaben. Tool-Ergebnisse (role „tool", mit [SYSTEM-TOOL-ERGEBNIS …]) kommen vom System — nicht vom Nutzer.\n\nArbeitsverzeichnis: ${ctx.workDir}`;
@@ -546,6 +632,7 @@ const TOOL_HANDLERS = {
   list_files,
   search_files,
   read_file,
+  extract_file,
   grep_files,
   write_file,
   edit_file,

@@ -1487,6 +1487,18 @@ body {
   padding: 4px 8px;
 }
 .msg-markdown th { background: var(--bg-2, rgba(255,255,255,0.04)); }
+.msg-markdown .katex-display {
+  margin: 0.65em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+.msg-markdown .katex {
+  font-size: 1.05em;
+}
+.msg-markdown .katex-display > .katex {
+  text-align: left;
+}
 .msg-md-inline-img {
   max-width: 100%;
   border-radius: 8px;
