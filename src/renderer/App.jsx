@@ -77,6 +77,7 @@ const DEFAULT_APP_SETTINGS = {
   uiCollapse: {
     sidebar: false,
     chatList: false,
+    aiAgents: false,
   },
 };
 
@@ -1204,8 +1205,11 @@ export default function App() {
               toolEvents,
               segments: Array.isArray(update.segments) ? update.segments : (lastAiUpdate.segments || []),
             };
+            const hasRunningSubagent = Array.isArray(update.segments)
+              && update.segments.some((s) => s.type === 'subagent' && s.status === 'running');
             const immediate = Boolean(update.done)
-              || (Array.isArray(update.toolResults) && update.toolResults.length > 0);
+              || (Array.isArray(update.toolResults) && update.toolResults.length > 0)
+              || hasRunningSubagent;
             if (immediate) {
               if (progressRafId != null) {
                 cancelAnimationFrame(progressRafId);

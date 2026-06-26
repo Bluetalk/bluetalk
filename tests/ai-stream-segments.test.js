@@ -59,3 +59,14 @@ test('consolidateSegments groups consecutive tool segments', () => {
   assert.equal(merged[1].events[0].name, 'read_file');
   assert.equal(merged[1].events[1].name, 'grep_files');
 });
+
+test('consolidateSegments preserves subagent segments', () => {
+  const merged = consolidateSegments([
+    { type: 'tool', event: { name: 'spawn_subagent' } },
+    { type: 'subagent', id: 'sub-1', task: 'Analyse', status: 'running' },
+    { type: 'answer', text: 'Fertig' },
+  ]);
+  assert.equal(merged.length, 3);
+  assert.equal(merged[1].type, 'subagent');
+  assert.equal(merged[1].id, 'sub-1');
+});

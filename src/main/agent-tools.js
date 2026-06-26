@@ -1,4 +1,5 @@
 const { exec } = require('child_process');
+const { randomUUID } = require('crypto');
 const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
@@ -591,6 +592,7 @@ async function spawn_subagent({ task, tools } = {}, ctx) {
   }
   const t = String(task || '').trim();
   if (!t) return { ok: false, error: 'empty_task' };
+  const subagentId = randomUUID();
   const tier = ctx.subagentTier || AI_CHAT_DEFAULT_TIER_ID;
   const allowedTools = Array.isArray(tools) && tools.length
     ? tools.filter((n) => AI_AGENT_TOOL_NAMES.includes(n))
@@ -598,17 +600,24 @@ async function spawn_subagent({ task, tools } = {}, ctx) {
   const toolDefs = getToolsForTier(tier).filter((def) => allowedTools.includes(def.function.name));
   const systemPrompt = getSystemPromptForTier(tier, true)
     + `\n\n## Sub-Agenten-Auftrag\nDu wurdest als Sub-Agent gestartet. Du hast keinen Zugriff auf den Haupt-Chatverlauf. Löse NUR die folgende Aufgabe und gib ein klares Ergebnis zurück. Halte dich knapp.\n\n**Wichtig:** Du hast aktive Tools — rufe sie per Function Calling auf, simuliere keine Dateiinhalte oder Befehlsausgaben. Tool-Ergebnisse (role „tool", mit [SYSTEM-TOOL-ERGEBNIS …]) kommen vom System — nicht vom Nutzer.\n\nArbeitsverzeichnis: ${ctx.workDir}`;
+  ctx.onSubagentStart?.({ id: subagentId, task: t, tools: allowedTools });
   try {
     const result = await ctx.subagentRunner({
+      subagentId,
       task: t,
       systemPrompt,
       tools: toolDefs,
       workDir: ctx.workDir,
       memory: ctx.memory,
       invokePluginCommand: ctx.invokePluginCommand,
+      onProgress: typeof ctx.onSubagentProgress === 'function'
+        ? (update) => ctx.onSubagentProgress(subagentId, update)
+        : undefined,
     });
+    ctx.onSubagentEnd?.({ id: subagentId, ok: true, result });
     return { ok: true, result };
   } catch (e) {
+    ctx.onSubagentEnd?.({ id: subagentId, ok: false, error: e?.message || 'subagent_failed' });
     return { ok: false, error: e?.message || 'subagent_failed' };
   }
 }

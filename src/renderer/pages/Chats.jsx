@@ -1318,6 +1318,7 @@ const TOOL_LABELS = {
   read_bluetalk_messages: 'Liest Chat',
   send_bluetalk_message: 'Sendet',
   ask_user: 'Rückfrage',
+  spawn_subagent: 'Sub-Agent',
   bluetalk_command: 'BlueTalk',
 };
 
@@ -1329,6 +1330,7 @@ function toolArgPreview(name, args) {
     if (name === 'run_command') return a.command || a.cmd || '';
     if (name === 'read_bluetalk_messages' || name === 'send_bluetalk_message') return a.peer_id || '';
     if (name === 'ask_user') return a.question || '';
+    if (name === 'spawn_subagent') return a.task || '';
     if (name === 'bluetalk_command') {
       const bits = [a.pluginId, a.commandId].filter(Boolean);
       return bits.join(' · ');
@@ -1339,13 +1341,16 @@ function toolArgPreview(name, args) {
   return '';
 }
 
-function AgentToolEvents({ events = [], live = false }) {
-  if (!Array.isArray(events) || !events.length) return null;
+function AgentToolEvents({ events = [], live = false, hideSubagentSpawn = false }) {
+  const visibleEvents = hideSubagentSpawn
+    ? events.filter((evt) => String(evt?.name || '') !== 'spawn_subagent')
+    : events;
+  if (!Array.isArray(visibleEvents) || !visibleEvents.length) return null;
 
-  const failed = events.filter((evt) => evt?.result?.ok === false).length;
+  const failed = visibleEvents.filter((evt) => evt?.result?.ok === false).length;
   const summaryText = failed
-    ? `Tool-Aufrufe · ${events.length} (${failed} fehlgeschlagen)`
-    : `Tool-Aufrufe · ${events.length}`;
+    ? `Tool-Aufrufe · ${visibleEvents.length} (${failed} fehlgeschlagen)`
+    : `Tool-Aufrufe · ${visibleEvents.length}`;
 
   return (
     <details className={`msg-agent-tools${live ? ' msg-agent-tools--live' : ''}`} open={live}>
@@ -1354,7 +1359,7 @@ function AgentToolEvents({ events = [], live = false }) {
         {live ? <span className="msg-agent-tools-live-badge">läuft</span> : null}
       </summary>
       <div className="msg-agent-tools-body">
-        {events.map((evt, idx) => {
+        {visibleEvents.map((evt, idx) => {
           const name = String(evt?.name || 'tool');
           const label = TOOL_LABELS[name] || name;
           const arg = toolArgPreview(name, evt?.arguments);
@@ -1376,25 +1381,66 @@ function AgentToolEvents({ events = [], live = false }) {
 }
 
 /** Rendert ein Tool-Segment (ein oder mehrere aufeinanderfolgende Tool-Aufrufe). */
-function AgentToolSegment({ segment, event, events, live = false }) {
+function AgentToolSegment({ segment, event, events, live = false, hideSubagentSpawn = false }) {
   const list = Array.isArray(events) && events.length
     ? events
     : toolEventsFromSegment(segment || (event ? { type: 'tool', event } : null));
-  return <AgentToolEvents events={list} live={live} />;
+  return <AgentToolEvents events={list} live={live} hideSubagentSpawn={hideSubagentSpawn} />;
+}
+
+/** Rendert einen laufenden oder abgeschlossenen Sub-Agenten als ausklappbaren Block. */
+function SubAgentBlock({ segment, live = false }) {
+  const running = segment?.status === 'running';
+  const taskPreview = String(segment?.task || '').trim();
+  const displayTask = taskPreview.length > 140 ? `${taskPreview.slice(0, 140)}…` : taskPreview;
+  const statusLabel = running
+    ? 'läuft'
+    : segment?.status === 'error'
+      ? 'Fehler'
+      : 'fertig';
+
+  return (
+    <details className={`msg-subagent${live && running ? ' msg-subagent--live' : ''}`} open={live && running}>
+      <summary>
+        <span className="msg-subagent-summary-text">Sub-Agent · {statusLabel}</span>
+        {displayTask ? <span className="msg-subagent-task">{displayTask}</span> : null}
+        {live && running ? <span className="msg-subagent-live-badge">läuft</span> : null}
+      </summary>
+      <div className="msg-subagent-body">
+        {Array.isArray(segment?.segments) && segment.segments.length ? (
+          <MessageSegments
+            segments={segment.segments}
+            content={segment.content}
+            thinking={segment.thinking}
+            toolEvents={segment.toolEvents}
+            live={live && running}
+            hideSubagentSpawn
+          />
+        ) : segment?.content ? (
+          <MarkdownBody text={segment.content} className={live && running ? 'msg-markdown--live-answer' : undefined} />
+        ) : segment?.error ? (
+          <span className="msg-subagent-error">{segment.error}</span>
+        ) : running ? (
+          <span className="msg-subagent-wait">Sub-Agent arbeitet…</span>
+        ) : null}
+      </div>
+    </details>
+  );
 }
 
 /**
  * Rendert die Agent-Segmente in echter Reihenfolge:
- * thinking (ausklappbar) -> tool (ausklappbar) -> thinking -> ... -> answer.
+ * thinking (ausklappbar) -> tool (ausklappbar) -> subagent -> ... -> answer.
  * Fehlen Segmente, wird auf das Legacy-Layout (Thinking+Tools+Content) zurückgegriffen.
  */
-function MessageSegments({ segments, content, thinking, toolEvents, live = false }) {
+function MessageSegments({ segments, content, thinking, toolEvents, live = false, hideSubagentSpawn = false }) {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
+  const hasSubagentSegments = hasSegments && segments.some((s) => s.type === 'subagent');
   if (!hasSegments) {
     return (
       <>
         {thinking ? <AiThinkingBlock thinking={thinking} live={live} /> : null}
-        <AgentToolEvents events={toolEvents || []} live={live} />
+        <AgentToolEvents events={toolEvents || []} live={live} hideSubagentSpawn={hideSubagentSpawn || hasSubagentSegments} />
         {content ? (
           <MarkdownBody text={content} className={live ? 'msg-markdown--live-answer' : undefined} />
         ) : null}
@@ -1415,7 +1461,17 @@ function MessageSegments({ segments, content, thinking, toolEvents, live = false
           return <AiThinkingBlock key={`t-${idx}`} thinking={seg.text} live={live} />;
         }
         if (seg.type === 'tool') {
-          return <AgentToolSegment key={`tool-${idx}`} segment={seg} live={live} />;
+          return (
+            <AgentToolSegment
+              key={`tool-${idx}`}
+              segment={seg}
+              live={live}
+              hideSubagentSpawn={hideSubagentSpawn || hasSubagentSegments}
+            />
+          );
+        }
+        if (seg.type === 'subagent') {
+          return <SubAgentBlock key={`sub-${seg.id || idx}`} segment={seg} live={live} />;
         }
         if (seg.type === 'answer') {
           return (
@@ -1896,6 +1952,10 @@ export default function ChatsPage() {
       return bTs - aTs;
     });
 
+    return sorted;
+  }, [chatMeta, contactById, contacts, peerById, peers]);
+
+  const aiAgentList = useMemo(() => {
     const aiEntries = aiAgents.map((agent) => {
       const aiMeta = chatMeta[agent.id] || null;
       return {
@@ -1918,18 +1978,16 @@ export default function ChatsPage() {
       };
     });
 
-    return [...aiEntries, ...sorted].sort((a, b) => {
-      if (a.pinned !== b.pinned) return Number(b.pinned) - Number(a.pinned);
-      const aTs = a.lastMessage?.timestamp || a.contact?.addedAt || a.createdAt || 0;
-      const bTs = b.lastMessage?.timestamp || b.contact?.addedAt || b.createdAt || 0;
+    return aiEntries.sort((a, b) => {
+      const aTs = a.lastMessage?.timestamp || a.createdAt || 0;
+      const bTs = b.lastMessage?.timestamp || b.createdAt || 0;
       return bTs - aTs;
     });
-  }, [aiAgents, chatMeta, contactById, contacts, peerById, peers]);
+  }, [aiAgents, chatMeta]);
 
   const mainChatList = useMemo(
     () =>
       chatList.filter((chat) => {
-        if (chat.isAiChat) return true;
         if (chat.contact?.pendingMessageRequest === true) return false;
         if (
           chat.messageCount === 0
@@ -1944,16 +2002,28 @@ export default function ChatsPage() {
     [chatList]
   );
 
-  const filtered = useMemo(
+  const filteredPeerChats = useMemo(
     () => mainChatList.filter((chat) =>
       `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
     ),
     [mainChatList, search]
   );
 
+  const filteredAiAgents = useMemo(
+    () => aiAgentList.filter((chat) =>
+      `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
+    ),
+    [aiAgentList, search]
+  );
+
+  const combinedChatList = useMemo(
+    () => [...aiAgentList, ...chatList],
+    [aiAgentList, chatList]
+  );
+
   const selectedPeer = useMemo(
-    () => chatList.find((c) => c.id === selectedPeerId) || null,
-    [chatList, selectedPeerId]
+    () => combinedChatList.find((c) => c.id === selectedPeerId) || null,
+    [combinedChatList, selectedPeerId]
   );
 
   const isAiChatSelected = Boolean(selectedPeer?.isAiChat || isAiChatPeerId(selectedPeer?.id));
@@ -1967,14 +2037,25 @@ export default function ChatsPage() {
   );
 
   const peerPendingDelete = useMemo(
-    () => (deleteTargetPeerId ? chatList.find((c) => c.id === deleteTargetPeerId) || null : null),
-    [chatList, deleteTargetPeerId]
+    () => (deleteTargetPeerId ? combinedChatList.find((c) => c.id === deleteTargetPeerId) || null : null),
+    [combinedChatList, deleteTargetPeerId]
   );
 
   const peerPendingClear = useMemo(
-    () => (clearContextTargetPeerId ? chatList.find((c) => c.id === clearContextTargetPeerId) || null : null),
-    [chatList, clearContextTargetPeerId]
+    () => (clearContextTargetPeerId ? combinedChatList.find((c) => c.id === clearContextTargetPeerId) || null : null),
+    [combinedChatList, clearContextTargetPeerId]
   );
+
+  const aiAgentsPanelCollapsed = settings.uiCollapse?.aiAgents === true;
+
+  const liveSubagentsByPeer = useMemo(() => {
+    if (!aiChatProgress?.peerId || !Array.isArray(aiChatProgress.segments)) return {};
+    const subs = aiChatProgress.segments.filter(
+      (seg) => seg?.type === 'subagent' && seg.status === 'running'
+    );
+    if (!subs.length) return {};
+    return { [aiChatProgress.peerId]: subs };
+  }, [aiChatProgress]);
 
   const closeListContextMenu = useCallback(() => setListContextMenu(null), []);
 
@@ -1988,9 +2069,9 @@ export default function ChatsPage() {
   useEffect(() => {
     if (openPeerFromNav) return;
     if (selectedPeerId != null) return;
-    const first = mainChatList[0];
+    const first = mainChatList[0] || aiAgentList[0];
     if (first) setSelectedPeerId(first.id);
-  }, [openPeerFromNav, selectedPeerId, mainChatList]);
+  }, [openPeerFromNav, selectedPeerId, mainChatList, aiAgentList]);
 
   useEffect(() => {
     setChatActionsMenuOpen(false);
@@ -2297,10 +2378,10 @@ export default function ChatsPage() {
   }, [selectedPeer, closeAttachMenu, sendMessage, toast, settings, contacts, peers, connectToAddress]);
 
   useEffect(() => {
-    if (selectedPeerId && !chatList.find((chat) => chat.id === selectedPeerId)) {
+    if (selectedPeerId && !combinedChatList.find((chat) => chat.id === selectedPeerId)) {
       setSelectedPeerId(null);
     }
-  }, [chatList, selectedPeerId]);
+  }, [combinedChatList, selectedPeerId]);
 
   useEffect(() => {
     setShowPeerProfile(false);
@@ -3003,6 +3084,137 @@ export default function ChatsPage() {
     [setContactNotificationMute, toast]
   );
 
+  const toggleAiAgentsPanel = useCallback(() => {
+    updateSettings({ uiCollapse: { aiAgents: !aiAgentsPanelCollapsed } });
+  }, [aiAgentsPanelCollapsed, updateSettings]);
+
+  const renderChatListRow = useCallback((chat, { nested = false } = {}) => {
+    const chatContact = resolveContact(chat.id);
+    const unreadCount = !chat.isAiChat
+      ? countUnreadPeerMessages(
+          chat.id,
+          chatLastViewedPeerTs[chat.id],
+          messages,
+          chat.lastMessage
+        )
+      : 0;
+    const runningSubagents = liveSubagentsByPeer[chat.id] || [];
+
+    return (
+      <React.Fragment key={chat.id}>
+        <div
+          className={`list-item ${selectedPeer?.id === chat.id ? 'active' : ''}${chat.contact?.blocked ? ' list-item--blocked' : ''}${chat.contact?.blockedByPeer ? ' list-item--blocked-by-peer' : ''}${unreadCount > 0 ? ' list-item--has-unread' : ''}${chat.isAiChat ? ' list-item--ai' : ''}${nested ? ' list-item--nested' : ''}`}
+          onClick={() => setSelectedPeerId(chat.id)}
+          onContextMenu={(e) => openChatListContextMenu(e, chat)}
+        >
+          {chat.isAiChat ? (
+            chat.profilePicture ? (
+              <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
+            ) : (
+              <div className="ai-chat-list-avatar" aria-hidden>
+                <Bot size={20} strokeWidth={CHAT_ICON_STROKE} />
+              </div>
+            )
+          ) : (
+            <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
+          )}
+          <div className="list-item-info">
+            <div className="list-item-name-row">
+              <div className="list-item-name">{chat.displayName}</div>
+              {chat.isAgent ? (
+                <span className="ai-agent-badge" title="Agent-Modus — kann Dateien, Befehle und BlueTalk-Werkzeuge nutzen">
+                  Agent
+                </span>
+              ) : null}
+              {chat.pinned && (
+                <span className="chat-pin-badge" title="Angehefteter Chat">
+                  <Pin size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                </span>
+              )}
+              {chat.e2eePlaintextBadge && (
+                <span className="chat-pin-badge" title="Ausgehend ohne E2EE (Klartext)">
+                  <Unlock size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                </span>
+              )}
+              {isContactNotificationMuted(chatContact) && (
+                <span className="chat-pin-badge" title="Mitteilungen stumm">
+                  <BellOff size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                </span>
+              )}
+            </div>
+            <div className="list-item-sub">
+              {chat.isAiChat
+                ? (isAiChatPending(chat.id)
+                  ? 'Antwort wird erstellt…'
+                  : (ollamaState?.setupComplete
+                    ? (chat.isAgent ? 'Agent · bereit' : 'Bereit')
+                    : 'Einrichtung nötig'))
+                : getLastPreview(chat.lastMessage, debugMode)}
+            </div>
+          </div>
+          <div className="chat-list-meta">
+            {chat.lastMessage && <span className="list-item-meta">{formatTime(chat.lastMessage.timestamp)}</span>}
+            <div className="chat-list-meta-row">
+              {unreadCount > 0 && (
+                <>
+                  <span className="chat-unread-dot" title="Ungelesene Nachrichten" aria-hidden />
+                  <span
+                    className="chat-unread-badge"
+                    title={`${unreadCount} ungelesen`}
+                    aria-label={`${unreadCount} ungelesene Nachrichten`}
+                  >
+                    {formatUnreadBadgeCount(unreadCount)}
+                  </span>
+                </>
+              )}
+              {chat.isAiChat ? (
+                isAiChatPending(chat.id) ? (
+                  <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Antwort wird erstellt">
+                    <span className="spinner spinner--sm" aria-hidden />
+                  </span>
+                ) : (
+                  <span className="ai-chat-list-badge" title="KI-Chat">KI</span>
+                )
+              ) : (
+                <span className={chat.offline ? 'offline-dot' : 'online-dot'} />
+              )}
+            </div>
+          </div>
+        </div>
+        {runningSubagents.map((sub) => {
+          const taskPreview = String(sub.task || '').trim();
+          const shortTask = taskPreview.length > 72 ? `${taskPreview.slice(0, 72)}…` : taskPreview;
+          return (
+            <div key={`sub-${sub.id}`} className="list-item list-item--subagent" aria-label="Laufender Sub-Agent">
+              <div className="ai-chat-list-avatar list-item--subagent-icon" aria-hidden>
+                <Bot size={16} strokeWidth={CHAT_ICON_STROKE} />
+              </div>
+              <div className="list-item-info">
+                <div className="list-item-name-row">
+                  <div className="list-item-name">Sub-Agent</div>
+                  <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Sub-Agent läuft">
+                    <span className="spinner spinner--sm" aria-hidden />
+                  </span>
+                </div>
+                <div className="list-item-sub">{shortTask || 'Teilaufgabe wird bearbeitet…'}</div>
+              </div>
+            </div>
+          );
+        })}
+      </React.Fragment>
+    );
+  }, [
+    chatLastViewedPeerTs,
+    debugMode,
+    isAiChatPending,
+    liveSubagentsByPeer,
+    messages,
+    ollamaState?.setupComplete,
+    openChatListContextMenu,
+    resolveContact,
+    selectedPeer?.id,
+  ]);
+
   return (
     <div className="page">
       <MediaLightbox
@@ -3057,105 +3269,44 @@ export default function ChatsPage() {
               />
             </div>
           </div>
-          <div className="split-list-body">
-            {filtered.length === 0 && (
-              <div className="empty-state split-list-empty-state">
-                <p>No chats yet. Use New in the sidebar for peers without a conversation, or connect below.</p>
-              </div>
-            )}
-            {filtered.map((chat) => {
-              const chatContact = resolveContact(chat.id);
-              const unreadCount = !chat.isAiChat
-                ? countUnreadPeerMessages(
-                    chat.id,
-                    chatLastViewedPeerTs[chat.id],
-                    messages,
-                    chat.lastMessage
-                  )
-                : 0;
-              return (
-              <div
-                key={chat.id}
-                  className={`list-item ${selectedPeer?.id === chat.id ? 'active' : ''}${chat.contact?.blocked ? ' list-item--blocked' : ''}${chat.contact?.blockedByPeer ? ' list-item--blocked-by-peer' : ''}${unreadCount > 0 ? ' list-item--has-unread' : ''}${chat.isAiChat ? ' list-item--ai' : ''}`}
-                onClick={() => setSelectedPeerId(chat.id)}
-                onContextMenu={(e) => openChatListContextMenu(e, chat)}
-              >
-                {chat.isAiChat ? (
-                  chat.profilePicture ? (
-                    <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
-                  ) : (
-                    <div className="ai-chat-list-avatar" aria-hidden>
-                      <Bot size={20} strokeWidth={CHAT_ICON_STROKE} />
-                    </div>
-                  )
-                ) : (
-                  <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
-                )}
-                <div className="list-item-info">
-                  <div className="list-item-name-row">
-                    <div className="list-item-name">{chat.displayName}</div>
-                    {chat.isAgent ? (
-                      <span className="ai-agent-badge" title="Agent-Modus — kann Dateien, Befehle und BlueTalk-Werkzeuge nutzen">
-                        Agent
-                      </span>
-                    ) : null}
-                    {chat.pinned && (
-                      <span className="chat-pin-badge" title="Angehefteter Chat">
-                        <Pin size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                      </span>
-                    )}
-                    {chat.e2eePlaintextBadge && (
-                      <span className="chat-pin-badge" title="Ausgehend ohne E2EE (Klartext)">
-                        <Unlock size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                      </span>
-                    )}
-                    {isContactNotificationMuted(chatContact) && (
-                      <span className="chat-pin-badge" title="Mitteilungen stumm">
-                        <BellOff size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                      </span>
-                    )}
-                  </div>
-                  <div className="list-item-sub">
-                    {chat.isAiChat
-                      ? (isAiChatPending(chat.id)
-                        ? 'Antwort wird erstellt…'
-                        : (ollamaState?.setupComplete
-                          ? (chat.isAgent ? 'Agent · bereit' : 'Bereit')
-                          : 'Einrichtung nötig'))
-                      : getLastPreview(chat.lastMessage, debugMode)}
-                  </div>
+          <div className="split-list-body split-list-body--with-agents">
+            <div className="split-list-chats">
+              {filteredPeerChats.length === 0 && filteredAiAgents.length === 0 && (
+                <div className="empty-state split-list-empty-state">
+                  <p>No chats yet. Use New in the sidebar for peers without a conversation, or connect below.</p>
                 </div>
-                <div className="chat-list-meta">
-                  {chat.lastMessage && <span className="list-item-meta">{formatTime(chat.lastMessage.timestamp)}</span>}
-                  <div className="chat-list-meta-row">
-                    {unreadCount > 0 && (
-                      <>
-                        <span className="chat-unread-dot" title="Ungelesene Nachrichten" aria-hidden />
-                        <span
-                          className="chat-unread-badge"
-                          title={`${unreadCount} ungelesen`}
-                          aria-label={`${unreadCount} ungelesene Nachrichten`}
-                        >
-                          {formatUnreadBadgeCount(unreadCount)}
-                        </span>
-                      </>
-                    )}
-                    {chat.isAiChat ? (
-                      isAiChatPending(chat.id) ? (
-                        <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Antwort wird erstellt">
-                          <span className="spinner spinner--sm" aria-hidden />
-                        </span>
-                      ) : (
-                        <span className="ai-chat-list-badge" title="KI-Chat">KI</span>
-                      )
-                    ) : (
-                      <span className={chat.offline ? 'offline-dot' : 'online-dot'} />
-                    )}
+              )}
+              {filteredPeerChats.map((chat) => renderChatListRow(chat))}
+            </div>
+            {filteredAiAgents.length > 0 ? (
+              <div className="split-list-agents-panel">
+                <button
+                  type="button"
+                  className="split-list-agents-toggle"
+                  onClick={toggleAiAgentsPanel}
+                  aria-expanded={!aiAgentsPanelCollapsed}
+                >
+                  <ChevronDown
+                    size={14}
+                    strokeWidth={CHAT_ICON_STROKE}
+                    aria-hidden
+                    className={`split-list-agents-chevron${aiAgentsPanelCollapsed ? ' split-list-agents-chevron--collapsed' : ''}`}
+                  />
+                  <span className="split-list-agents-toggle-label">KI-Agenten</span>
+                  <span className="split-list-agents-count">{filteredAiAgents.length}</span>
+                  {filteredAiAgents.some((chat) => isAiChatPending(chat.id)) ? (
+                    <span className="split-list-agents-active" title="KI-Antwort wird erstellt">
+                      <span className="spinner spinner--sm" aria-hidden />
+                    </span>
+                  ) : null}
+                </button>
+                {!aiAgentsPanelCollapsed ? (
+                  <div className="split-list-agents-body">
+                    {filteredAiAgents.map((chat) => renderChatListRow(chat))}
                   </div>
-                </div>
+                ) : null}
               </div>
-            );
-            })}
+            ) : null}
           </div>
         </div>
         )}

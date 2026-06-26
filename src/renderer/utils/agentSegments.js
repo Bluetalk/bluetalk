@@ -19,6 +19,10 @@ export function groupConsecutiveToolSegments(segments) {
       continue;
     }
     flushTools();
+    if (seg.type === 'subagent') {
+      out.push({ ...seg });
+      continue;
+    }
     const last = out[out.length - 1];
     if (seg.type === 'thinking' && last?.type === 'thinking' && !last.toolAfter && !seg.toolAfter) {
       last.text = seg.text;
