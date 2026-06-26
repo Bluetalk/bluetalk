@@ -7,6 +7,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { normalizeChatMarkdown } from '../utils/normalizeChatMarkdown.js';
+import { groupConsecutiveToolSegments, toolEventsFromSegment } from '../utils/agentSegments.js';
 import {
   Archive,
   Ban,
@@ -1360,7 +1361,7 @@ function AgentToolEvents({ events = [], live = false }) {
           const ok = evt?.result?.ok !== false;
           const resultText = summarizeToolResult(evt?.result);
           return (
-            <div key={idx} className={`msg-agent-tool-line${ok ? '' : ' msg-agent-tool-line--error'}`}>
+            <div key={`${name}-${idx}`} className={`msg-agent-tool-line${ok ? '' : ' msg-agent-tool-line--error'}`}>
               <span className="msg-agent-tool-line-dot" aria-hidden />
               <span className="msg-agent-tool-line-label">{label}</span>
               {arg ? <span className="msg-agent-tool-line-arg">{arg}</span> : null}
@@ -1374,10 +1375,12 @@ function AgentToolEvents({ events = [], live = false }) {
   );
 }
 
-/** Rendert ein einzelnes Tool-Segment (ein Tool-Aufruf) als ausklappbarer Block. */
-function AgentToolSegment({ event, live = false }) {
-  const events = Array.isArray(event) ? event : [event];
-  return <AgentToolEvents events={events} live={live} />;
+/** Rendert ein Tool-Segment (ein oder mehrere aufeinanderfolgende Tool-Aufrufe). */
+function AgentToolSegment({ segment, event, events, live = false }) {
+  const list = Array.isArray(events) && events.length
+    ? events
+    : toolEventsFromSegment(segment || (event ? { type: 'tool', event } : null));
+  return <AgentToolEvents events={list} live={live} />;
 }
 
 /**
@@ -1404,14 +1407,15 @@ function MessageSegments({ segments, content, thinking, toolEvents, live = false
   // eigenes Segment angelegt hat).
   const hasAnswer = segments.some((s) => s.type === 'answer' && String(s.text || '').trim());
   const fallbackContent = !hasAnswer && content && content.trim() ? content : null;
+  const displaySegments = groupConsecutiveToolSegments(segments);
   return (
     <>
-      {segments.map((seg, idx) => {
+      {displaySegments.map((seg, idx) => {
         if (seg.type === 'thinking') {
           return <AiThinkingBlock key={`t-${idx}`} thinking={seg.text} live={live} />;
         }
         if (seg.type === 'tool') {
-          return <AgentToolSegment key={`tool-${idx}`} event={seg.event} live={live} />;
+          return <AgentToolSegment key={`tool-${idx}`} segment={seg} live={live} />;
         }
         if (seg.type === 'answer') {
           return (

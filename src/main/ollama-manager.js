@@ -53,8 +53,6 @@ const {
 } = require(path.join(__dirname, 'ollama-paths.js'));
 
 const RUNTIME_DIR_NAME = 'runtime';
-const MAX_AGENT_TOOL_ROUNDS = 12;
-const MAX_SUBAGENT_TOOL_ROUNDS = 8;
 
 function platformRuntimeAsset() {
   if (process.platform === 'win32') return 'ollama-windows-amd64.zip';
@@ -763,7 +761,7 @@ class OllamaManager {
 
       if (agentEnabled) {
         // eslint-disable-next-line no-constant-condition
-        for (let toolRound = 0; ; toolRound += 1) {
+        for (;;) {
           // eslint-disable-next-line no-await-in-loop
           const response = await this._chatRequestStream(
             {
@@ -818,28 +816,6 @@ class OllamaManager {
           }
 
           if (!toolCalls.length) {
-            break;
-          }
-
-          if (toolRound >= MAX_AGENT_TOOL_ROUNDS) {
-            const limitEvent = {
-              name: 'tool_limit',
-              arguments: { limit: MAX_AGENT_TOOL_ROUNDS },
-              result: { ok: false, error: 'agent_tool_round_limit' },
-            };
-            collectedToolEvents.push(limitEvent);
-            segments.push({ type: 'tool', event: limitEvent });
-            finalContent = (finalContent ? `${finalContent}\n\n` : '')
-              + 'Der Agent hat das Tool-Limit erreicht und wurde gestoppt.';
-            emitProgress({
-              thinking: finalThinking,
-              content: finalContent,
-              toolResults: [limitEvent],
-              segments,
-              tps: 0,
-              genTimeMs: 0,
-              done: false,
-            });
             break;
           }
 
@@ -1114,7 +1090,8 @@ class OllamaManager {
     const subThink = this._thinkOption({ model, tierId: parentTier, thinkingMode: 'auto' });
 
     let lastContent = '';
-    for (let toolRound = 0; toolRound < MAX_SUBAGENT_TOOL_ROUNDS; toolRound += 1) {
+    // eslint-disable-next-line no-constant-condition
+    for (;;) {
       // eslint-disable-next-line no-await-in-loop
       const response = await this._chatRequestStream(
         {
@@ -1150,7 +1127,7 @@ class OllamaManager {
         });
       }
     }
-    throw new Error(lastContent || 'subagent_tool_round_limit');
+    return { content: lastContent.trim() };
   }
 
   _buildChatHistory(peerId, latestPrompt, tierId, agentEnabled) {
