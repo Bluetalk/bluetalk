@@ -1,11 +1,16 @@
 {
   "id": "poker",
   "name": "Poker (Texas Hold'em)",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Erstellt Tische, lädt Spieler per Chat-Einladung ein und spielt Echtzeit Texas Hold'em über P2P.",
   "author": "BlueTalk",
   "main": "main.js",
   "ui": "ui.js",
   "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "tabs:register"],
-  "autoEnable": true
+  "autoEnable": true,
+  "game": {
+    "mark": "♠",
+    "title": "Texas Hold'em",
+    "description": "Host erstellt den Tisch, lädt per Chat ein — Echtzeit über P2P."
+  }
 }

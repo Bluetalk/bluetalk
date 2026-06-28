@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import ReactDOM from 'react-dom';
 import {
   Blocks,
+  BookOpen,
   Copy,
   FolderOpen,
   Package,
@@ -274,6 +276,10 @@ export default function PluginsPage() {
           ) : null}
         </div>
         <div className="page-header-actions">
+          <Link to="/docs/getting-started" className="btn btn-secondary btn-sm">
+            <BookOpen size={15} strokeWidth={ICON_STROKE} />
+            API Documentation
+          </Link>
           <button type="button" className="btn btn-primary btn-sm" onClick={installFromDialog} disabled={busy === 'install'}>
             <Plus size={15} strokeWidth={ICON_STROKE} />
             {busy === 'install' ? 'Wird hinzugefügt…' : 'Hinzufügen'}

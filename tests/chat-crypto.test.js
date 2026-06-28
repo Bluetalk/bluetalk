@@ -52,3 +52,32 @@ test('E2EE v1 payloads remain compatible with existing peers', async () => {
   assert.equal(envelope.e2eeV, 1);
   assert.deepEqual(await cryptoApi.decryptChatPayload(rightKey, envelope), plain);
 });
+
+test('group payloads are encrypted independently for each pairwise recipient', async () => {
+  const cryptoApi = await loadChatCrypto();
+  const sender = await cryptoApi.generateEcdhKeyPair();
+  const alice = await cryptoApi.generateEcdhKeyPair();
+  const bob = await cryptoApi.generateEcdhKeyPair();
+  const outsider = await cryptoApi.generateEcdhKeyPair();
+
+  const senderAlice = await cryptoApi.deriveSharedAesKey(sender.privateKey, alice.publicKey);
+  const aliceSender = await cryptoApi.deriveSharedAesKey(alice.privateKey, sender.publicKey);
+  const senderBob = await cryptoApi.deriveSharedAesKey(sender.privateKey, bob.publicKey);
+  const bobSender = await cryptoApi.deriveSharedAesKey(bob.privateKey, sender.publicKey);
+  const outsiderSender = await cryptoApi.deriveSharedAesKey(outsider.privateKey, sender.publicKey);
+  const payload = {
+    kind: 'group-message-v1',
+    protocolVersion: 1,
+    groupId: 'group:12345678',
+    senderPeerId: 'bt-sender',
+    messageId: 'gm1',
+    payload: { kind: 'chat', content: 'nur Mitglieder' },
+  };
+
+  const aliceEnvelope = await cryptoApi.encryptChatPayload(senderAlice, payload, { version: 1 });
+  const bobEnvelope = await cryptoApi.encryptChatPayload(senderBob, payload, { version: 1 });
+  assert.deepEqual(await cryptoApi.decryptChatPayload(aliceSender, aliceEnvelope), payload);
+  assert.deepEqual(await cryptoApi.decryptChatPayload(bobSender, bobEnvelope), payload);
+  await assert.rejects(cryptoApi.decryptChatPayload(outsiderSender, aliceEnvelope));
+  await assert.rejects(cryptoApi.decryptChatPayload(bobSender, aliceEnvelope));
+});

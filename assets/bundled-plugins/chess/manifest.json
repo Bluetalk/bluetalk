@@ -1,0 +1,16 @@
+{
+  "id": "chess",
+  "name": "Schach",
+  "version": "1.0.0",
+  "description": "2-Spieler-Schach — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster.",
+  "author": "BlueTalk",
+  "main": "main.js",
+  "ui": "ui.js",
+  "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "tabs:register"],
+  "autoEnable": true,
+  "game": {
+    "mark": "♟",
+    "title": "Schach",
+    "description": "2 Spieler, Einladung per Chat, Echtzeit P2P."
+  }
+}

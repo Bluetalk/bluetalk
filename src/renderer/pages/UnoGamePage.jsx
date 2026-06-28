@@ -418,6 +418,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         <p><strong>Spieler:</strong> max. {settings?.maxPlayers}</p>
         <p><strong>Modus:</strong> {settings?.gameMode === 'points' ? `Punkte (${settings?.targetScore})` : 'Einzelrunde'}</p>
         <p><strong>Hausregeln:</strong> {settings?.houseRules === 'casual' ? 'Casual' : 'Offiziell'}</p>
+        <p><strong>Lobby:</strong> {settings?.lobbyAccess === 'public' ? 'Öffentlich' : 'Nur auf Einladung'}</p>
       </div>
     );
   }
@@ -438,6 +439,12 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         <select value={local.houseRules || 'official'} onChange={(e) => setLocal({ ...local, houseRules: e.target.value })}>
           <option value="official">Offiziell (Mattel)</option>
           <option value="casual">Casual (+2/+4 stapelbar)</option>
+        </select>
+      </label>
+      <label>Lobby-Zugang
+        <select value={local.lobbyAccess || 'invite'} onChange={(e) => setLocal({ ...local, lobbyAccess: e.target.value })}>
+          <option value="invite">Nur auf Einladung</option>
+          <option value="public">Öffentlich (Presence-Beitritt)</option>
         </select>
       </label>
       <label>Zugzeit (Sek., 0=∞)<input type="number" min={0} max={300} value={local.turnTimeSec ?? 0} onChange={(e) => setLocal({ ...local, turnTimeSec: Number(e.target.value) })} /></label>

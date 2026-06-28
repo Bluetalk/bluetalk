@@ -6,15 +6,22 @@
  *   - Execute each enabled plugin's `ui.js` source inside a per-plugin function
  *     closure so plugin globals don't collide.
  *   - Provide the plugin-facing `BlueTalkPlugin` API: events, peer, messages,
- *     (tabs, screens, commands, composer attachments), storage, toast.
+ *     (tabs, screens, commands, composer attachments), storage, toast, realtime.
  *   - Maintain registries for custom tabs + screens and notify subscribers
  *     via a tiny pub/sub.
+ *
+ * Game plugins (manifest.game): no sidebar tab; register launcher commands via
+ * api.ui.registerCommand — launcherState, launchNew, launchResume, openWindow.
  *
  * The API is intentionally permissive — all plugins are locally installed by
  * the user. Guard rails are limited to avoiding obvious foot-guns (passing
  * frozen snapshots out, scoping storage per plugin, removing listeners on
  * disable/uninstall).
  */
+
+import { createRealtimeManager } from '../../shared/plugin-realtime.mjs';
+
+const LEGACY_GAME_TAB_IDS = new Set(['uno:game', 'poker:table']);
 
 const EVENTS_FROM_MAIN = [
   'peer:connected',
@@ -66,6 +73,8 @@ class PluginRuntime {
     this._host = null;
     this._pluginListChanged = null;
     this._booted = false;
+    this._applyingList = false;
+    this._pendingPluginList = null;
   }
 
   setHost(host) {
@@ -73,9 +82,9 @@ class PluginRuntime {
   }
 
   async boot(host) {
+    if (host) this._host = host;
     if (this._booted) return;
     this._booted = true;
-    this._host = host;
 
     if (!window.bluetalk?.plugins) return;
 
@@ -128,38 +137,81 @@ class PluginRuntime {
   }
 
   _applyList(list) {
-    const prev = new Map(this.plugins.map((p) => [p.id, p]));
-    this.plugins = Array.isArray(list) ? list : [];
+    if (this._applyingList) {
+      this._pendingPluginList = list;
+      return;
+    }
+    this._applyingList = true;
+    let tabsDirty = false;
 
-    const nextIds = new Set(this.plugins.map((p) => p.id));
-    for (const id of Array.from(this.active.keys())) {
-      if (!nextIds.has(id)) {
-        this._deactivate(id);
+    try {
+      const prev = new Map(this.plugins.map((p) => [p.id, p]));
+      this.plugins = Array.isArray(list) ? list : [];
+
+      const nextIds = new Set(this.plugins.map((p) => p.id));
+      for (const id of Array.from(this.active.keys())) {
+        if (!nextIds.has(id)) {
+          this._deactivate(id, { emit: false });
+          tabsDirty = true;
+        }
+      }
+
+      for (const plugin of this.plugins) {
+        const existing = prev.get(plugin.id);
+        const activeRec = this.active.get(plugin.id);
+
+        if (activeRec) {
+          activeRec.manifest = plugin.manifest || activeRec.manifest;
+          if (this._isGamePlugin(plugin) || activeRec.isGameLauncher) {
+            activeRec.isGameLauncher = true;
+            if (activeRec.tabs.size > 0) {
+              activeRec.tabs.clear();
+              tabsDirty = true;
+            }
+          }
+        }
+
+        if (plugin.enabled && plugin.hasUi) {
+          const isGame = this._isGamePlugin(plugin);
+          const needsActivation = !activeRec
+            || (isGame && !activeRec.commands.has('launcherState'));
+          if (needsActivation) {
+            if (activeRec) {
+              this._deactivate(plugin.id, { emit: false });
+            }
+            this._activate(plugin);
+            tabsDirty = true;
+          }
+        } else if (!plugin.enabled && activeRec) {
+          this._deactivate(plugin.id, { emit: false });
+          tabsDirty = true;
+        } else if (plugin.enabled && plugin.hasUi && activeRec && existing?.ui !== plugin.ui) {
+          this._deactivate(plugin.id, { emit: false });
+          this._activate(plugin);
+          tabsDirty = true;
+        }
+      }
+
+      this.emitter.emit('plugins-changed', this.plugins);
+      if (tabsDirty) {
+        this.emitter.emit('tabs-changed', this.listTabs());
+        this.emitter.emit('screens-changed', this.listScreens());
+        this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
+      }
+    } finally {
+      this._applyingList = false;
+      if (this._pendingPluginList) {
+        const pending = this._pendingPluginList;
+        this._pendingPluginList = null;
+        this._applyList(pending);
       }
     }
-
-    for (const plugin of this.plugins) {
-      const existing = prev.get(plugin.id);
-      const activeRec = this.active.get(plugin.id);
-      if (plugin.enabled && plugin.hasUi && !activeRec) {
-        this._activate(plugin);
-      } else if (!plugin.enabled && activeRec) {
-        this._deactivate(plugin.id);
-      } else if (plugin.enabled && plugin.hasUi && activeRec && existing?.ui !== plugin.ui) {
-        // Plugin UI source changed — re-activate
-        this._deactivate(plugin.id);
-        this._activate(plugin);
-      }
-    }
-
-    this.emitter.emit('plugins-changed', this.plugins);
-    this.emitter.emit('tabs-changed', this.listTabs());
-    this.emitter.emit('screens-changed', this.listScreens());
-    this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
   }
 
   _activate(plugin) {
-    if (this.active.has(plugin.id)) return;
+    if (this.active.has(plugin.id)) {
+      this._deactivate(plugin.id, { emit: false });
+    }
     const logger = {
       info: (...a) => console.log(`[plugin:${plugin.id}]`, ...a),
       warn: (...a) => console.warn(`[plugin:${plugin.id}]`, ...a),
@@ -169,6 +221,7 @@ class PluginRuntime {
     const record = {
       id: plugin.id,
       manifest: plugin.manifest,
+      isGameLauncher: this._isGamePlugin(plugin),
       tabs: new Map(),
       screens: new Map(),
       composerAttachments: new Map(),
@@ -180,7 +233,14 @@ class PluginRuntime {
     };
     this.active.set(plugin.id, record);
 
-    const api = this._buildPluginApi(record);
+    let api;
+    try {
+      api = this._buildPluginApi(record);
+    } catch (e) {
+      logger.error('API build failed:', e);
+      this.active.delete(plugin.id);
+      return;
+    }
     record.api = api;
 
     try {
@@ -189,11 +249,19 @@ class PluginRuntime {
       const fn = new Function('BlueTalkPlugin', 'plugin', 'window', 'document', plugin.ui || '');
       fn(api, api, window, document);
     } catch (e) {
-      record.logger.error('activation failed:', e);
+      logger.error('activation failed:', e);
+      this.active.delete(plugin.id);
+      return;
+    }
+
+    if (record.isGameLauncher && !record.commands.has('launcherState')) {
+      logger.error('activation incomplete: missing launcher commands');
+      this.active.delete(plugin.id);
     }
   }
 
-  _deactivate(id) {
+  _deactivate(id, options = {}) {
+    const { emit = true } = options;
     const record = this.active.get(id);
     if (!record) return;
     try {
@@ -219,11 +287,21 @@ class PluginRuntime {
     record.screens.clear();
     record.composerAttachments.clear();
     record.commands.clear();
+    if (record.realtimeManager) {
+      try {
+        record.realtimeManager.dispose();
+      } catch {
+        /* ignore */
+      }
+      record.realtimeManager = null;
+    }
     record.eventListeners.clear();
     this.active.delete(id);
-    this.emitter.emit('tabs-changed', this.listTabs());
-    this.emitter.emit('screens-changed', this.listScreens());
-    this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
+    if (emit) {
+      this.emitter.emit('tabs-changed', this.listTabs());
+      this.emitter.emit('screens-changed', this.listScreens());
+      this.emitter.emit('composer-attachments-changed', this.listComposerAttachments());
+    }
   }
 
   _buildPluginApi(record) {
@@ -303,6 +381,7 @@ class PluginRuntime {
         info: () => window.bluetalk?.peer?.getInfo?.(),
         list: () => window.bluetalk?.peer?.getPeers?.(),
         send: (peerId, data) => window.bluetalk?.peer?.send?.(peerId, data),
+        sendMany: (peerIds, data) => window.bluetalk?.peer?.sendMany?.(peerIds, data),
         broadcast: (data) => window.bluetalk?.peer?.broadcast?.(data),
         connect: (address) => window.bluetalk?.peer?.connect?.(address),
         disconnect: (peerId) => window.bluetalk?.peer?.disconnect?.(peerId),
@@ -338,6 +417,15 @@ class PluginRuntime {
          */
         registerTab: (tab) => {
           if (!tab || typeof tab.render !== 'function') return () => undefined;
+          const pluginEntry = this.plugins.find((p) => p.id === id);
+          if (
+            record.isGameLauncher
+            || this._isGamePlugin(pluginEntry)
+            || this._isGamePlugin({ manifest: record.manifest })
+          ) {
+            logger.warn('registerTab ignored — game plugins belong in the built-in Spiele tab');
+            return () => undefined;
+          }
           const tabId = `${id}:${tab.id || tab.label || Math.random().toString(36).slice(2, 8)}`;
           const entry = {
             tabId,
@@ -403,6 +491,12 @@ class PluginRuntime {
             return () => undefined;
           }
           record.commands.set(commandId, handler);
+          if (commandId === 'launcherState') {
+            record.isGameLauncher = true;
+            if (record.tabs.size > 0) {
+              record.tabs.clear();
+            }
+          }
           const off = () => record.commands.delete(commandId);
           record.disposers.add(off);
           return off;
@@ -459,9 +553,30 @@ class PluginRuntime {
         }
       },
 
+      invokePluginCommand: (pluginId, commandId, args) =>
+        this.invokePluginCommand(pluginId, commandId, args),
+
       // React helpers (available for plugins that want JSX at runtime)
       React: undefined,
       ReactDOM: undefined,
+    };
+
+    const realtimeManager = createRealtimeManager({
+      pluginId: id,
+      peer: api.peer,
+      selfPeerId: () => window.bluetalk?.peer?.getInfo?.()?.peerId,
+      log: logger,
+      onPeerMessage: (handler) => api.on('peer:message', handler),
+    });
+    record.realtimeManager = realtimeManager;
+    record.disposers.add(() => realtimeManager.dispose());
+
+    api.realtime = {
+      createRoom: (opts) => realtimeManager.createRoom(opts),
+      joinRoom: (opts) => realtimeManager.joinRoom(opts),
+      listRooms: () => realtimeManager.listRooms(),
+      getRoom: (roomId) => realtimeManager.getRoom(roomId),
+      on: (event, handler) => realtimeManager.on(event, handler),
     };
 
     return api;
@@ -478,10 +593,49 @@ class PluginRuntime {
     this._ReactDOM = ReactDOM;
   }
 
+  _isGamePlugin(plugin) {
+    if (!plugin) return false;
+    if (plugin.id === 'poker' || plugin.id === 'uno' || plugin.id === 'connect-four' || plugin.id === 'chess') return true;
+    const game = plugin?.manifest?.game;
+    return game === true || (typeof game === 'object' && game !== null);
+  }
+
+  listGames() {
+    return this.plugins
+      .filter((plugin) => this._isGamePlugin(plugin))
+      .map((plugin) => this._mapGameEntry(plugin))
+      .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+  }
+
+  _mapGameEntry(plugin) {
+    const gameMeta = typeof plugin.manifest?.game === 'object' && plugin.manifest.game !== null
+      ? plugin.manifest.game
+      : {};
+    return {
+      id: plugin.id,
+      enabled: Boolean(plugin.enabled),
+      name: gameMeta.title || plugin.manifest?.name || plugin.id,
+      description: gameMeta.description || plugin.manifest?.description || '',
+      tag: plugin.manifest?.tag || gameMeta.tag || null,
+      mark: gameMeta.mark || plugin.manifest?.gameMark || '🎮',
+      alphaNotice: gameMeta.alphaNotice || null,
+      labels: gameMeta.labels || null,
+    };
+  }
+
   listTabs() {
     const out = [];
     for (const record of this.active.values()) {
+      const plugin = this.plugins.find((p) => p.id === record.id);
+      if (
+        record.isGameLauncher
+        || this._isGamePlugin(plugin)
+        || this._isGamePlugin({ manifest: record.manifest })
+      ) {
+        continue;
+      }
       for (const tab of record.tabs.values()) {
+        if (LEGACY_GAME_TAB_IDS.has(tab.tabId)) continue;
         out.push(tab);
       }
     }
@@ -512,6 +666,32 @@ class PluginRuntime {
 
   getTab(tabId) {
     return this.listTabs().find((t) => t.tabId === tabId) || null;
+  }
+
+  async invokePluginCommand(pluginId, commandId, args) {
+    let record = this.active.get(pluginId);
+    let handler = record?.commands.get(commandId);
+    if (!record || !handler) {
+      await this.refresh();
+      const plugin = this.plugins.find((item) => item.id === pluginId);
+      if (plugin?.enabled && plugin.hasUi) {
+        if (this.active.has(pluginId)) {
+          this._deactivate(pluginId, { emit: false });
+        }
+        this._activate(plugin);
+      }
+      record = this.active.get(pluginId);
+      handler = record?.commands.get(commandId);
+    }
+
+    if (!record) return { ok: false, error: 'not_active' };
+    if (!handler) return { ok: false, error: 'unknown_command' };
+    try {
+      const result = await handler(args);
+      return { ok: true, result };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
   }
 
   onTabsChanged(fn) {

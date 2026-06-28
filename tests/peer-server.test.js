@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
-const { PeerServer } = require('../src/shared/peer-server');
+const { PeerServer, isLoopbackConnectAddress } = require('../src/shared/peer-server');
 
 class MemoryStore {
   constructor(initial = {}) {
@@ -146,6 +146,20 @@ test('saved contacts retain their identity when reconnecting host:port addresses
   peer.stop();
 });
 
+test('explicit host:port addresses dial only the saved port', () => {
+  const peer = new PeerServer(new MemoryStore({ peerId: 'bt-a' }));
+  const descriptor = peer._createConnectionDescriptor({ id: 'bt-b', address: '127.0.0.1:58621' });
+  const candidates = peer._createConnectionCandidates(descriptor);
+  assert.deepEqual(candidates.map((item) => item.port), [58621]);
+  peer.stop();
+});
+
+test('isLoopbackConnectAddress detects localhost endpoints', () => {
+  assert.equal(isLoopbackConnectAddress('127.0.0.1:58621'), true);
+  assert.equal(isLoopbackConnectAddress('localhost:8080'), true);
+  assert.equal(isLoopbackConnectAddress('192.168.1.10:58621'), false);
+});
+
 test('candidate dialing uses bounded parallel batches', async () => {
   const peer = new PeerServer(new MemoryStore({ peerId: 'bt-a' }));
   let active = 0;
@@ -171,6 +185,25 @@ test('invalid peer identities are rejected before dialing', async () => {
     peer.connectTo({ id: '__proto__', address: '127.0.0.1:1234' }),
     /Invalid peer identity/
   );
+  peer.stop();
+});
+
+test('sendMany routes only to explicit valid recipients', () => {
+  const peer = new PeerServer(new MemoryStore({ peerId: 'bt-a' }));
+  const calls = [];
+  peer.sendTo = (peerId, data) => {
+    calls.push({ peerId, data });
+    return peerId !== 'bt-offline';
+  };
+  const result = peer.sendMany(
+    ['bt-member', 'bt-member', 'invalid peer', 'bt-offline'],
+    { kind: 'group-message-v1', groupId: 'group:12345678' }
+  );
+  assert.deepEqual(calls.map((call) => call.peerId), ['bt-member', 'bt-offline']);
+  assert.deepEqual(result, [
+    { peerId: 'bt-member', sent: true },
+    { peerId: 'bt-offline', sent: false },
+  ]);
   peer.stop();
 });
 

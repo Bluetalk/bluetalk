@@ -21,6 +21,7 @@ const {
   resolveAgentPersonality,
   isAgentModeEnabled,
   resolveAgentWorkDir,
+  resolveAllowBluetalkMessaging,
   getModelTier,
   isValidModelTier,
   getCloudModel,
@@ -29,18 +30,26 @@ const {
   resolveCloudModelId,
   resolveActiveModelName,
   isAiChatPeerId,
+  isBluetalkAgentTool,
   resolveThinkOption,
   resolveAgentThinkingMode,
   resolveOllamaRuntimeMode,
+  modelSupportsVision,
 } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
 const {
   defaultWorkDir,
   executeToolCall,
-  extractToolCallsFromText,
+  resolveToolCallsFromAssistantText,
   normalizeToolCallsForOllama,
   sanitizeMessagesForOllama,
   formatToolResultMessageContent,
 } = require(path.join(__dirname, 'agent-tools.js'));
+const {
+  isImageAttachment,
+  normalizeAttachmentFileType,
+  resolveImageMime,
+  stripDataUrlPrefix: stripAttachmentDataUrlPrefix,
+} = require(path.join(__dirname, '..', 'shared', 'attachment-image.js'));
 const {
   BLUETALK_OLLAMA_MODELS_ENV,
   defaultModelsDir,
@@ -52,8 +61,6 @@ const {
 } = require(path.join(__dirname, 'ollama-paths.js'));
 
 const RUNTIME_DIR_NAME = 'runtime';
-const MAX_AGENT_TOOL_ROUNDS = 12;
-const MAX_SUBAGENT_TOOL_ROUNDS = 8;
 
 function platformRuntimeAsset() {
   if (process.platform === 'win32') return 'ollama-windows-amd64.zip';
@@ -65,6 +72,39 @@ function isArchiveTgz(name) {
   return name.endsWith('.tgz') || name.endsWith('.tar.gz');
 }
 
+function stripDataUrlPrefix(data) {
+  return stripAttachmentDataUrlPrefix(data);
+}
+
+function buildAiUserMessage(text, attachments = []) {
+  const images = [];
+  const notes = [];
+  for (const att of attachments) {
+    if (!att) continue;
+    const fileName = String(att.fileName || att.name || 'Anhang').trim() || 'Anhang';
+    const fileType = normalizeAttachmentFileType(fileName, att.fileType || att.type, att.fileData || att.base64);
+    const rawData = att.fileData || att.base64;
+    if (isImageAttachment(fileType, fileName, rawData) && rawData) {
+      images.push(stripDataUrlPrefix(rawData));
+      continue;
+    }
+    notes.push(`[Datei: ${fileName}${fileType ? ` (${fileType})` : ''}]`);
+  }
+  const trimmed = String(text || '').trim();
+  const content = [trimmed, ...notes].filter(Boolean).join('\n\n')
+    || (images.length ? 'Siehe angehängtes Bild.' : '');
+  const msg = { role: 'user', content };
+  if (images.length) msg.images = images;
+  return msg;
+}
+
+function stripOrphanThinkingTags(text) {
+  return String(text || '')
+    .replace(/<\/?(?:redacted_thinking|think|redacted_reasoning)>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function splitThinkingText(rawText) {
   const raw = String(rawText || '');
   if (!raw) return { thinking: '', content: '' };
@@ -72,17 +112,17 @@ function splitThinkingText(rawText) {
   let content = '';
   let thinking = '';
   let cursor = 0;
-  const openRe = /<think>/ig;
+  const openRe = /<(?:redacted_thinking|think|redacted_reasoning)>/ig;
   let match = openRe.exec(raw);
 
   while (match) {
     content += raw.slice(cursor, match.index);
     const bodyStart = openRe.lastIndex;
-    const closeRe = /<\/think>/ig;
+    const closeRe = /<\/(?:redacted_thinking|think|redacted_reasoning)>/ig;
     closeRe.lastIndex = bodyStart;
     const close = closeRe.exec(raw);
     if (!close) {
-      thinking += raw.slice(bodyStart);
+      thinking += `${thinking ? '\n\n' : ''}${raw.slice(bodyStart)}`;
       cursor = raw.length;
       break;
     }
@@ -95,24 +135,70 @@ function splitThinkingText(rawText) {
   content += raw.slice(cursor);
   return {
     thinking: thinking.trim(),
-    content: content.trim(),
+    content: stripOrphanThinkingTags(content),
   };
 }
 
 const {
   upsertStreamThinking,
   upsertStreamAnswer,
+  clearLastStreamAnswer,
   consolidateSegments,
 } = require(path.join(__dirname, 'ai-stream-segments.js'));
 
 class OllamaManager {
-  constructor({ store, onStateChange, invokePluginCommand, askUser }) {
+  constructor({
+    store,
+    onStateChange,
+    invokePluginCommand,
+    askUser,
+    readBluetalkMessages,
+    sendBluetalkMessage,
+    listBluetalkContacts,
+    listBluetalkPeers,
+    listBluetalkChats,
+    getBluetalkContact,
+    getBluetalkSelf,
+    listBluetalkPlugins,
+    connectBluetalkPeer,
+    getContactLabel,
+  }) {
     this.store = store;
     this.onStateChange = onStateChange || (() => {});
     this.invokePluginCommand = typeof invokePluginCommand === 'function'
       ? invokePluginCommand
       : null;
     this.askUser = typeof askUser === 'function' ? askUser : null;
+    this.readBluetalkMessages = typeof readBluetalkMessages === 'function'
+      ? readBluetalkMessages
+      : null;
+    this.sendBluetalkMessage = typeof sendBluetalkMessage === 'function'
+      ? sendBluetalkMessage
+      : null;
+    this.listBluetalkContacts = typeof listBluetalkContacts === 'function'
+      ? listBluetalkContacts
+      : null;
+    this.listBluetalkPeers = typeof listBluetalkPeers === 'function'
+      ? listBluetalkPeers
+      : null;
+    this.listBluetalkChats = typeof listBluetalkChats === 'function'
+      ? listBluetalkChats
+      : null;
+    this.getBluetalkContact = typeof getBluetalkContact === 'function'
+      ? getBluetalkContact
+      : null;
+    this.getBluetalkSelf = typeof getBluetalkSelf === 'function'
+      ? getBluetalkSelf
+      : null;
+    this.listBluetalkPlugins = typeof listBluetalkPlugins === 'function'
+      ? listBluetalkPlugins
+      : null;
+    this.connectBluetalkPeer = typeof connectBluetalkPeer === 'function'
+      ? connectBluetalkPeer
+      : null;
+    this.getContactLabel = typeof getContactLabel === 'function'
+      ? getContactLabel
+      : null;
     this.userDataDir = app.getPath('userData');
     this.baseDir = path.join(this.userDataDir, 'ollama');
     this.runtimeDir = path.join(this.baseDir, RUNTIME_DIR_NAME);
@@ -664,12 +750,17 @@ class OllamaManager {
     return resolveThinkOption(thinkingMode, model, tierId);
   }
 
-  async chat({ peerId, prompt, requestId, onProgress, askUser }) {
+  async chat({ peerId, prompt, requestId, attachments, onProgress, askUser }) {
+    const attachmentList = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
     const text = String(prompt || '').trim();
-    if (!text) return { ok: false, error: 'empty_prompt' };
+    if (!text && !attachmentList.length) return { ok: false, error: 'empty_prompt' };
 
     const state = await this.refreshState();
     if (!state.setupComplete) return { ok: false, error: 'setup_incomplete', state };
+
+    if (attachmentList.length && !modelSupportsVision(state.selectedModelTier, state.selectedCloudModelId)) {
+      return { ok: false, error: 'vision_not_supported', state };
+    }
 
     const tier = getModelTier(state.selectedModelTier);
     const model = resolveActiveModelName(state.selectedModelTier, state.selectedCloudModelId);
@@ -699,13 +790,25 @@ class OllamaManager {
       });
     };
 
-    const { agentEnabled, workDir, thinkingMode } = this._resolveAgentContext(peerId);
+    const { workDir, thinkingMode, allowBluetalkMessaging } = this._resolveAgentContext(peerId);
+    const agentEnabled = true;
     const thinkOpt = this._thinkOption({ model, tierId: state.selectedModelTier, thinkingMode });
     const askUserHandler = async (question) => {
       const result = await this._runAskUser({ peerId, requestId, question, askUser });
       if (typeof result?.answer === 'string') return result.answer;
       return '';
     };
+    const upsertSubagentSegment = (sub) => {
+      const idx = segments.findIndex((s) => s.type === 'subagent' && s.id === sub.id);
+      const seg = { type: 'subagent', ...sub };
+      if (idx >= 0) segments[idx] = seg;
+      else segments.push(seg);
+    };
+
+    let finalContent = '';
+    let finalThinking = '';
+    let finalStats = null;
+
     const toolCtx = {
       workDir,
       invokePluginCommand: this.invokePluginCommand
@@ -714,22 +817,115 @@ class OllamaManager {
       memory: this._getAgentMemory(peerId),
       subagentRunner: (opts) => this._runSubagent({ ...opts, parentTier: state.selectedModelTier }),
       subagentTier: state.selectedModelTier,
+      onSubagentStart: ({ id, task, tools: subTools }) => {
+        upsertSubagentSegment({
+          id,
+          task,
+          tools: subTools,
+          status: 'running',
+          content: '',
+          thinking: '',
+          toolEvents: [],
+          segments: [],
+        });
+        emitProgress({
+          thinking: finalThinking,
+          content: finalContent,
+          segments: [...segments],
+          tps: 0,
+          genTimeMs: 0,
+          done: false,
+        });
+      },
+      onSubagentProgress: (id, update) => {
+        const existing = segments.find((s) => s.type === 'subagent' && s.id === id);
+        if (!existing) return;
+        if (update.content) existing.content = update.content;
+        if (update.thinking) existing.thinking = update.thinking;
+        if (Array.isArray(update.toolEvents)) existing.toolEvents = update.toolEvents;
+        if (Array.isArray(update.segments)) existing.segments = update.segments;
+        emitProgress({
+          thinking: finalThinking,
+          content: finalContent,
+          segments: [...segments],
+          tps: typeof update.tps === 'number' ? update.tps : 0,
+          genTimeMs: typeof update.genTimeMs === 'number' ? update.genTimeMs : 0,
+          done: false,
+        });
+      },
+      onSubagentEnd: ({ id, ok, result, error }) => {
+        const existing = segments.find((s) => s.type === 'subagent' && s.id === id);
+        if (existing) {
+          existing.status = ok ? 'done' : 'error';
+          if (result?.content) existing.content = result.content;
+          if (error) existing.error = error;
+        }
+        emitProgress({
+          thinking: finalThinking,
+          content: finalContent,
+          segments: [...segments],
+          tps: 0,
+          genTimeMs: 0,
+          done: false,
+        });
+      },
       askUser: askUserHandler,
+      allowBluetalkMessaging,
+      getContactLabel: (id) => (this.getContactLabel ? this.getContactLabel(id) : id),
+      readBluetalkMessages: this.readBluetalkMessages
+        ? (opts) => this.readBluetalkMessages(opts)
+        : undefined,
+      sendBluetalkMessage: this.sendBluetalkMessage
+        ? (opts) => this.sendBluetalkMessage(opts)
+        : undefined,
+      listBluetalkContacts: this.listBluetalkContacts
+        ? (opts) => this.listBluetalkContacts(opts)
+        : undefined,
+      listBluetalkPeers: this.listBluetalkPeers
+        ? () => this.listBluetalkPeers()
+        : undefined,
+      listBluetalkChats: this.listBluetalkChats
+        ? (opts) => this.listBluetalkChats(opts)
+        : undefined,
+      getBluetalkContact: this.getBluetalkContact
+        ? (opts) => this.getBluetalkContact(opts)
+        : undefined,
+      getBluetalkSelf: this.getBluetalkSelf
+        ? () => this.getBluetalkSelf()
+        : undefined,
+      listBluetalkPlugins: this.listBluetalkPlugins
+        ? () => this.listBluetalkPlugins()
+        : undefined,
+      connectBluetalkPeer: this.connectBluetalkPeer
+        ? (opts) => this.connectBluetalkPeer(opts)
+        : undefined,
     };
-    const tierTools = agentEnabled ? getToolsForTier(state.selectedModelTier) : [];
+    const tierTools = agentEnabled
+      ? getToolsForTier(state.selectedModelTier).filter((tool) => {
+        const name = tool.function.name;
+        if (isBluetalkAgentTool(name) && !allowBluetalkMessaging) {
+          return false;
+        }
+        return true;
+      })
+      : [];
     const tierToolNames = tierTools.map((t) => t.function.name);
+    const allTierToolNames = agentEnabled
+      ? getToolsForTier(state.selectedModelTier).map((t) => t.function.name)
+      : [];
 
     try {
-      const baseHistory = this._buildChatHistory(peerId, text, state.selectedModelTier, agentEnabled);
+      const baseHistory = this._buildChatHistory(peerId, state.selectedModelTier, agentEnabled, {
+        prompt: text,
+        attachments: attachmentList,
+      });
       let history = baseHistory;
-      let finalContent = '';
-      let finalThinking = '';
-      let finalStats = null;
       const collectedToolEvents = [];
 
       if (agentEnabled) {
+        let forgedToolResultRepairs = 0;
         // eslint-disable-next-line no-constant-condition
-        for (let toolRound = 0; ; toolRound += 1) {
+        for (;;) {
           // eslint-disable-next-line no-await-in-loop
           const response = await this._chatRequestStream(
             {
@@ -743,71 +939,86 @@ class OllamaManager {
             segments
           );
           const msgContent = response?.message?.content || '';
-          const msgThinking = response?.message?.thinking || '';
-          let toolCalls = Array.isArray(response?.message?.tool_calls)
-            ? response.message.tool_calls
-            : [];
+          const apiThinking = response?.message?.thinking || '';
+          const resolvedTools = resolveToolCallsFromAssistantText({
+            nativeToolCalls: response?.message?.tool_calls,
+            msgContent,
+            msgThinking: apiThinking,
+            allValidNames: allTierToolNames,
+            allowedNames: tierToolNames,
+          });
+          let toolCalls = resolvedTools.toolCalls;
+          let displayContent = resolvedTools.displayContent;
+          let msgThinking = resolvedTools.thinkingText;
 
-          // Fallback: kleine lokale Modelle schreiben Tool-Aufrufe oft als
-          // Text (```json {...} ``` oder rohes {...}) statt über tool_calls.
-          // In dem Fall extrahieren wir sie aus dem Content, führen sie aus
-          // und zeigen nur den bereinigten Text an.
-          let displayContent = msgContent;
-          if (!toolCalls.length && msgContent && tierToolNames.length) {
-            const extracted = extractToolCallsFromText(msgContent, tierToolNames);
-            if (extracted.calls.length) {
-              toolCalls = extracted.calls;
-              displayContent = extracted.cleanedText;
-              console.log(
-                `[Agent] Text-Fallback: ${extracted.calls.length} Tool-Aufruf(e) aus Content extrahiert ` +
-                `(${extracted.calls.map((c) => c.function.name).join(', ')})`
-              );
-            }
+          if (toolCalls.length) {
+            console.log(
+              `[Agent] ${toolCalls.length} Tool-Aufruf(e): ${toolCalls.map((c) => c.function.name).join(', ')}`
+            );
           }
 
-          finalStats = response?.stats || finalStats;
-          if (displayContent) {
-            finalContent = finalContent ? `${finalContent}\n\n${displayContent}` : displayContent;
-          }
-          if (msgThinking) {
-            finalThinking = finalThinking ? `${finalThinking}\n\n${msgThinking}` : msgThinking;
-          }
-          // Segmente werden während des Streamings live aufgebaut
-          // (liveSegments). Hier nach Stream-Ende nur sicherstellen, dass
-          // Thinking und finales Content-Segment vorhanden sind — kein
-          // Duplikat erzeugen, wenn das Streaming sie schon angelegt hat.
-          if (msgThinking) {
-            upsertStreamThinking(segments, msgThinking);
-          }
-          if (displayContent && displayContent.trim()) {
-            upsertStreamAnswer(segments, displayContent);
-          }
-
-          if (!toolCalls.length) {
-            break;
-          }
-
-          if (toolRound >= MAX_AGENT_TOOL_ROUNDS) {
-            const limitEvent = {
-              name: 'tool_limit',
-              arguments: { limit: MAX_AGENT_TOOL_ROUNDS },
-              result: { ok: false, error: 'agent_tool_round_limit' },
-            };
-            collectedToolEvents.push(limitEvent);
-            segments.push({ type: 'tool', event: limitEvent });
-            finalContent = (finalContent ? `${finalContent}\n\n` : '')
-              + 'Der Agent hat das Tool-Limit erreicht und wurde gestoppt.';
+          if (!toolCalls.length && resolvedTools.spoofedToolResult && forgedToolResultRepairs < 1) {
+            forgedToolResultRepairs += 1;
+            console.warn('[Agent] Gefälschtes Tool-Ergebnis erkannt; fordere nativen Function-Call erneut an.');
+            clearLastStreamAnswer(segments);
+            history = [
+              ...history,
+              {
+                role: 'system',
+                content:
+                  'SYSTEM-KORREKTUR: Deine vorige Ausgabe hat ein Tool-Ergebnis simuliert und wurde verworfen. ' +
+                  'Führe jetzt den nächsten nötigen Schritt ausschließlich als nativen Function-Call aus. ' +
+                  'Für send_bluetalk_reply brauchst du peer_id, content und die echte reply_to_message_id aus einem Tool-Ergebnis. ' +
+                  'Schreibe keinen Begleittext, keinen SYSTEM-TOOL-ERGEBNIS-Marker und kein Erfolgs-JSON.',
+              },
+            ];
             emitProgress({
               thinking: finalThinking,
               content: finalContent,
-              toolResults: [limitEvent],
-              segments,
+              segments: [...segments],
               tps: 0,
               genTimeMs: 0,
               done: false,
             });
+            continue;
+          }
+
+          if (!toolCalls.length && resolvedTools.spoofedToolResult) {
+            displayContent = 'Die Aktion wurde nicht ausgeführt, weil das Modell kein gültiges Werkzeug verwendet hat.';
+            msgThinking = '';
+          }
+
+          if (!toolCalls.length) {
+            finalStats = response?.stats || finalStats;
+            if (displayContent) {
+              finalContent = finalContent ? `${finalContent}\n\n${displayContent}` : displayContent;
+            }
+            if (msgThinking) {
+              finalThinking = finalThinking ? `${finalThinking}\n\n${msgThinking}` : msgThinking;
+            }
+            if (msgThinking) {
+              upsertStreamThinking(segments, msgThinking);
+            }
+            if (displayContent && displayContent.trim()) {
+              upsertStreamAnswer(segments, displayContent);
+            }
             break;
           }
+
+          finalStats = response?.stats || finalStats;
+          if (msgThinking) {
+            finalThinking = finalThinking ? `${finalThinking}\n\n${msgThinking}` : msgThinking;
+            upsertStreamThinking(segments, msgThinking);
+          }
+          clearLastStreamAnswer(segments);
+          emitProgress({
+            thinking: finalThinking,
+            content: finalContent,
+            segments: [...segments],
+            tps: 0,
+            genTimeMs: 0,
+            done: false,
+          });
 
           // Assistant-Nachricht mit Tool-Aufrufen an History anhängen.
           // Arguments müssen Objekte sein — Ollama lehnt JSON-Strings ab.
@@ -822,31 +1033,59 @@ class OllamaManager {
 
           let pendingUserQuestion = '';
           for (const call of toolCalls) {
+            const toolName = String(call?.function?.name || call?.name || '');
+            const toolArgs = call?.function?.arguments ?? call?.arguments;
+            if (toolName === 'run_command') {
+              const pendingEvent = { name: toolName, arguments: toolArgs, pending: true };
+              segments.push({ type: 'tool', event: pendingEvent });
+              emitProgress({
+                thinking: finalThinking,
+                content: finalContent,
+                toolResults: [pendingEvent],
+                segments: [...segments],
+                tps: 0,
+                genTimeMs: 0,
+                done: false,
+              });
+            }
             // eslint-disable-next-line no-await-in-loop
             const toolResult = await executeToolCall(call, toolCtx);
-            const toolName = String(call?.function?.name || call?.name || '');
             console.log(
               `[Agent] Tool ausgefuehrt: ${toolName} -> ok=${toolResult?.ok !== false}`,
               toolResult?.error ? `error=${toolResult.error}` : ''
             );
             // Memory-Änderungen persistent sichern
             if (toolName === 'memory') this._persistAgentMemory(peerId);
-            const toolEvent = {
-              name: toolName,
-              arguments: call?.function?.arguments ?? call?.arguments,
-              result: toolResult,
-            };
-            collectedToolEvents.push(toolEvent);
-            segments.push({ type: 'tool', event: toolEvent });
-            const lastThinking = segments[segments.length - 2];
-            if (lastThinking && lastThinking.type === 'thinking') {
-              lastThinking.toolAfter = true;
+            if (toolName === 'run_command') {
+              for (let i = segments.length - 1; i >= 0; i -= 1) {
+                const seg = segments[i];
+                if (seg?.type === 'tool' && seg.event?.name === 'run_command' && seg.event?.pending) {
+                  segments.splice(i, 1);
+                  break;
+                }
+              }
+            } else {
+              const toolEvent = {
+                name: toolName,
+                arguments: toolArgs,
+                result: toolResult,
+              };
+              collectedToolEvents.push(toolEvent);
+              segments.push({ type: 'tool', event: toolEvent });
+              const lastThinking = segments[segments.length - 2];
+              if (lastThinking && lastThinking.type === 'thinking') {
+                lastThinking.toolAfter = true;
+              }
             }
             emitProgress({
               thinking: finalThinking,
               content: finalContent,
-              toolResults: [toolEvent],
-              segments,
+              toolResults: toolName === 'run_command' ? [] : [{
+                name: toolName,
+                arguments: toolArgs,
+                result: toolResult,
+              }],
+              segments: [...segments],
               tps: 0,
               genTimeMs: 0,
               done: false,
@@ -977,7 +1216,8 @@ class OllamaManager {
     const workDirRaw = resolveAgentWorkDir(agent);
     const workDir = workDirRaw || defaultWorkDir();
     const thinkingMode = resolveAgentThinkingMode(agent);
-    return { personality, agentEnabled, workDir, agent, thinkingMode };
+    const allowBluetalkMessaging = resolveAllowBluetalkMessaging(agent);
+    return { personality, agentEnabled, workDir, agent, thinkingMode, allowBluetalkMessaging };
   }
 
   /**
@@ -1057,7 +1297,17 @@ class OllamaManager {
    * eigenem Loop und eigenem System-Prompt. Nutzt das gleiche Modell
    * wie der Eltern-Agent. Gibt die finale Textantwort zurück.
    */
-  async _runSubagent({ task, systemPrompt, tools, workDir, memory, invokePluginCommand, parentTier }) {
+  async _runSubagent({
+    task,
+    systemPrompt,
+    tools,
+    workDir,
+    memory,
+    invokePluginCommand,
+    parentTier,
+    subagentId,
+    onProgress,
+  }) {
     const state = await this.refreshState();
     const model = resolveActiveModelName(state.selectedModelTier, state.selectedCloudModelId)
       || resolveActiveModelName(parentTier, state.selectedCloudModelId);
@@ -1076,10 +1326,28 @@ class OllamaManager {
       { role: 'system', content: systemPrompt || getSystemPromptForAgent(parentTier, { agentMode: true }) },
       { role: 'user', content: task },
     ];
-    const subThink = this._thinkOption({ model, tierId: parentTier, thinkingMode: 'auto' });
+    const subThink = false;
 
+    const subSegments = [];
+    const subToolEvents = [];
     let lastContent = '';
-    for (let toolRound = 0; toolRound < MAX_SUBAGENT_TOOL_ROUNDS; toolRound += 1) {
+    let lastThinking = '';
+
+    const emitSubProgress = (update) => {
+      if (typeof onProgress !== 'function') return;
+      onProgress({
+        subagentId,
+        content: update.content ?? lastContent,
+        thinking: update.thinking ?? lastThinking,
+        toolEvents: update.toolEvents ?? [...subToolEvents],
+        segments: update.segments ?? [...subSegments],
+        tps: typeof update.tps === 'number' ? update.tps : 0,
+        genTimeMs: typeof update.genTimeMs === 'number' ? update.genTimeMs : 0,
+      });
+    };
+
+    // eslint-disable-next-line no-constant-condition
+    for (;;) {
       // eslint-disable-next-line no-await-in-loop
       const response = await this._chatRequestStream(
         {
@@ -1088,13 +1356,19 @@ class OllamaManager {
           tools: tools && tools.length ? tools : AI_AGENT_TOOLS,
           think: subThink,
         },
-        () => {},
-        null
+        (update) => {
+          if (update.content) lastContent = update.content;
+          if (update.thinking) lastThinking = update.thinking;
+          emitSubProgress(update);
+        },
+        null,
+        subSegments
       );
       const content = response?.message?.content || '';
       lastContent = content.trim() || lastContent;
       const toolCalls = Array.isArray(response?.message?.tool_calls) ? response.message.tool_calls : [];
       if (!toolCalls.length) {
+        emitSubProgress({ content: content.trim(), thinking: lastThinking });
         return { content: content.trim() };
       }
       messages.push({
@@ -1103,36 +1377,94 @@ class OllamaManager {
         tool_calls: normalizeToolCallsForOllama(toolCalls),
       });
       for (const call of toolCalls) {
+        const toolName = String(call?.function?.name || call?.name || '');
+        const toolArgs = call?.function?.arguments ?? call?.arguments;
+        if (toolName === 'run_command') {
+          const pendingEvent = { name: toolName, arguments: toolArgs, pending: true };
+          subSegments.push({ type: 'tool', event: pendingEvent });
+          emitSubProgress({
+            content: lastContent,
+            thinking: lastThinking,
+            segments: [...subSegments],
+            toolEvents: [...subToolEvents, pendingEvent],
+          });
+        }
         // eslint-disable-next-line no-await-in-loop
         const result = await executeToolCall(call, subCtx);
+        if (toolName === 'run_command') {
+          for (let i = subSegments.length - 1; i >= 0; i -= 1) {
+            const seg = subSegments[i];
+            if (seg?.type === 'tool' && seg.event?.name === 'run_command' && seg.event?.pending) {
+              subSegments.splice(i, 1);
+              break;
+            }
+          }
+        } else {
+          const toolEvent = {
+            name: toolName,
+            arguments: toolArgs,
+            result,
+          };
+          subToolEvents.push(toolEvent);
+          subSegments.push({ type: 'tool', event: toolEvent });
+          const lastThinkingSeg = subSegments[subSegments.length - 2];
+          if (lastThinkingSeg && lastThinkingSeg.type === 'thinking') {
+            lastThinkingSeg.toolAfter = true;
+          }
+        }
+        emitSubProgress({
+          content: lastContent,
+          thinking: lastThinking,
+          segments: [...subSegments],
+          toolEvents: [...subToolEvents],
+        });
         messages.push({
           role: 'tool',
-          name: String(call?.function?.name || call?.name || ''),
-          content: formatToolResultMessageContent(
-            call?.function?.name || call?.name,
-            result
-          ),
+          name: toolName,
+          content: formatToolResultMessageContent(toolName, result),
         });
       }
     }
-    throw new Error(lastContent || 'subagent_tool_round_limit');
   }
 
-  _buildChatHistory(peerId, latestPrompt, tierId, agentEnabled) {
+  _buildChatHistory(peerId, tierId, agentEnabled, { prompt = '', attachments = [] } = {}) {
     const raw = this.store.get(`messages.${peerId}`, []);
     const list = Array.isArray(raw) ? raw : [];
     const messages = [];
     for (const item of list.slice(-24)) {
-      if (!item || item.kind !== 'chat') continue;
-      const content = String(item.content || '').trim();
-      if (!content) continue;
-      messages.push({
-        role: item.from === 'self' ? 'user' : 'assistant',
-        content,
-      });
+      if (!item) continue;
+      if (item.kind === 'chat') {
+        const content = String(item.content || '').trim();
+        if (!content) continue;
+        messages.push({
+          role: item.from === 'self' ? 'user' : 'assistant',
+          content,
+        });
+        continue;
+      }
+      if (item.kind === 'file' && item.from === 'self') {
+        const fileName = String(item.fileName || item.content || 'Anhang').trim();
+        const fileType = normalizeAttachmentFileType(fileName, item.fileType, item.fileData);
+        const fileData = item.fileData;
+        if (isImageAttachment(fileType, fileName, fileData) && fileData) {
+          messages.push({
+            role: 'user',
+            content: String(item.content || '').trim() || `Bild: ${fileName}`,
+            images: [stripDataUrlPrefix(fileData)],
+          });
+        } else {
+          const label = `[Datei: ${fileName}${fileType ? ` (${fileType})` : ''}]`;
+          messages.push({ role: 'user', content: label });
+        }
+      }
     }
-    if (!messages.some((m, index) => index === messages.length - 1 && m.role === 'user' && m.content === latestPrompt)) {
-      messages.push({ role: 'user', content: latestPrompt });
+    const trimmedPrompt = String(prompt || '').trim();
+    const attachmentList = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    if (trimmedPrompt || attachmentList.length) {
+      while (messages.length && messages[messages.length - 1]?.role === 'user') {
+        messages.pop();
+      }
+      messages.push(buildAiUserMessage(trimmedPrompt, attachmentList));
     }
     const personality = this._resolveAgentPersonality(peerId);
     const agentConfig = agentEnabled

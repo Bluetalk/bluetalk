@@ -1,3 +1,9 @@
+const path = require('path');
+const {
+  groupConsecutiveToolSegments,
+  consolidateSegments,
+} = require(path.join(__dirname, '..', 'shared', 'agent-segments.js'));
+
 /** Aktualisiert das letzte Thinking-Segment der aktuellen Runde (seit letztem Tool). */
 function upsertStreamThinking(segments, text) {
   const trimmed = String(text || '').trim();
@@ -34,28 +40,23 @@ function upsertStreamAnswer(segments, text) {
   segments.push({ type: 'answer', text: trimmed });
 }
 
-/** Fasst versehentlich duplizierte aufeinanderfolgende Segmente zusammen. */
-function consolidateSegments(segments) {
-  if (!Array.isArray(segments) || !segments.length) return segments;
-  const out = [];
-  for (const seg of segments) {
-    if (!seg?.type) continue;
-    const last = out[out.length - 1];
-    if (seg.type === 'thinking' && last?.type === 'thinking' && !last.toolAfter && !seg.toolAfter) {
-      last.text = seg.text;
-      continue;
+/** Entfernt das letzte Antwort-Segment der laufenden Runde (z. B. vor Tool-Ausführung). */
+function clearLastStreamAnswer(segments) {
+  if (!Array.isArray(segments)) return;
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i];
+    if (seg.type === 'answer') {
+      segments.splice(i, 1);
+      return;
     }
-    if (seg.type === 'answer' && last?.type === 'answer') {
-      last.text = seg.text;
-      continue;
-    }
-    out.push(seg.type === 'tool' ? { ...seg, event: seg.event ? { ...seg.event } : seg.event } : { ...seg });
+    if (seg.type === 'tool') return;
   }
-  return out;
 }
 
 module.exports = {
   upsertStreamThinking,
   upsertStreamAnswer,
+  clearLastStreamAnswer,
   consolidateSegments,
+  groupConsecutiveToolSegments,
 };

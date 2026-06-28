@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, FolderOpen, Wrench, X } from 'lucide-react';
+import { Bot, Brain, Check, FolderOpen, MessageSquare, Sparkles, X } from 'lucide-react';
 import {
   AI_AGENT_DEFAULT_MODE_ID,
-  AI_AGENT_MODES,
   AI_PERSONALITY_CUSTOM_MAX_CHARS,
   AI_PERSONALITY_DEFAULT_ID,
   AI_PERSONALITY_PRESETS,
   AI_THINKING_DEFAULT_MODE_ID,
   AI_THINKING_MODES,
-  isValidAgentMode,
   isValidThinkingMode,
 } from '../aiChatConstants';
 import { SETTINGS_ICON_STROKE } from '../pages/settings/settingsUtils';
@@ -20,6 +18,7 @@ const DEFAULT_FORM = {
   agentMode: AI_AGENT_DEFAULT_MODE_ID,
   agentWorkDir: '',
   thinkingMode: AI_THINKING_DEFAULT_MODE_ID,
+  allowBluetalkMessaging: false,
 };
 
 export default function CreateAiAgentModal({ open, onClose, onCreate, creating = false }) {
@@ -41,14 +40,14 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
   const handleSubmit = (event) => {
     event.preventDefault();
     if (creating) return;
-    const mode = isValidAgentMode(form.agentMode) ? form.agentMode : AI_AGENT_DEFAULT_MODE_ID;
     onCreate?.({
       name: form.name.trim() || 'KI-Assistent',
       personality: form.personality,
       personalityCustom: form.personalityCustom.trim().slice(0, AI_PERSONALITY_CUSTOM_MAX_CHARS),
-      agentMode: mode,
+      agentMode: AI_AGENT_DEFAULT_MODE_ID,
       agentWorkDir: form.agentWorkDir.trim(),
       thinkingMode: isValidThinkingMode(form.thinkingMode) ? form.thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
+      allowBluetalkMessaging: Boolean(form.allowBluetalkMessaging),
     });
   };
 
@@ -60,8 +59,6 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
     }
   };
 
-  const agentMode = isValidAgentMode(form.agentMode) ? form.agentMode : AI_AGENT_DEFAULT_MODE_ID;
-  const isAgent = agentMode !== 'off';
   const thinkingMode = isValidThinkingMode(form.thinkingMode)
     ? form.thinkingMode
     : AI_THINKING_DEFAULT_MODE_ID;
@@ -80,12 +77,20 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
         aria-labelledby="create-ai-agent-title"
       >
         <div className="create-ai-agent-modal-header">
-          <h3 id="create-ai-agent-title" style={{ margin: 0 }}>
-            {isAgent ? 'KI-Agent erstellen' : 'KI-Assistent erstellen'}
-          </h3>
+          <div className="create-ai-agent-modal-title-block">
+            <span className="create-ai-agent-modal-icon" aria-hidden>
+              <Bot size={20} strokeWidth={SETTINGS_ICON_STROKE} />
+            </span>
+            <div className="create-ai-agent-modal-title-copy">
+              <h3 id="create-ai-agent-title">KI-Agent erstellen</h3>
+              <p className="create-ai-agent-modal-lead">
+                Lokaler Agent mit Datei-, Befehls- und optionalen BlueTalk-Werkzeugen.
+              </p>
+            </div>
+          </div>
           <button
             type="button"
-            className="btn btn-ghost btn-icon"
+            className="btn btn-ghost btn-icon create-ai-agent-modal-close"
             onClick={() => onClose?.()}
             disabled={creating}
             aria-label="Schließen"
@@ -94,141 +99,156 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="create-ai-agent-modal-body">
-          <p className="text-sm text-muted" style={{ margin: '0 0 16px' }}>
-            Erstelle einen lokalen KI-Assistenten in deiner Chatliste.
-          </p>
-
-          <div className="input-group">
-            <label htmlFor="create-ai-agent-name">Name</label>
-            <input
-              ref={nameRef}
-              id="create-ai-agent-name"
-              className="input"
-              value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              maxLength={64}
-              placeholder="Agent-Name"
-              disabled={creating}
-            />
-          </div>
-
-          <div className="input-group">
-            <span className="input-group-label">Modus</span>
-            <div className="ai-personality-grid" role="radiogroup" aria-label="Modus">
-              {Object.values(AI_AGENT_MODES).map((mode) => {
-                const selected = agentMode === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    className={`ai-personality-option${selected ? ' ai-personality-option--selected' : ''}`}
-                    onClick={() => setForm((prev) => ({ ...prev, agentMode: mode.id }))}
-                    role="radio"
-                    aria-checked={selected}
+        <form onSubmit={handleSubmit} className="create-ai-agent-modal-form">
+          <div className="create-ai-agent-modal-body">
+            <section className="create-ai-agent-section">
+              <h4 className="create-ai-agent-section-title">Grundlagen</h4>
+              <div className="create-ai-agent-fields">
+                <div className="input-group">
+                  <label htmlFor="create-ai-agent-name">Name</label>
+                  <input
+                    ref={nameRef}
+                    id="create-ai-agent-name"
+                    className="input"
+                    value={form.name}
+                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                    maxLength={64}
+                    placeholder="z. B. Code-Helfer"
                     disabled={creating}
-                  >
-                    <span className="ai-personality-option-label">
-                      {mode.id === 'agent' ? <Wrench size={13} strokeWidth={SETTINGS_ICON_STROKE} /> : null}
-                      {' '}
-                      {mode.label}
-                    </span>
-                    <span className="ai-personality-option-desc">{mode.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                  />
+                </div>
 
-          {isAgent ? (
-            <div className="input-group">
-              <label htmlFor="create-ai-agent-workdir">Arbeitsverzeichnis (optional)</label>
-              <div className="agent-workdir-row">
+                <div className="input-group">
+                  <label htmlFor="create-ai-agent-workdir">Arbeitsverzeichnis</label>
+                  <div className="agent-workdir-row">
+                    <input
+                      id="create-ai-agent-workdir"
+                      className="input"
+                      value={form.agentWorkDir}
+                      onChange={(e) => setForm((prev) => ({ ...prev, agentWorkDir: e.target.value }))}
+                      placeholder="Standard: Desktop-Ordner"
+                      disabled={creating}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary agent-workdir-btn"
+                      onClick={pickWorkDir}
+                      disabled={creating}
+                      aria-label="Ordner wählen"
+                      title="Ordner wählen"
+                    >
+                      <FolderOpen size={15} strokeWidth={SETTINGS_ICON_STROKE} />
+                    </button>
+                  </div>
+                  <p className="create-ai-agent-hint">
+                    Dateien lesen/schreiben und Befehle in diesem Ordner ausführen.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="create-ai-agent-section">
+              <label className={`agent-permission-card${form.allowBluetalkMessaging ? ' agent-permission-card--on' : ''}`}>
                 <input
-                  id="create-ai-agent-workdir"
-                  className="input"
-                  value={form.agentWorkDir}
-                  onChange={(e) => setForm((prev) => ({ ...prev, agentWorkDir: e.target.value }))}
-                  placeholder="Standard: Desktop-Ordner des Nutzers"
+                  type="checkbox"
+                  className="agent-permission-card-input"
+                  checked={Boolean(form.allowBluetalkMessaging)}
+                  onChange={(e) => setForm((prev) => ({ ...prev, allowBluetalkMessaging: e.target.checked }))}
                   disabled={creating}
                 />
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={pickWorkDir}
-                  disabled={creating}
-                  aria-label="Ordner wählen"
-                >
-                  <FolderOpen size={14} strokeWidth={SETTINGS_ICON_STROKE} />
-                </button>
+                <span className="agent-permission-card-check" aria-hidden>
+                  {form.allowBluetalkMessaging ? <Check size={12} strokeWidth={2.5} /> : null}
+                </span>
+                <span className="agent-permission-card-copy">
+                  <span className="agent-permission-card-title">
+                    <MessageSquare size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                    BlueTalk-Nutzung erlauben
+                  </span>
+                  <span className="create-ai-agent-hint">
+                    Kontakte und Chats einsehen, Nachrichten senden, Peers verbinden — sensible Aktionen nur nach Bestätigung.
+                  </span>
+                </span>
+              </label>
+            </section>
+
+            <section className="create-ai-agent-section">
+              <h4 className="create-ai-agent-section-title">
+                <Brain size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                Thinking-Modus
+              </h4>
+              <div className="ai-thinking-grid" role="radiogroup" aria-label="Thinking-Modus">
+                {Object.values(AI_THINKING_MODES).map((mode) => {
+                  const selected = thinkingMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={`ai-choice-card${selected ? ' ai-choice-card--selected' : ''}`}
+                      onClick={() => setForm((prev) => ({ ...prev, thinkingMode: mode.id }))}
+                      role="radio"
+                      aria-checked={selected}
+                      disabled={creating}
+                    >
+                      <span className="ai-choice-card-label">{mode.label}</span>
+                      <span className="ai-choice-card-desc">{mode.description}</span>
+                      {selected ? (
+                        <span className="ai-choice-card-mark" aria-hidden>
+                          <Check size={11} strokeWidth={2.5} />
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
-              <span className="text-sm text-muted">
-                Der Agent liest und schreibt Dateien und führt Befehle in diesem Ordner aus.
-              </span>
-            </div>
-          ) : null}
+            </section>
 
-          <div className="input-group">
-            <span className="input-group-label">Thinking-Modus</span>
-            <div className="ai-personality-grid" role="radiogroup" aria-label="Thinking-Modus">
-              {Object.values(AI_THINKING_MODES).map((mode) => {
-                const selected = thinkingMode === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    className={`ai-personality-option${selected ? ' ai-personality-option--selected' : ''}`}
-                    onClick={() => setForm((prev) => ({ ...prev, thinkingMode: mode.id }))}
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={creating}
-                  >
-                    <span className="ai-personality-option-label">{mode.label}</span>
-                    <span className="ai-personality-option-desc">{mode.description}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <section className="create-ai-agent-section">
+              <h4 className="create-ai-agent-section-title">
+                <Sparkles size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                Persönlichkeit
+              </h4>
+              <div className="ai-personality-grid" role="radiogroup" aria-label="Persönlichkeit">
+                {Object.values(AI_PERSONALITY_PRESETS).map((preset) => {
+                  const selected = form.personality === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`ai-choice-card${selected ? ' ai-choice-card--selected' : ''}`}
+                      onClick={() => setForm((prev) => ({ ...prev, personality: preset.id }))}
+                      role="radio"
+                      aria-checked={selected}
+                      disabled={creating}
+                    >
+                      <span className="ai-choice-card-label">{preset.label}</span>
+                      <span className="ai-choice-card-desc">{preset.description}</span>
+                      {selected ? (
+                        <span className="ai-choice-card-mark" aria-hidden>
+                          <Check size={11} strokeWidth={2.5} />
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="input-group create-ai-agent-custom">
+                <label htmlFor="create-ai-agent-custom">Eigene Anweisungen</label>
+                <textarea
+                  id="create-ai-agent-custom"
+                  className="input create-ai-agent-textarea"
+                  rows={3}
+                  maxLength={AI_PERSONALITY_CUSTOM_MAX_CHARS}
+                  placeholder="Optional — z. B. „Antworte immer mit einem Witz am Ende.“"
+                  value={form.personalityCustom}
+                  onChange={(e) => setForm((prev) => ({ ...prev, personalityCustom: e.target.value }))}
+                  disabled={creating}
+                />
+              </div>
+            </section>
           </div>
 
-          <div className="input-group">
-            <span className="input-group-label">Persönlichkeit</span>
-            <div className="ai-personality-grid" role="radiogroup" aria-label="Persönlichkeit">
-              {Object.values(AI_PERSONALITY_PRESETS).map((preset) => {
-                const selected = form.personality === preset.id;
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={`ai-personality-option${selected ? ' ai-personality-option--selected' : ''}`}
-                    onClick={() => setForm((prev) => ({ ...prev, personality: preset.id }))}
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={creating}
-                  >
-                    <span className="ai-personality-option-label">{preset.label}</span>
-                    <span className="ai-personality-option-desc">{preset.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="input-group">
-            <label htmlFor="create-ai-agent-custom">Eigene Anweisungen (optional)</label>
-            <textarea
-              id="create-ai-agent-custom"
-              className="input profile-menu-bio"
-              rows={3}
-              maxLength={AI_PERSONALITY_CUSTOM_MAX_CHARS}
-              placeholder="z. B. „Antworte immer mit einem Witz am Ende.“"
-              value={form.personalityCustom}
-              onChange={(e) => setForm((prev) => ({ ...prev, personalityCustom: e.target.value }))}
-              disabled={creating}
-            />
-          </div>
-
-          <div className="modal-actions">
+          <div className="modal-actions create-ai-agent-modal-actions">
             <button
               type="button"
               className="btn btn-secondary"
@@ -239,7 +259,7 @@ export default function CreateAiAgentModal({ open, onClose, onCreate, creating =
             </button>
             <button type="submit" className="btn btn-primary" disabled={creating}>
               <Bot size={14} strokeWidth={SETTINGS_ICON_STROKE} />
-              {creating ? 'Erstelle…' : isAgent ? 'Agent erstellen' : 'Assistent erstellen'}
+              {creating ? 'Erstelle…' : 'Agent erstellen'}
             </button>
           </div>
         </form>

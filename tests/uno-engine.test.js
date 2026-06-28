@@ -12,7 +12,10 @@ function loadUnoEngine() {
   const api = {
     contacts: () => [],
     peers: () => [],
-    peer: { send: (peerId, payload) => sent.push({ peerId, payload }) },
+    peer: {
+      send: (peerId, payload) => sent.push({ peerId, payload }),
+      broadcast: () => [],
+    },
     chat: { send: () => true },
     storage: {
       get: (key, fallback) => (storage.has(key) ? storage.get(key) : fallback),
@@ -30,7 +33,7 @@ function loadUnoEngine() {
       return () => events.delete(name);
     },
     onDeactivate: () => {},
-    ui: { registerTab: () => {} },
+    ui: { registerTab: () => {}, registerCommand: () => {} },
     notify: { toast: () => {} },
     log: { info: () => {}, error: () => {} },
   };
@@ -99,7 +102,7 @@ test('sanitizeSettings clamps maxPlayers to 8 and preserves game modes', () => {
 
 test('host can start game with two players and deal seven cards each', () => {
   const { hooks } = loadUnoEngine();
-  const host = hooks.createHost({}, () => {}, { id: 'host', name: 'Host' });
+  const host = hooks.createHost({ lobbyAccess: 'public' }, () => {}, { id: 'host', name: 'Host' });
   host.bootstrapHost();
   host.onWire('p2', { wire: 'join', gameId: host.gameId, name: 'Zwei' });
   assert.equal(host.startGame(), true);
@@ -113,7 +116,7 @@ test('host can start game with two players and deal seven cards each', () => {
 
 test('playing matching card advances turn', () => {
   const { hooks } = loadUnoEngine();
-  const host = hooks.createHost({}, () => {}, { id: 'host', name: 'Host' });
+  const host = hooks.createHost({ lobbyAccess: 'public' }, () => {}, { id: 'host', name: 'Host' });
   host.bootstrapHost();
   host.onWire('p2', { wire: 'join', gameId: host.gameId, name: 'Zwei' });
   host.startGame();
@@ -138,7 +141,7 @@ test('playing matching card advances turn', () => {
 
 test('callUno marks player and draw plus pass advances turn', () => {
   const { hooks } = loadUnoEngine();
-  const host = hooks.createHost({}, () => {}, { id: 'host', name: 'Host' });
+  const host = hooks.createHost({ lobbyAccess: 'public' }, () => {}, { id: 'host', name: 'Host' });
   host.bootstrapHost();
   host.onWire('p2', { wire: 'join', gameId: host.gameId, name: 'Zwei' });
   host.startGame();
@@ -159,7 +162,7 @@ test('callUno marks player and draw plus pass advances turn', () => {
 
 test('saved game persists lobby players', () => {
   const { hooks, storage } = loadUnoEngine();
-  const host = hooks.createHost({}, () => {}, { id: 'host', name: 'Host' });
+  const host = hooks.createHost({ lobbyAccess: 'public' }, () => {}, { id: 'host', name: 'Host' });
   host.bootstrapHost();
   host.saveNow();
   const saved = storage.get('savedUnoGame');

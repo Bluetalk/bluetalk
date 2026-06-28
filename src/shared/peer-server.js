@@ -135,6 +135,21 @@ function normalizeConnectAddress(rawInput) {
   return raw;
 }
 
+function isLoopbackConnectAddress(rawInput) {
+  const raw = String(rawInput || '').trim();
+  if (!raw) return false;
+  try {
+    const normalized = normalizeConnectAddress(raw);
+    const host = normalized.includes(':')
+      ? normalized.slice(0, normalized.lastIndexOf(':'))
+      : normalized;
+    const lower = host.toLowerCase();
+    return lower === '127.0.0.1' || lower === 'localhost' || lower === '::1';
+  } catch {
+    return false;
+  }
+}
+
 class PeerServer extends EventEmitter {
   constructor(store) {
     super();
@@ -599,13 +614,18 @@ class PeerServer extends EventEmitter {
       ...(discovered?.addresses || []),
     ].map((address) => this._normalizeAddress(address)));
 
-    const ports = this._normalizePortList(
-      descriptor.ports,
-      discovered?.ports,
-      this.store.get('settings.peerPorts', []),
-      this.store.get('settings.peerPort', 0),
-      PORT_CANDIDATES
-    );
+    const explicitPorts = this._normalizePortList(descriptor.ports);
+    const discoveredPorts = discovered
+      ? this._normalizePortList(discovered.ports, discovered.port, discovered.primaryPort)
+      : [];
+    const ports = explicitPorts.length > 0
+      ? this._normalizePortList(explicitPorts, discoveredPorts)
+      : this._normalizePortList(
+        discoveredPorts,
+        this.store.get('settings.peerPorts', []),
+        this.store.get('settings.peerPort', 0),
+        PORT_CANDIDATES,
+      );
 
     const localAddresses = new Set(this.getLocalAddresses());
     const localPorts = new Set(this.ports);
@@ -1661,6 +1681,16 @@ class PeerServer extends EventEmitter {
     return sent;
   }
 
+  /**
+   * Send one payload to an explicit set of peers. This deliberately does not
+   * fall back to broadcast: callers such as group chat must define the exact
+   * recipients for every protocol frame.
+   */
+  sendMany(peerIds, data) {
+    const ids = [...new Set((Array.isArray(peerIds) ? peerIds : []).filter(isValidPeerId))];
+    return ids.map((peerId) => ({ peerId, sent: this.sendTo(peerId, data) }));
+  }
+
   broadcast(data) {
     const ts = typeof data?.timestamp === 'number' && Number.isFinite(data.timestamp) ? data.timestamp : Date.now();
     const payload = JSON.stringify({
@@ -1971,4 +2001,4 @@ class PeerServer extends EventEmitter {
   }
 }
 
-module.exports = { PeerServer, normalizeConnectAddress };
+module.exports = { PeerServer, normalizeConnectAddress, isLoopbackConnectAddress };

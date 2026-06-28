@@ -204,6 +204,12 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         <label>Zugzeit in Sekunden<input type="number" min="0" max="300" value={draft.turnTimeSec ?? 0} onChange={(event) => set('turnTimeSec', Number(event.target.value))} disabled={!isHost} /></label>
         <label>Min. Raise in BB<input type="number" min="1" max="10" value={draft.minRaiseBB ?? 1} onChange={(event) => set('minRaiseBB', Number(event.target.value))} disabled={!isHost} /></label>
         <label className="poker-settings-checkbox"><input type="checkbox" checked={draft.autoStart === true} onChange={(event) => set('autoStart', event.target.checked)} disabled={!isHost} />Nächste Hand automatisch starten</label>
+        <label>Lobby-Zugang
+          <select value={draft.lobbyAccess || 'invite'} onChange={(event) => set('lobbyAccess', event.target.value)} disabled={!isHost}>
+            <option value="invite">Nur auf Einladung</option>
+            <option value="public">Öffentlich (Presence-Beitritt)</option>
+          </select>
+        </label>
       </div>
       {isHost ? <button type="submit" className="poker-btn-primary">Einstellungen übernehmen</button> : <p className="poker-panel-note">Nur der Host kann diese Werte ändern.</p>}
     </form>

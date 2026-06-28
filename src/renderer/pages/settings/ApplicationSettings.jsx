@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Bug, Moon, Power, Server, Sun } from 'lucide-react';
+import { Bell, BellOff, Bug, Moon, Power, Server, Sun } from 'lucide-react';
 import { useApp } from '../../App';
 import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
@@ -28,6 +28,27 @@ export default function ApplicationSettingsPage() {
       <div className="page-body">
         <section className="settings-section">
           <div className="card">
+            <div className="toggle-row">
+              <div className="toggle-row-info">
+                <span className="toggle-row-label-with-icon">
+                  <BellOff size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                  Nicht stören (Presence)
+                </span>
+                <span>
+                  Unterdrückt Windows-Benachrichtigungen für dich und zeigt Kontakten „Nicht stören“.
+                  Du kannst den Status auch unten links in der Seitenleiste umschalten.
+                </span>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={local.doNotDisturb ?? false}
+                  onChange={(e) => change('doNotDisturb', e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+
             <div className="toggle-row">
               <div className="toggle-row-info">
                 <span className="toggle-row-label-with-icon">

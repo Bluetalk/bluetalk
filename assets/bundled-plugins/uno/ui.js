@@ -25,6 +25,7 @@
       houseRules: 'official',
       targetScore: 500,
       penaltyCards: 2,
+      lobbyAccess: 'invite',
     };
   }
 
@@ -38,6 +39,7 @@
     next.houseRules = next.houseRules === 'casual' ? 'casual' : 'official';
     next.targetScore = clampInt(next.targetScore, 100, 10000, fallback.targetScore || 500);
     next.penaltyCards = clampInt(next.penaltyCards, 1, 10, fallback.penaltyCards || 2);
+    next.lobbyAccess = next.lobbyAccess === 'public' ? 'public' : 'invite';
     return next;
   }
 
@@ -157,6 +159,13 @@
     for (const id of peerIds) sendWire(id, body);
   }
 
+  const GAME_PRESENCE_KIND = 'game-presence';
+  const GAME_PRESENCE_CLEAR_KIND = 'game-presence-clear';
+
+  function isUnoLobbyJoinable(phase) {
+    return phase === 'lobby' || phase === 'roundOver';
+  }
+
   function createHost(settings, onTick, me, restoredGame = null) {
     const selfId = me?.id;
     const gameId = restoredGame?.gameId || `uno_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -185,6 +194,7 @@
     let savedAt = Number(restoredGame?.savedAt) || 0;
     let lastEvent = null;
     let eventSeq = 0;
+    const invitedPeers = new Set(Array.isArray(restoredGame?.invitedPeers) ? restoredGame.invitedPeers : []);
 
     for (const row of restoredPlayers) {
       if (!row?.peerId || players.some((p) => p.peerId === row.peerId)) continue;
@@ -798,6 +808,14 @@
           sendWire(from, { wire: 'join_reject', gameId, reason: 'Spiel läuft bereits.' });
           return;
         }
+        if (cfg.lobbyAccess !== 'public' && from !== selfId && !invitedPeers.has(from)) {
+          sendWire(from, {
+            wire: 'join_reject',
+            gameId,
+            reason: 'Nur auf Einladung — bitte zuerst eine Einladung im Chat erhalten.',
+          });
+          return;
+        }
         const ok = addPlayer(from, body.name);
         sendWire(from, ok
           ? { wire: 'join_ok', gameId, public: publicState() }
@@ -844,6 +862,7 @@
         if (!peerId || players.some((p) => p.peerId === peerId)) return false;
         const connected = (api.peers() || []).some((p) => p.id === peerId);
         if (!connected || isContactBlocked(peerId)) return false;
+        invitedPeers.add(peerId);
         void api.chat.send(peerId, this.invitePayload());
         message = 'Einladung wurde im Chat gesendet.';
         pushState();
@@ -871,6 +890,7 @@
           hostPeerId: selfId,
           unoSettings: { ...cfg },
           unoSettingsSummary: sum,
+          lobbyAccess: cfg.lobbyAccess,
           content: `🎴 ${cfg.tableName} — ${sum}`,
         };
       },
@@ -906,7 +926,47 @@
   let unoSelfPeerName = '';
   let clientState = null;
   let myHand = [];
-  let rootRender = null;
+  let lastPresenceSession = null;
+
+  function clearGamePresence() {
+    if (!lastPresenceSession) return;
+    api.peer.broadcast({
+      kind: GAME_PRESENCE_CLEAR_KIND,
+      game: 'uno',
+      sessionId: lastPresenceSession,
+      timestamp: Date.now(),
+    });
+    lastPresenceSession = null;
+  }
+
+  function syncGamePresence() {
+    const pub = hostRef ? hostRef.publicState() : clientState;
+    if (!pub || !unoSelfPeerId) {
+      clearGamePresence();
+      return;
+    }
+    const sessionId = pub.gameId;
+    const playerCount = (pub.players || []).length;
+    const maxPlayers = pub.settings?.maxPlayers || 4;
+    const role = hostRef ? 'host' : 'player';
+    const phase = pub.phase || 'lobby';
+    const joinable = role === 'host' && isUnoLobbyJoinable(phase) && playerCount < maxPlayers;
+    lastPresenceSession = sessionId;
+    api.peer.broadcast({
+      kind: GAME_PRESENCE_KIND,
+      game: 'uno',
+      sessionId,
+      tableName: pub.settings?.tableName || 'UNO-Tisch',
+      phase,
+      lobbyAccess: pub.settings?.lobbyAccess === 'public' ? 'public' : 'invite',
+      role,
+      hostPeerId: pub.hostPeerId || unoSelfPeerId,
+      playerCount,
+      maxPlayers,
+      joinable,
+      timestamp: Date.now(),
+    });
+  }
 
   async function refreshUnoSelfId() {
     try {
@@ -925,6 +985,7 @@
     const pub = hostRef ? hostRef.publicState() : clientState;
     if (!pub) {
       window.bluetalk.uno.pushState(null);
+      clearGamePresence();
       return;
     }
     const hand = hostRef ? hostRef.getMyHand() : myHand;
@@ -937,6 +998,15 @@
         name: contact.nickname || contact.name || connected.get(contact.id)?.name || contact.id,
       }));
     window.bluetalk.uno.pushState({ public: pub, myHand: hand, inviteCandidates });
+    syncGamePresence();
+  }
+
+  async function pumpStateToWindow() {
+    tryPump();
+    for (const delayMs of [150, 400, 900]) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      tryPump();
+    }
   }
 
   async function openGameWindowIfNeeded() {
@@ -961,13 +1031,13 @@
       myHand = w.cards || [];
       tryPump();
       void openGameWindowIfNeeded();
-      rootRender?.();
+      notifyLauncherRefresh();
       return;
     }
 
     if (w.wire === 'state' && w.public) {
       if (w.public.hostPeerId === selfId && host) {
-        rootRender?.();
+        notifyLauncherRefresh();
         return;
       }
       if (host) return;
@@ -976,7 +1046,7 @@
       clientState = w.public;
       tryPump();
       void openGameWindowIfNeeded();
-      rootRender?.();
+      notifyLauncherRefresh();
       return;
     }
 
@@ -989,21 +1059,21 @@
         clientState = null;
         myHand = [];
         tryPump();
-        rootRender?.();
+        notifyLauncherRefresh();
       }
     }
     if (w.wire === 'leave' && clientState?.gameId === w.gameId && msg.from === clientState.hostPeerId) {
       clientState = null;
       myHand = [];
       tryPump();
-      rootRender?.();
+      notifyLauncherRefresh();
     }
     if (w.wire === 'kicked' && (!w.gameId || w.gameId === clientState?.gameId)) {
       api.notify.toast?.({ title: 'UNO', message: w.reason || 'Du wurdest aus dem Spiel entfernt.' });
       clientState = null;
       myHand = [];
       tryPump();
-      rootRender?.();
+      notifyLauncherRefresh();
       void window.bluetalk?.uno?.closeGameWindow?.();
     }
   }
@@ -1019,123 +1089,69 @@
     }
   }
 
-  function render(container) {
-    container.innerHTML = `
-      <div class="uno-plugin-root">
-        <div class="uno-plugin-hero">
-          <h2>UNO <span class="uno-alpha-tag">Alpha</span></h2>
-          <p class="uno-plugin-sub">Host erstellt das Spiel, lädt per Chat ein — bis zu 8 Spieler über P2P.</p>
-          <p class="uno-alpha-notice" role="note">Alpha-Version: Spielregeln, Sync und UI können noch fehlerhaft sein und sich jederzeit ändern.</p>
-        </div>
-        <div class="uno-plugin-panels"></div>
-      </div>
-      <style>
-        .uno-plugin-root { max-width: 880px; margin: 0 auto; padding: 12px 16px 32px; }
-        .uno-plugin-hero h2 { margin: 0 0 6px; font-size: 1.35rem; display: flex; align-items: center; gap: 8px; }
-        .uno-alpha-tag {
-          display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px;
-          font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-          color: #fde68a; background: rgba(234, 179, 8, 0.16); border: 1px solid rgba(234, 179, 8, 0.35);
-        }
-        .uno-alpha-notice {
-          margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.45;
-          color: var(--fg-2); background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.22);
-        }
-        .uno-plugin-sub { margin: 0; color: var(--fg-2); font-size: 13px; line-height: 1.45; }
-        .uno-plugin-panels { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
-        .uno-card-panel {
-          background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
-          padding: 14px 16px;
-        }
-        .uno-launch-card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; }
-        .uno-launch-mark { font-size: 42px; line-height: 1; }
-        .uno-btn { padding: 6px 12px; border-radius: 6px; border: 0; cursor: pointer; font-size: 13px; }
-        .uno-btn-primary { background: var(--accent); color: var(--accent-fg); }
-        .uno-btn-ghost { background: var(--bg-2); color: var(--fg-0); border: 1px solid var(--border); }
-        .uno-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      </style>
-    `;
-
-    const panels = container.querySelector('.uno-plugin-panels');
-
-    async function paint() {
-      await refreshUnoSelfId();
-      const pending = tryConsumePendingJoin();
-      if (pending?.hostPeerId && pending?.gameId && !host && !clientState) {
-        clientState = {
-          gameId: pending.gameId,
-          hostPeerId: pending.hostPeerId,
-          phase: 'lobby',
-          players: [],
-          settings: sanitizeSettings(pending.unoSettings || {}),
-          message: 'Verbindung zum Tisch wird hergestellt…',
-        };
-        sendWire(pending.hostPeerId, {
-          wire: 'join',
-          gameId: pending.gameId,
-          name: unoSelfPeerName || 'Spieler',
-        });
-        await openGameWindowIfNeeded();
-        tryPump();
-      }
-
-      const activeState = host ? host.publicState() : clientState;
-      const savedGame = api.storage.get('savedUnoGame', null);
-      panels.innerHTML = activeState
-        ? `
-          <div class="uno-card-panel uno-launch-card">
-            <div class="uno-launch-mark">🎴</div>
-            <div>
-              <h3>${activeState.settings?.tableName || 'UNO-Tisch'}</h3>
-              <p class="uno-plugin-sub">Spiel, Einladungen und Einstellungen werden im UNO-Fenster verwaltet.</p>
-            </div>
-            <button type="button" class="uno-btn uno-btn-primary" id="uno-launch-open">UNO-Fenster öffnen</button>
-          </div>`
-        : `
-          <div class="uno-card-panel uno-launch-card">
-            <div class="uno-launch-mark">🎴</div>
-            <div>
-              <h3>UNO-Runde starten</h3>
-              <p class="uno-plugin-sub">Starte hier das Spiel — alles Weitere erledigst du im UNO-Fenster.</p>
-            </div>
-            <div class="uno-row">
-              <button type="button" class="uno-btn uno-btn-primary" id="uno-launch-new">Neues Spiel</button>
-              ${savedGame?.players?.length ? '<button type="button" class="uno-btn uno-btn-ghost" id="uno-launch-resume">Gespeichertes Spiel fortsetzen</button>' : ''}
-            </div>
-          </div>`;
-
-      const launchHost = async (saved = null) => {
-        const peerInfo = await window.bluetalk?.peer?.getInfo?.();
-        if (!peerInfo?.id) {
-          api.notify.toast?.({ title: 'UNO', message: 'Peer-ID noch nicht verfügbar.' });
-          return;
-        }
-        unoSelfPeerId = peerInfo.id;
-        unoSelfPeerName = peerInfo.name || '';
-        const settings = saved?.settings || api.storage.get('unoSettings', defaultSettings());
-        host = createHost(settings, () => {
-          tryPump();
-          rootRender?.();
-        }, { id: peerInfo.id, name: peerInfo.name || 'Host' }, saved);
-        hostRef = host;
-        host.bootstrapHost();
-        clientState = host.publicState();
-        myHand = [];
-        await openGameWindowIfNeeded();
-        tryPump();
-        void paint();
-      };
-
-      panels.querySelector('#uno-launch-open')?.addEventListener('click', () => {
-        void openGameWindowIfNeeded().then(() => tryPump());
-      });
-      panels.querySelector('#uno-launch-new')?.addEventListener('click', () => void launchHost(null));
-      panels.querySelector('#uno-launch-resume')?.addEventListener('click', () => void launchHost(savedGame));
+  function notifyLauncherRefresh() {
+    try {
+      window.dispatchEvent(new CustomEvent('bt:games-launcher-refresh'));
+    } catch {
+      /* ignore */
     }
+  }
 
-    rootRender = () => void paint();
-    void paint();
-    return () => { rootRender = null; };
+  async function launchHostGame(saved = null) {
+    const peerInfo = await window.bluetalk?.peer?.getInfo?.();
+    if (!peerInfo?.id) {
+      api.notify.toast?.({ title: 'UNO', message: 'Peer-ID noch nicht verfügbar.' });
+      return { ok: false };
+    }
+    unoSelfPeerId = peerInfo.id;
+    unoSelfPeerName = peerInfo.name || '';
+    const settings = saved?.settings || api.storage.get('unoSettings', defaultSettings());
+    host = createHost(settings, () => {
+      tryPump();
+      notifyLauncherRefresh();
+    }, { id: peerInfo.id, name: peerInfo.name || 'Host' }, saved);
+    hostRef = host;
+    host.bootstrapHost();
+    clientState = host.publicState();
+    myHand = [];
+    await openGameWindowIfNeeded();
+    await pumpStateToWindow();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }
+
+  async function getLauncherState() {
+    await refreshUnoSelfId();
+    const activeState = host ? host.publicState() : clientState;
+    const savedGame = api.storage.get('savedUnoGame', null);
+    return {
+      active: Boolean(activeState),
+      tableName: activeState?.settings?.tableName || 'UNO-Tisch',
+      hasSavedGame: Boolean(savedGame?.players?.length),
+    };
+  }
+
+  async function bootstrapPendingJoin() {
+    await refreshUnoSelfId();
+    const pending = tryConsumePendingJoin();
+    if (pending?.hostPeerId && pending?.gameId && !host && !clientState) {
+      clientState = {
+        gameId: pending.gameId,
+        hostPeerId: pending.hostPeerId,
+        phase: 'lobby',
+        players: [],
+        settings: sanitizeSettings(pending.unoSettings || {}),
+        message: 'Verbindung zum Tisch wird hergestellt…',
+      };
+      sendWire(pending.hostPeerId, {
+        wire: 'join',
+        gameId: pending.gameId,
+        name: unoSelfPeerName || 'Spieler',
+      });
+      await openGameWindowIfNeeded();
+      tryPump();
+      notifyLauncherRefresh();
+    }
   }
 
   const offUnoMessage = api.on('peer:message', (msg) => {
@@ -1155,7 +1171,7 @@
       });
     }
     tryPump();
-    rootRender?.();
+    notifyLauncherRefresh();
   });
 
   let offUnoChild = null;
@@ -1187,10 +1203,11 @@
         } else if (clientState?.hostPeerId) {
           sendWire(clientState.hostPeerId, { wire: 'leave', gameId: clientState.gameId });
         }
+        clearGamePresence();
         clientState = null;
         myHand = [];
         tryPump();
-        rootRender?.();
+        notifyLauncherRefresh();
       } else if (payload.type === 'update_settings' && payload.settings) {
         hostRef?.updateSettings(payload.settings);
       } else if (payload.type === 'invite' && payload.peerId) {
@@ -1205,23 +1222,27 @@
 
   void refreshUnoSelfId();
 
-  api.ui.registerTab({
-    id: 'game',
-    label: 'UNO',
-    icon: 'Layers',
-    order: 41,
-    render,
-  });
+  api.ui.registerCommand('launcherState', () => getLauncherState());
+  api.ui.registerCommand('launchNew', () => launchHostGame(null));
+  api.ui.registerCommand('launchResume', () => launchHostGame(api.storage.get('savedUnoGame', null)));
+  api.ui.registerCommand('openWindow', () => openGameWindowIfNeeded().then(() => {
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }));
+
+  void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
     offUnoChild?.();
     offUnoMessage?.();
     offUnoDisconnect?.();
     offUnoConnect?.();
+    clearGamePresence();
     host?.destroy?.();
     host = null;
     hostRef = null;
-    rootRender = null;
+    /* noop */
   });
 
   api.log.info('UNO-Plugin UI geladen');
