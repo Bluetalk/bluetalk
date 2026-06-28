@@ -32,10 +32,11 @@ test('AI_CHAT_PEER_ID is a reserved virtual id', () => {
   assert.equal(isAiChatPeerId('real-peer'), false);
 });
 
-test('model tiers include fast, normal, normal+, smart, and cloud', () => {
+test('model tiers include fast, normal, normal+, ornith, smart, and cloud', () => {
   assert.ok(isValidModelTier('fast'));
   assert.ok(isValidModelTier('normal'));
   assert.ok(isValidModelTier('normal+'));
+  assert.ok(isValidModelTier('ornith'));
   assert.ok(isValidModelTier('smart'));
   assert.ok(isValidModelTier('cloud'));
   assert.equal(isValidModelTier('unknown'), false);
@@ -45,8 +46,11 @@ test('local tiers reference ollama pull names', () => {
   assert.equal(getModelTier('fast').model, 'qwen3:0.6b');
   assert.equal(getModelTier('normal').model, 'qwen3:1.7b');
   assert.equal(getModelTier('normal+').model, 'qwen3:4b');
+  assert.equal(getModelTier('ornith').model, 'ornith:9b');
   assert.equal(getModelTier('smart').model, 'gemma4:latest');
-  for (const id of ['fast', 'normal', 'normal+', 'smart']) {
+  assert.equal(getModelTier('ornith').beta, true);
+  assert.equal(getModelTier('ornith').debugOnly, true);
+  for (const id of ['fast', 'normal', 'normal+', 'ornith', 'smart']) {
     assert.ok(getModelTier(id).local);
     assert.ok(getModelTier(id).estimatedSizeBytes > 0);
   }
@@ -69,25 +73,30 @@ test('AI_CHAT_SYSTEM_PROMPT encodes offline assistant rules', () => {
   assert.ok(AI_CHAT_SYSTEM_PROMPT.includes('BlueTalk'));
   assert.ok(AI_CHAT_SYSTEM_PROMPT.includes('IMMER auf Deutsch'));
   assert.ok(AI_CHAT_SYSTEM_PROMPT.includes('Kein Live-Internet'));
+  assert.ok(AI_CHAT_SYSTEM_PROMPT.includes('Antwortform wählen'));
   assert.ok(AI_CHAT_SYSTEM_PROMPT.length > 200);
 });
 
 test('getSystemPromptForTier returns tier-specific sections', () => {
   const fast = getSystemPromptForTier('fast');
+  const ornith = getSystemPromptForTier('ornith');
   const smart = getSystemPromptForTier('smart');
   const cloud = getSystemPromptForTier('cloud');
 
   assert.ok(fast.includes('Modell-Stufe: Schnell'));
   assert.ok(fast.includes('Maximal 1–3 kurze Sätze'));
+  assert.ok(ornith.includes('Ornith'));
+  assert.ok(ornith.includes('nicht standardmäßig mit Code'));
   assert.ok(smart.includes('Gemma 4'));
   assert.ok(smart.includes('analytisches Potenzial'));
   assert.ok(cloud.includes('gpt-oss 120B'));
   assert.ok(cloud.includes('Fachberaters'));
 
   assert.notEqual(fast, smart);
+  assert.notEqual(ornith, smart);
   assert.notEqual(smart, cloud);
 
-  for (const id of ['fast', 'normal', 'normal+', 'smart', 'cloud']) {
+  for (const id of ['fast', 'normal', 'normal+', 'ornith', 'smart', 'cloud']) {
     const prompt = getSystemPromptForTier(id);
     assert.ok(prompt.includes('BlueTalk'));
     assert.ok(prompt.includes('IMMER auf Deutsch'));
@@ -132,19 +141,29 @@ test('cloud tier requires auth and has no local size', () => {
   assert.equal(cloud.estimatedSizeBytes, 0);
 });
 
-test('agent modes include off and agent', () => {
-  assert.ok(isValidAgentMode('off'));
-  assert.ok(isValidAgentMode('agent'));
-  assert.equal(isValidAgentMode('bogus'), false);
-  assert.equal(AI_AGENT_MODES.off.label, 'Chat');
-  assert.equal(AI_AGENT_MODES.agent.label, 'Agent');
+test('modelSupportsVision reflects tier and cloud model capabilities', () => {
+  const { modelSupportsVision } = require('../src/shared/ai-chat-constants.js');
+  assert.equal(modelSupportsVision('fast', ''), false);
+  assert.equal(modelSupportsVision('normal', ''), false);
+  assert.equal(modelSupportsVision('normal+', ''), false);
+  assert.equal(modelSupportsVision('ornith', ''), false);
+  assert.equal(modelSupportsVision('smart', ''), true);
+  assert.equal(modelSupportsVision('cloud', 'gpt-oss-120b'), false);
+  assert.equal(modelSupportsVision('cloud', 'gpt-oss-20b'), false);
 });
 
-test('isAgentModeEnabled detects agent agents', () => {
+test('agent modes only include agent', () => {
+  assert.ok(isValidAgentMode('agent'));
+  assert.ok(isValidAgentMode('off'));
+  assert.equal(isValidAgentMode('bogus'), false);
+  assert.equal(AI_AGENT_MODES.agent.label, 'Agent');
+  assert.equal(AI_AGENT_MODES.off, undefined);
+});
+
+test('isAgentModeEnabled is true for any configured agent', () => {
   assert.equal(isAgentModeEnabled({ agentMode: 'agent' }), true);
-  assert.equal(isAgentModeEnabled({ agentMode: 'off' }), false);
-  assert.equal(isAgentModeEnabled({}), false);
-  assert.equal(isAgentModeEnabled({ agentMode: 'bogus' }), false);
+  assert.equal(isAgentModeEnabled({ agentMode: 'off' }), true);
+  assert.equal(isAgentModeEnabled({}), true);
   assert.equal(isAgentModeEnabled(null), false);
 });
 
@@ -224,8 +243,10 @@ test('getToolsForTier filters tools by model tier', () => {
   assert.ok(!names(fast).includes('spawn_subagent'));
   assert.ok(!names(fast).includes('web_fetch'));
 
-  // Smart und Cloud haben die volle Palette inkl. Sub-Agent
+  // Smart, Ornith und Cloud haben die volle Palette inkl. Sub-Agent
   assert.ok(names(smart).includes('spawn_subagent'));
+  const ornith = getToolsForTier('ornith');
+  assert.ok(names(ornith).includes('spawn_subagent'));
   assert.ok(names(cloud).includes('web_fetch'));
   assert.ok(names(cloud).includes('spawn_subagent'));
 
@@ -252,6 +273,7 @@ test('getToolsForTier filters tools by model tier', () => {
 test('agent system prompt includes tier-specific agent strategies', () => {
   const { AI_AGENT_SYSTEM_PROMPT_BASE } = require('../src/shared/ai-chat-constants.js');
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('Tool-Pflicht'));
+  assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('Aufgaben-Typ erkennen'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('Arbeits-Loop'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('spawn_subagent'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('ask_user'));
@@ -280,6 +302,7 @@ test('agent system prompt lists available tools per tier', () => {
 test('agent system prompt enforces code-quality rules', () => {
   const { AI_AGENT_SYSTEM_PROMPT_BASE } = require('../src/shared/ai-chat-constants.js');
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('Code-Qualität'));
+  assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('nur bei echten Coding-Aufgaben'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('<style>'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('<head>'));
   assert.ok(AI_AGENT_SYSTEM_PROMPT_BASE.includes('<body>'));
@@ -287,10 +310,13 @@ test('agent system prompt enforces code-quality rules', () => {
 
 test('agent tier prompts are appended in agent mode', () => {
   const fastAgent = getSystemPromptForTier('fast', true);
+  const ornithAgent = getSystemPromptForTier('ornith', true);
   const cloudAgent = getSystemPromptForTier('cloud', true);
   const fastChat = getSystemPromptForTier('fast', false);
 
   assert.ok(fastAgent.includes('Agent-Strategie: Schnell'));
+  assert.ok(ornithAgent.includes('Agent-Strategie: Ornith'));
+  assert.ok(ornithAgent.includes('Alltags-Agent'));
   assert.ok(cloudAgent.includes('Agent-Strategie: Cloud'));
   assert.ok(cloudAgent.includes('Sub-Agent'));
   assert.ok(fastAgent.includes('kompakter Agent mit wenigen'));
@@ -298,25 +324,72 @@ test('agent tier prompts are appended in agent mode', () => {
   assert.notEqual(fastAgent, fastChat);
 });
 
-test('getSystemPromptForAgent uses agent base prompt when agent mode is enabled', () => {
-  const chat = getSystemPromptForAgent('normal', { personalityId: 'default' });
+test('Ornith prompt enforces the confirmed BlueTalk send sequence', () => {
+  const prompt = getSystemPromptForTier('ornith', true);
+
+  assert.ok(prompt.includes('Verbindlicher Ablauf beim Senden einer Nachricht'));
+  assert.ok(prompt.includes('list_bluetalk_contacts mit dem Namen als query'));
+  assert.ok(prompt.includes('send_bluetalk_message öffnet selbst den verpflichtenden Bestätigungsdialog'));
+  assert.ok(prompt.includes('Ohne ok=true niemals behaupten'));
+  assert.ok(prompt.includes('keine Kontaktliste erfinden'));
+  assert.ok(prompt.includes('EINORDNEN / VERSTEHEN / PLANEN'));
+  assert.ok(prompt.includes('list_bluetalk_contacts mit query=Henri'));
+  assert.ok(prompt.includes('nur aus dem nativen Function-Call'));
+  assert.ok(prompt.includes('Verbindlicher Ablauf für eine Zitantwort'));
+  assert.ok(prompt.includes('conversationId oder chatId ist KEINE peer_id'));
+  assert.ok(prompt.includes('Let me construct the function call'));
+  assert.ok(prompt.includes('als ungültige Ausgabe verworfen'));
+  assert.ok(prompt.includes('[TOOL_CALLS]-Tabellen'));
+  assert.ok(prompt.includes('native Function-Calling-Feld der API'));
+  assert.ok(prompt.includes('ORNITH-KONTROLLREGELN — LETZTE UND HÖCHSTE PRIORITÄT'));
+  assert.ok(prompt.includes('assistant.content vollständig leer'));
+  assert.ok(prompt.includes('Text und Tool-Call dürfen NIEMALS gemeinsam'));
+  assert.ok(prompt.includes('SYSTEM-TOOL-CALL'));
+  assert.ok(prompt.endsWith('dass die Aktion nicht ausgeführt wurde.'));
+});
+
+test('Ornith strict tool rules remain last after personality and workdir additions', () => {
+  const prompt = getSystemPromptForAgent('ornith', {
+    personalityId: 'friendly',
+    personalityCustom: 'Sei besonders gesprächig.',
+    agentMode: 'agent',
+    agentWorkDir: 'C:\\workspace',
+  });
+
+  assert.ok(prompt.includes('Persönlichkeit: Freundlich'));
+  assert.ok(prompt.includes('Sei besonders gesprächig.'));
+  assert.ok(prompt.includes('C:\\workspace'));
+  assert.ok(prompt.endsWith('dass die Aktion nicht ausgeführt wurde.'));
+  assert.ok(prompt.lastIndexOf('ORNITH-KONTROLLREGELN') > prompt.lastIndexOf('Sei besonders gesprächig.'));
+});
+
+test('BlueTalk messaging tool descriptions reject invented ids and duplicate confirmation prompts', () => {
+  const byName = new Map(AI_AGENT_TOOLS.map((tool) => [tool.function.name, tool.function.description]));
+
+  assert.ok(byName.get('list_bluetalk_contacts').includes('erfinde keine Treffer oder IDs'));
+  assert.ok(byName.get('send_bluetalk_message').includes('nicht vorher separat mit ask_user'));
+  assert.ok(byName.get('send_bluetalk_message').includes('ok=true'));
+  assert.ok(byName.get('send_bluetalk_reply').includes('niemals conversationId/chatId'));
+  assert.ok(byName.get('send_bluetalk_reply').includes('Ergebnis-JSON selbst schreiben'));
+});
+
+test('getSystemPromptForAgent always uses agent base prompt', () => {
+  const defaultPrompt = getSystemPromptForAgent('normal', { personalityId: 'default' });
   const agent = getSystemPromptForAgent('normal', {
     personalityId: 'default',
     agentMode: 'agent',
     agentWorkDir: '/home/user/proj',
   });
 
-  assert.ok(chat.includes('kein Zugriff auf Dateien'));
-  assert.ok(agent.includes('handlungsfaehiger Agent') || agent.includes('handlungsfähiger Agent') || agent.includes('ECHTE, AKTIVE Werkzeuge'));
+  assert.ok(defaultPrompt.includes('handlungsfaehiger Agent') || defaultPrompt.includes('handlungsfähiger Agent') || defaultPrompt.includes('ECHTE, AKTIVE Werkzeuge'));
   assert.ok(agent.includes('Verfügbare Tools'));
   assert.ok(agent.includes('Arbeitsverzeichnis'));
   assert.ok(agent.includes('/home/user/proj'));
   assert.ok(!agent.includes('Kein Live-Internet'));
-  assert.notEqual(chat, agent);
 });
 
-test('getSystemPromptForAgent stays in chat mode when agentMode is off', () => {
+test('getSystemPromptForAgent migrates legacy agentMode off to agent', () => {
   const off = getSystemPromptForAgent('normal', { personalityId: 'default', agentMode: 'off' });
-  assert.ok(off.includes('BlueTalk'));
-  assert.ok(!off.includes('Arbeitsverzeichnis'));
+  assert.ok(off.includes('Arbeitsverzeichnis'));
+  assert.ok(off.includes('Verfügbare Tools'));
 });

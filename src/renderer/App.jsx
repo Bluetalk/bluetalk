@@ -30,8 +30,48 @@ import {
 import VerticalResizeHandle from './components/VerticalResizeHandle';
 import { base64ByteLength, validateStickerData } from './stickers/stickerStore';
 import { isAiChatPeerId } from './aiChatConstants';
+import { normalizeAttachmentFileType } from './utils/attachmentImage';
+import { toolEventsFromSegments } from './utils/agentSegments.js';
 import { isContactNotificationMuted } from './contactNotificationMute';
 import { buildMessageNotificationPreview } from './utils/messageNotificationPreview';
+import {
+  GAME_PRESENCE_CLEAR_KIND,
+  GAME_PRESENCE_KIND,
+  canJoinGameViaPresence,
+  gameInviteKey,
+  isPresenceStale,
+} from '../shared/game-presence.js';
+import {
+  USER_PRESENCE_KIND,
+  buildUserPresencePayload,
+} from '../shared/user-presence.js';
+import { REALTIME_KIND } from '../shared/plugin-realtime.mjs';
+import PresenceStatusToggle from './components/PresenceStatusToggle';
+import groupChat from '../shared/group-chat.js';
+
+const {
+  GROUP_EVENT_KIND,
+  GROUP_MESSAGE_KIND,
+  GROUP_PROTOCOL_VERSION,
+  GROUP_RECEIPT_KIND,
+  applyGroupEvent,
+  buildTargetedGroupRoute,
+  createGroup: createGroupModel,
+  createGroupAcceptEvent,
+  createGroupInviteEvent,
+  createGroupLeaveEvent,
+  createGroupUpdateEvent,
+  deriveGroupDeliveryStatus,
+  getGroupMember,
+  groupPeerIds,
+  isActiveGroupMember,
+  isGroupAdmin,
+  isGroupChatId,
+  normalizeGroup,
+  rememberGroupEventId,
+  summarizeGroupDelivery,
+  validateIncomingGroupMessage,
+} = groupChat;
 
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const AccountSettingsPage = lazy(() => import('./pages/settings/AccountSettings'));
@@ -43,11 +83,16 @@ const AiSettingsPage = lazy(() => import('./pages/settings/AiSettings'));
 const NewConnectionsPage = lazy(() => import('./pages/NewConnections'));
 const CloudSyncPage = lazy(() => import('./pages/CloudSync'));
 const LibraryPage = lazy(() => import('./pages/Library'));
+const GamesPage = lazy(() => import('./pages/Games'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const PluginsPage = lazy(() => import('./pages/Plugins'));
 const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
 const PokerGamePage = lazy(() => import('./pages/PokerGamePage'));
 const UnoGamePage = lazy(() => import('./pages/UnoGamePage'));
+const ConnectFourGamePage = lazy(() => import('./pages/ConnectFourGamePage'));
+const ChessGamePage = lazy(() => import('./pages/ChessGamePage'));
+const TicTacToeGamePage = lazy(() => import('./pages/TicTacToeGamePage'));
+const DocsPage = lazy(() => import('./docs/DocsPage'));
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -70,6 +115,7 @@ const DEFAULT_APP_SETTINGS = {
   theme: 'dark',
   debugMode: false,
   windowsNotifications: true,
+  doNotDisturb: false,
   sendReadReceipts: true,
   /** Gespeicherte Panel-Breiten (Pixel). */
   uiResize: {},
@@ -308,6 +354,7 @@ function Sidebar() {
     { to: '/', label: 'Chats', icon: MessageCircle },
     { to: '/new', label: 'New', icon: UserPlus },
     { to: '/library', label: 'Bibliothek', icon: FolderOpen },
+    { to: '/games', label: 'Spiele', icon: Sparkles },
     { to: '/plugins', label: 'Erweiterungen', icon: Blocks },
     { to: '/settings', label: 'Settings', icon: SettingsIcon },
   ];
@@ -357,6 +404,9 @@ function Sidebar() {
           <div className="sidebar-notif">
             <NotificationCenter />
           </div>
+          <div className="sidebar-presence">
+            <PresenceStatusToggle />
+          </div>
           <div className="sidebar-profile">
             <ProfileMenu variant="sidebar" />
           </div>
@@ -375,12 +425,17 @@ function Sidebar() {
 export default function App() {
   const [peers, setPeers] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [ownPeerId, setOwnPeerId] = useState('');
   const [chatMeta, setChatMeta] = useState({});
   const [loadedChats, setLoadedChats] = useState({});
   const [messages, setMessages] = useState({});
   const [aiChatProgress, setAiChatProgress] = useState(null);
   const [aiChatPendingPeerId, setAiChatPendingPeerId] = useState(null);
   const [agentAskUser, setAgentAskUser] = useState(null);
+  const [peerGamePresence, setPeerGamePresence] = useState({});
+  const [peerUserPresence, setPeerUserPresence] = useState({});
+  const [gameInviteKeys, setGameInviteKeys] = useState(() => new Set());
   const [theme, setTheme] = useState('dark');
   const [settings, setSettings] = useState({ ...DEFAULT_APP_SETTINGS });
   const messageCacheRef = useRef({});
@@ -388,6 +443,12 @@ export default function App() {
   const activeAiChatRequestRef = useRef(null);
   const settingsRef = useRef(settings);
   const contactsRef = useRef([]);
+  const groupsRef = useRef([]);
+  const ownPeerIdRef = useRef('');
+  const groupOutboxRef = useRef([]);
+  const groupEventIdsRef = useRef([]);
+  const sendGroupPacketRef = useRef(null);
+  const flushGroupOutboxRef = useRef(null);
   const ownEcdhPrivateRef = useRef(null);
   const ownEcdhPublicSpkiRef = useRef('');
   const e2eeSessionsRef = useRef({});
@@ -412,6 +473,10 @@ export default function App() {
   useEffect(() => {
     contactsRef.current = contacts;
   }, [contacts]);
+
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   const sendE2eeHandshake = useCallback(async (peerId, options = {}) => {
     if (!window.bluetalk?.peer || !peerId || !ownEcdhPublicSpkiRef.current) return false;
@@ -538,6 +603,23 @@ export default function App() {
     deliveryTimersRef.current.clear();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPeerGamePresence((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [peerId, presence] of Object.entries(prev)) {
+          if (isPresenceStale(presence)) {
+            delete next[peerId];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const applyContactPatch = useCallback((prev, patch) => {
     if (!patch?.id) return prev;
     const idx = prev.findIndex((c) => c.id === patch.id);
@@ -562,6 +644,50 @@ export default function App() {
       return updated;
     });
   }, [applyContactPatch]);
+
+  const replaceGroup = useCallback((nextGroup) => {
+    let normalized;
+    try {
+      normalized = normalizeGroup(nextGroup);
+    } catch {
+      return false;
+    }
+    const current = groupsRef.current;
+    const idx = current.findIndex((group) => group.id === normalized.id);
+    const updated = idx >= 0
+      ? current.map((group, index) => (index === idx ? normalized : group))
+      : [...current, normalized];
+    groupsRef.current = updated;
+    setGroups(updated);
+    void window.bluetalk?.store?.set?.('groups', updated);
+    return true;
+  }, []);
+
+  const removeGroup = useCallback((groupId) => {
+    if (!groupId) return false;
+    const updated = groupsRef.current.filter((group) => group.id !== groupId);
+    if (updated.length === groupsRef.current.length) return false;
+    groupsRef.current = updated;
+    setGroups(updated);
+    void window.bluetalk?.store?.set?.('groups', updated);
+    return true;
+  }, []);
+
+  const persistGroupOutbox = useCallback((next) => {
+    const bounded = (Array.isArray(next) ? next : []).slice(-1000);
+    groupOutboxRef.current = bounded;
+    void window.bluetalk?.store?.set?.('groupOutbox', bounded);
+    return bounded;
+  }, []);
+
+  const rememberIncomingGroupEvent = useCallback((eventId) => {
+    const remembered = rememberGroupEventId(groupEventIdsRef.current, eventId);
+    groupEventIdsRef.current = remembered.eventIds;
+    if (!remembered.duplicate) {
+      void window.bluetalk?.store?.set?.('groupEventIds', remembered.eventIds);
+    }
+    return remembered.duplicate;
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -630,9 +756,15 @@ export default function App() {
         });
 
         const blocked = contactsRef.current.some((c) => c?.id === peer.id && c.blocked === true);
+        if (!blocked) {
+          void window.bluetalk.peer.send(peer.id, buildUserPresencePayload(settingsRef.current));
+        }
         if (!blocked && ownEcdhPublicSpkiRef.current && contactWantsOutgoingE2ee(contactsRef, peer.id)) {
           void sendE2eeHandshake(peer.id);
         }
+        window.setTimeout(() => {
+          void flushGroupOutboxRef.current?.(peer.id);
+        }, 250);
       })
     );
 
@@ -642,6 +774,18 @@ export default function App() {
         e2eeHandshakeSentRef.current.delete(peerId);
         e2eeHandshakePromisesRef.current.delete(peerId);
         setPeers((prev) => prev.filter((p) => p.id !== peerId));
+        setPeerGamePresence((prev) => {
+          if (!prev[peerId]) return prev;
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        });
+        setPeerUserPresence((prev) => {
+          if (!prev[peerId]) return prev;
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        });
       })
     );
 
@@ -787,10 +931,71 @@ export default function App() {
           return;
         }
 
+        // Vier-gewinnt-Spielprotokoll (Wire) — nicht im Chatverlauf speichern
+        if (msg.kind === 'connect-four' && fromId) {
+          if (isBlocked) return;
+          return;
+        }
+
+        // Schach-Spielprotokoll (Wire) — nicht im Chatverlauf speichern
+        if (msg.kind === 'chess' && fromId) {
+          if (isBlocked) return;
+          return;
+        }
+
+        // Tic-Tac-Toe-Spielprotokoll (Wire) — nicht im Chatverlauf speichern
+        if (msg.kind === 'tic-tac-toe' && fromId) {
+          if (isBlocked) return;
+          return;
+        }
+
+        // Plugin-Realtime-Protokoll — nicht im Chatverlauf speichern
+        if (msg.kind === REALTIME_KIND && fromId) {
+          if (isBlocked) return;
+          return;
+        }
+
+        if (msg.kind === USER_PRESENCE_KIND && fromId) {
+          if (isBlocked) return;
+          setPeerUserPresence((prev) => ({
+            ...prev,
+            [fromId]: {
+              status: msg.status === 'dnd' ? 'dnd' : 'online',
+              updatedAt: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
+            },
+          }));
+          return;
+        }
+
+        if (msg.kind === GAME_PRESENCE_KIND && fromId) {
+          if (isBlocked) return;
+          setPeerGamePresence((prev) => ({
+            ...prev,
+            [fromId]: {
+              ...msg,
+              peerId: fromId,
+              updatedAt: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
+            },
+          }));
+          return;
+        }
+
+        if (msg.kind === GAME_PRESENCE_CLEAR_KIND && fromId) {
+          setPeerGamePresence((prev) => {
+            const current = prev[fromId];
+            if (!current) return prev;
+            if (msg.sessionId && current.sessionId !== msg.sessionId) return prev;
+            const next = { ...prev };
+            delete next[fromId];
+            return next;
+          });
+          return;
+        }
+
         if (isBlocked) {
           const k = msg.kind;
           const blockable =
-            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'contact-share';
+            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'connect-four-invite' || k === 'chess-invite' || k === 'tic-tac-toe-invite' || k === 'contact-share';
           if (blockable && fromId && msg.messageId) {
             void window.bluetalk.peer.send(fromId, {
               kind: 'messaging-blocked',
@@ -806,6 +1011,7 @@ export default function App() {
           messageId: msg.messageId || newChatMessageId(),
           timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
         };
+        let wasPairwiseEncrypted = false;
 
         if (msg.kind === 'encrypted-chat-e2ee' && fromId) {
           const expectedKeyId = Number(msg.e2eeV || 1) === 2 ? String(msg.keyId || '') : '';
@@ -833,8 +1039,13 @@ export default function App() {
               timestamp: typeof inner.timestamp === 'number' ? inner.timestamp : normalized.timestamp,
               from: fromId,
             };
+            wasPairwiseEncrypted = true;
             const contact = contactsRef.current.find((entry) => entry?.id === fromId);
-            if (!isContactNotificationMuted(contact)) {
+            if (
+              !settingsRef.current.doNotDisturb
+              && !isContactNotificationMuted(contact)
+              && ![GROUP_EVENT_KIND, GROUP_MESSAGE_KIND, GROUP_RECEIPT_KIND].includes(inner.kind)
+            ) {
               void window.bluetalk?.notify?.show?.({
                 title: contact?.nickname || contact?.name || normalized.sender || fromId,
                 body: buildMessageNotificationPreview(normalized),
@@ -844,6 +1055,194 @@ export default function App() {
             console.error('E2EE decrypt failed:', e);
             return;
           }
+        }
+
+        if ([GROUP_EVENT_KIND, GROUP_MESSAGE_KIND, GROUP_RECEIPT_KIND].includes(normalized.kind) && !wasPairwiseEncrypted) {
+          console.warn('Rejected unencrypted group protocol frame from peer:', fromId);
+          return;
+        }
+
+        if (normalized.kind === GROUP_EVENT_KIND) {
+          if (!fromId || normalized.actorId !== fromId) return;
+          const sendEventReceipt = () => {
+            const receipt = {
+              kind: GROUP_RECEIPT_KIND,
+              protocolVersion: GROUP_PROTOCOL_VERSION,
+              groupId: normalized.groupId,
+              refEventId: normalized.eventId,
+              senderPeerId: ownPeerIdRef.current,
+              status: 'delivered',
+              receivedAt: Date.now(),
+            };
+            void sendGroupPacketRef.current?.(fromId, receipt, {
+              packetId: `event-receipt:${normalized.eventId}`,
+              groupId: normalized.groupId,
+              type: 'receipt',
+              queue: false,
+            });
+          };
+          if (groupEventIdsRef.current.includes(normalized.eventId)) {
+            sendEventReceipt();
+            return;
+          }
+          const current = groupsRef.current.find((group) => group.id === normalized.groupId) || null;
+          const applied = applyGroupEvent(current, normalized, ownPeerIdRef.current);
+          if (!applied.ok) {
+            console.warn('Rejected group event:', applied.error, normalized.groupId, fromId);
+            return;
+          }
+          rememberIncomingGroupEvent(normalized.eventId);
+          replaceGroup(applied.group);
+          sendEventReceipt();
+
+          if (applied.shouldAccept) {
+            try {
+              const accept = createGroupAcceptEvent(applied.group, ownPeerIdRef.current);
+              void sendGroupPacketRef.current?.(fromId, accept, {
+                packetId: accept.eventId,
+                groupId: applied.group.id,
+                type: 'control',
+              });
+            } catch (error) {
+              console.warn('Could not acknowledge group invitation:', error?.message);
+            }
+            inboundToastRef.current?.({
+              variant: 'success',
+              title: 'Neue Gruppe',
+              message: `Du wurdest zu „${applied.group.name}“ hinzugefügt.`,
+            });
+          }
+
+          if (applied.shouldBroadcast && current && isGroupAdmin(applied.group, ownPeerIdRef.current)) {
+            try {
+              const update = createGroupUpdateEvent(
+                current,
+                applied.group,
+                ownPeerIdRef.current,
+                normalized.action === 'accept' ? 'member-accepted' : 'member-left'
+              );
+              const route = buildTargetedGroupRoute(applied.group, ownPeerIdRef.current, { includeInvited: true });
+              for (const recipientId of route.recipients) {
+                void sendGroupPacketRef.current?.(recipientId, update, {
+                  packetId: update.eventId,
+                  groupId: applied.group.id,
+                  type: 'control',
+                });
+              }
+            } catch (error) {
+              console.warn('Could not publish group membership update:', error?.message);
+            }
+          }
+          return;
+        }
+
+        if (normalized.kind === GROUP_RECEIPT_KIND) {
+          const group = groupsRef.current.find((entry) => entry.id === normalized.groupId);
+          if (group && normalized.senderPeerId === fromId && normalized.refEventId) {
+            persistGroupOutbox(groupOutboxRef.current.filter((entry) => !(
+              entry.peerId === fromId && entry.packetId === normalized.refEventId
+            )));
+            return;
+          }
+          if (
+            !group
+            || normalized.senderPeerId !== fromId
+            || !normalized.refMessageId
+          ) return;
+          const existingMessage = (messageCacheRef.current[group.id] || [])
+            .find((item) => item.messageId === normalized.refMessageId && item.from === 'self');
+          if (!existingMessage) return;
+          const recipients = existingMessage.groupRecipientIds || [];
+          if (!recipients.includes(fromId)) return;
+          const delivery = {
+            ...(existingMessage.groupDelivery || {}),
+            [fromId]: {
+              status: normalized.status === 'seen' ? 'seen' : 'delivered',
+              at: Number.isFinite(normalized.receivedAt) ? normalized.receivedAt : Date.now(),
+            },
+          };
+          await applyMessagePatch(group.id, normalized.refMessageId, {
+            groupDelivery: delivery,
+            deliveryStatus: deriveGroupDeliveryStatus(delivery, recipients),
+            groupDeliverySummary: summarizeGroupDelivery(delivery, recipients),
+          });
+          persistGroupOutbox(groupOutboxRef.current.filter((entry) => !(
+            entry.type === 'message'
+            && entry.peerId === fromId
+            && entry.messageId === normalized.refMessageId
+          )));
+          return;
+        }
+
+        if (normalized.kind === GROUP_MESSAGE_KIND) {
+          const group = groupsRef.current.find((entry) => entry.id === normalized.groupId);
+          const validation = validateIncomingGroupMessage(group, normalized, fromId, ownPeerIdRef.current);
+          if (!validation.ok) {
+            console.warn('Rejected group message:', validation.error, normalized.groupId, fromId);
+            return;
+          }
+          let groupMessage = {
+            ...normalized.payload,
+            messageId: normalized.messageId,
+            timestamp: normalized.timestamp,
+            sender: getGroupMember(group, fromId)?.displayName || fromId,
+            senderPeerId: fromId,
+            groupId: group.id,
+            groupRevision: normalized.groupRevision,
+            from: fromId,
+          };
+          if (groupMessage.kind === 'sticker') {
+            try {
+              groupMessage = { ...groupMessage, ...validateStickerData(groupMessage) };
+            } catch {
+              return;
+            }
+          } else if (groupMessage.kind === 'file' && groupMessage.fileData) {
+            const actualSize = base64ByteLength(groupMessage.fileData);
+            if (actualSize < 0 || actualSize > MAX_CHAT_FILE_BYTES) return;
+            groupMessage.fileSize = actualSize;
+          } else if (groupMessage.kind === 'chat' && String(groupMessage.content || '').length > MAX_CHAT_TEXT_CHARS) {
+            return;
+          }
+
+          const receipt = {
+            kind: GROUP_RECEIPT_KIND,
+            protocolVersion: GROUP_PROTOCOL_VERSION,
+            groupId: group.id,
+            refMessageId: groupMessage.messageId,
+            senderPeerId: ownPeerIdRef.current,
+            status: 'delivered',
+            receivedAt: Date.now(),
+          };
+          void sendGroupPacketRef.current?.(fromId, receipt, {
+            packetId: `receipt:${groupMessage.messageId}`,
+            groupId: group.id,
+            type: 'receipt',
+            queue: false,
+          });
+
+          const meta = await window.bluetalk.messages.append(group.id, groupMessage);
+          if (meta?.appended === false) return;
+          setChatMeta((prev) => ({
+            ...prev,
+            [group.id]: meta?.count ? meta : {
+              count: (prev[group.id]?.count || 0) + 1,
+              lastMessage: groupMessage,
+            },
+          }));
+          startTransition(() => {
+            setMessages((prev) => ({
+              ...prev,
+              [group.id]: [...(prev[group.id] || []), groupMessage],
+            }));
+          });
+          if (!settingsRef.current.doNotDisturb) {
+            void window.bluetalk?.notify?.show?.({
+              title: group.name,
+              body: `${groupMessage.sender}: ${buildMessageNotificationPreview(groupMessage)}`,
+            });
+          }
+          return;
         }
 
         if (normalized.kind === 'sticker') {
@@ -876,6 +1275,30 @@ export default function App() {
 
         const meta = await window.bluetalk.messages.append(fromId, normalized);
         if (meta?.appended === false) return;
+
+        if ((normalized.kind === 'poker-invite' || normalized.kind === 'uno-invite' || normalized.kind === 'connect-four-invite' || normalized.kind === 'chess-invite' || normalized.kind === 'tic-tac-toe-invite') && fromId) {
+          const game = normalized.kind === 'poker-invite'
+            ? 'poker'
+            : normalized.kind === 'uno-invite'
+              ? 'uno'
+              : normalized.kind === 'chess-invite'
+                ? 'chess'
+                : normalized.kind === 'tic-tac-toe-invite'
+                  ? 'tic-tac-toe'
+                  : 'connect-four';
+          const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
+          const hostPeerId = normalized.hostPeerId || fromId;
+          if (sessionId && hostPeerId) {
+            const key = gameInviteKey(game, hostPeerId, sessionId);
+            setGameInviteKeys((prev) => {
+              if (prev.has(key)) return prev;
+              const next = new Set(prev);
+              next.add(key);
+              void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
+              return next;
+            });
+          }
+        }
 
         if (normalized.kind === 'contact-share' && normalized.sharedContact?.id) {
           const shared = normalized.sharedContact;
@@ -925,12 +1348,28 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const [storedContacts, storedChatMeta, storedSettings, storedReadReceipts, currentPeers] = await Promise.all([
+        const [
+          storedContacts,
+          storedChatMeta,
+          storedSettings,
+          storedReadReceipts,
+          currentPeers,
+          storedInviteKeys,
+          storedGroups,
+          peerInfo,
+          storedGroupOutbox,
+          storedGroupEventIds,
+        ] = await Promise.all([
           window.bluetalk.store.get('contacts', []),
           window.bluetalk.messages.getMeta(),
           window.bluetalk.store.get('settings', {}),
           window.bluetalk.store.get('chatReadReceipts', {}),
           window.bluetalk.peer.getPeers(),
+          window.bluetalk.store.get('gameInviteKeys', []),
+          window.bluetalk.store.get('groups', []),
+          window.bluetalk.peer.getInfo(),
+          window.bluetalk.store.get('groupOutbox', []),
+          window.bluetalk.store.get('groupEventIds', []),
         ]);
 
         if (cancelled) return;
@@ -952,6 +1391,20 @@ export default function App() {
 
         setContacts(normalized);
         setChatMeta(meta);
+        const normalizedGroups = [];
+        for (const rawGroup of Array.isArray(storedGroups) ? storedGroups : []) {
+          try {
+            normalizedGroups.push(normalizeGroup(rawGroup));
+          } catch {
+            /* skip invalid persisted group */
+          }
+        }
+        groupsRef.current = normalizedGroups;
+        setGroups(normalizedGroups);
+        ownPeerIdRef.current = peerInfo?.id || '';
+        setOwnPeerId(peerInfo?.id || '');
+        groupOutboxRef.current = Array.isArray(storedGroupOutbox) ? storedGroupOutbox : [];
+        groupEventIdsRef.current = Array.isArray(storedGroupEventIds) ? storedGroupEventIds : [];
 
         const storedViewed = await window.bluetalk.store.get('chatLastViewedPeerTs', {});
         const viewedRaw = storedViewed && typeof storedViewed === 'object' ? storedViewed : {};
@@ -975,6 +1428,10 @@ export default function App() {
 
         setPeerReadReceipts(storedReadReceipts && typeof storedReadReceipts === 'object' ? storedReadReceipts : {});
 
+        if (Array.isArray(storedInviteKeys) && storedInviteKeys.length) {
+          setGameInviteKeys(new Set(storedInviteKeys.filter((key) => typeof key === 'string' && key.length)));
+        }
+
         const stored = storedSettings && typeof storedSettings === 'object' ? storedSettings : {};
         let mergedSettings = { ...DEFAULT_APP_SETTINGS, ...stored };
         mergedSettings.uiResize = {
@@ -992,6 +1449,7 @@ export default function App() {
         }
         setSettings(mergedSettings);
         if (mergedSettings.theme) setTheme(mergedSettings.theme);
+        void window.bluetalk.peer.broadcast(buildUserPresencePayload(mergedSettings));
 
         const needsUsernameOnboarding = mergedSettings.onboardingUsernameDone !== true
           && (displayNameTrim === '' || displayNameTrim === 'Anonymous');
@@ -1014,7 +1472,15 @@ export default function App() {
       deliveryTimersRef.current.forEach((tid) => clearTimeout(tid));
       deliveryTimersRef.current.clear();
     };
-  }, [upsertContact, applyContactPatch, applyMessagePatch, sendE2eeHandshake]);
+  }, [
+    upsertContact,
+    applyContactPatch,
+    applyMessagePatch,
+    sendE2eeHandshake,
+    replaceGroup,
+    rememberIncomingGroupEvent,
+    persistGroupOutbox,
+  ]);
 
   useEffect(() => {
     if (!window.bluetalk?.on) return undefined;
@@ -1121,41 +1587,295 @@ export default function App() {
     });
   }, []);
 
+  const sendPairwiseEncrypted = useCallback(async (peerId, innerPayload) => {
+    if (!window.bluetalk?.peer || !peerId || !innerPayload) return false;
+    await waitForE2eeIdentity(ownEcdhPublicSpkiRef);
+    let session = e2eeSessionsRef.current[peerId];
+    const ready = e2eeReadyPeersRef.current.has(peerId);
+    if (!session?.aesKey || !session.keyId || !ready || session.keyChanged === true) {
+      await sendE2eeHandshake(peerId, { force: true, requestReply: true });
+      session = await waitForE2eeSession(e2eeSessionsRef, e2eeReadyPeersRef, peerId, '', 8000);
+    }
+    if (!session?.aesKey || !session.keyId || session.keyChanged === true) return false;
+    try {
+      const encrypted = await encryptChatPayload(session.aesKey, innerPayload, {
+        keyId: session.keyId,
+        version: session.e2eeVersion === 2 ? 2 : 1,
+      });
+      return Boolean(await window.bluetalk.peer.send(peerId, {
+        ...encrypted,
+        sender: settingsRef.current.displayName,
+        messageId: innerPayload.messageId || innerPayload.eventId || innerPayload.refMessageId || newChatMessageId(),
+        timestamp: Number.isFinite(innerPayload.timestamp) ? innerPayload.timestamp : Date.now(),
+      }));
+    } catch (error) {
+      console.warn('Pairwise encrypted send failed:', peerId, error?.message);
+      return false;
+    }
+  }, [sendE2eeHandshake]);
+
+  const sendGroupPacket = useCallback(async (peerId, packet, options = {}) => {
+    const packetId = options.packetId || packet?.messageId || packet?.eventId || packet?.refMessageId;
+    const queue = options.queue !== false;
+    let entry = null;
+    if (queue && packetId) {
+      entry = {
+        id: `${options.type || 'control'}:${packetId}:${peerId}`,
+        type: options.type || 'control',
+        packetId,
+        messageId: options.messageId || packet?.messageId || '',
+        groupId: options.groupId || packet?.groupId || '',
+        peerId,
+        packet,
+        status: 'queued',
+        attempts: 0,
+        createdAt: Date.now(),
+      };
+      const next = groupOutboxRef.current.filter((item) => item.id !== entry.id);
+      persistGroupOutbox([...next, entry]);
+    }
+
+    const sent = await sendPairwiseEncrypted(peerId, packet);
+    if (!entry) return sent;
+    persistGroupOutbox(groupOutboxRef.current.map((item) => item.id === entry.id
+      ? { ...item, status: sent ? 'sent' : 'offline', attempts: (item.attempts || 0) + 1, lastAttemptAt: Date.now() }
+      : item));
+    return sent;
+  }, [persistGroupOutbox, sendPairwiseEncrypted]);
+
+  sendGroupPacketRef.current = sendGroupPacket;
+
+  const flushGroupOutbox = useCallback(async (peerId) => {
+    if (!peerId) return;
+    const pending = groupOutboxRef.current.filter((entry) => entry.peerId === peerId);
+    for (const entry of pending) {
+      const sent = await sendPairwiseEncrypted(peerId, entry.packet);
+      if (!sent) continue;
+      persistGroupOutbox(groupOutboxRef.current.map((item) => item.id === entry.id
+        ? { ...item, status: 'sent', attempts: (item.attempts || 0) + 1, lastAttemptAt: Date.now() }
+        : item));
+      if (entry.type === 'message') {
+        const stored = (messageCacheRef.current[entry.groupId] || [])
+          .find((message) => message.messageId === entry.messageId);
+        if (stored) {
+          const delivery = {
+            ...(stored.groupDelivery || {}),
+            [peerId]: { status: 'sent', at: Date.now() },
+          };
+          const recipients = stored.groupRecipientIds || [];
+          await applyMessagePatch(entry.groupId, entry.messageId, {
+            groupDelivery: delivery,
+            deliveryStatus: deriveGroupDeliveryStatus(delivery, recipients),
+            groupDeliverySummary: summarizeGroupDelivery(delivery, recipients),
+          });
+        }
+      }
+    }
+  }, [applyMessagePatch, persistGroupOutbox, sendPairwiseEncrypted]);
+
+  flushGroupOutboxRef.current = flushGroupOutbox;
+
+  useEffect(() => {
+    for (const peer of peers) {
+      if (peer?.id && groupOutboxRef.current.some((entry) => entry.peerId === peer.id)) {
+        void flushGroupOutbox(peer.id);
+      }
+    }
+  }, [peers, flushGroupOutbox]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const online = new Set(peers.map((peer) => peer.id));
+      const pendingPeerIds = [...new Set(groupOutboxRef.current
+        .map((entry) => entry.peerId)
+        .filter((peerId) => online.has(peerId)))];
+      for (const peerId of pendingPeerIds) void flushGroupOutbox(peerId);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [peers, flushGroupOutbox]);
+
   const sendMessage = useCallback((peerId, payload) => {
     if (!window.bluetalk || !peerId) return Promise.resolve(false);
+
+    if (isGroupChatId(peerId)) {
+      const group = groupsRef.current.find((entry) => entry.id === peerId);
+      const selfPeerId = ownPeerIdRef.current;
+      if (!group || !selfPeerId || !isActiveGroupMember(group, selfPeerId)) {
+        return Promise.resolve({ ok: false, error: 'not_group_member' });
+      }
+      const outgoing = typeof payload === 'string'
+        ? { kind: 'chat', content: payload }
+        : { kind: 'chat', ...payload };
+      if (!['chat', 'file', 'sticker', 'contact-share'].includes(outgoing.kind)) {
+        return Promise.resolve({ ok: false, error: 'unsupported_group_payload' });
+      }
+      const localPreviewUrl = ['file', 'sticker'].includes(outgoing.kind) ? outgoing.localPreviewUrl : undefined;
+      const wireContent = { ...outgoing };
+      delete wireContent.localPreviewUrl;
+      const messageId = newChatMessageId();
+      const createdAt = Date.now();
+      const route = buildTargetedGroupRoute(group, selfPeerId, { includeInvited: false });
+      const initialDelivery = Object.fromEntries(route.recipients.map((recipientId) => [
+        recipientId,
+        { status: 'offline' },
+      ]));
+      const inner = {
+        kind: GROUP_MESSAGE_KIND,
+        protocolVersion: GROUP_PROTOCOL_VERSION,
+        groupId: group.id,
+        groupRevision: group.revision,
+        messageId,
+        senderPeerId: selfPeerId,
+        sender: settings.displayName,
+        timestamp: createdAt,
+        payload: wireContent,
+      };
+      const selfMessage = {
+        ...wireContent,
+        localPreviewUrl,
+        sender: settings.displayName,
+        senderPeerId: selfPeerId,
+        messageId,
+        timestamp: createdAt,
+        groupId: group.id,
+        groupRevision: group.revision,
+        groupRecipientIds: route.recipients,
+        groupDelivery: initialDelivery,
+        groupDeliverySummary: summarizeGroupDelivery(initialDelivery, route.recipients),
+        from: 'self',
+        deliveryStatus: deriveGroupDeliveryStatus(initialDelivery, route.recipients),
+      };
+
+      const nextCached = [...(messageCacheRef.current[group.id] || []), selfMessage];
+      messageCacheRef.current = { ...messageCacheRef.current, [group.id]: nextCached };
+      startTransition(() => {
+        setMessages((prev) => ({ ...prev, [group.id]: [...(prev[group.id] || []), selfMessage] }));
+        setChatMeta((prev) => ({
+          ...prev,
+          [group.id]: { count: (prev[group.id]?.count || 0) + 1, lastMessage: selfMessage },
+        }));
+      });
+
+      return (async () => {
+        const meta = await window.bluetalk.messages.append(group.id, selfMessage);
+        const pairs = await Promise.all(route.recipients.map(async (recipientId) => {
+          const sent = await sendGroupPacket(recipientId, inner, {
+            packetId: messageId,
+            messageId,
+            groupId: group.id,
+            type: 'message',
+          });
+          return [recipientId, sent];
+        }));
+        const delivery = { ...initialDelivery };
+        for (const [recipientId, sent] of pairs) {
+          delivery[recipientId] = { status: sent ? 'sent' : 'offline', at: Date.now() };
+        }
+        const patch = {
+          groupDelivery: delivery,
+          groupDeliverySummary: summarizeGroupDelivery(delivery, route.recipients),
+          deliveryStatus: deriveGroupDeliveryStatus(delivery, route.recipients),
+          localPreviewUrl: undefined,
+        };
+        await applyMessagePatch(group.id, messageId, patch);
+        if (meta?.count) setChatMeta((prev) => ({ ...prev, [group.id]: meta }));
+        return { ok: true, queued: pairs.some(([, sent]) => !sent), delivery: patch.groupDeliverySummary };
+      })().catch((error) => ({ ok: false, error: error?.message || 'group_send_failed' }));
+    }
 
     if (isAiChatPeerId(peerId)) {
       const outgoing = typeof payload === 'string'
         ? { kind: 'chat', content: payload }
-        : { kind: 'chat', ...payload };
+        : { ...payload };
 
-      if (outgoing.kind !== 'chat' || !String(outgoing.content || '').trim()) {
+      if (outgoing.kind !== 'chat' && outgoing.kind !== 'file') {
         return Promise.resolve(false);
       }
 
-      const messageId = newChatMessageId();
+      const fileAttachment = outgoing.kind === 'file'
+        ? {
+            fileName: outgoing.fileName || outgoing.content,
+            fileSize: outgoing.fileSize,
+            fileType: outgoing.fileType,
+            fileData: outgoing.fileData,
+            localPreviewUrl: outgoing.localPreviewUrl,
+          }
+        : outgoing.fileAttachment;
+
+      const text = outgoing.kind === 'chat' ? String(outgoing.content || '').trim() : '';
+      const hasFile = Boolean(fileAttachment?.fileData);
+      if (!text && !hasFile) {
+        return Promise.resolve(false);
+      }
+
+      const normalizedFileAttachment = hasFile
+        ? {
+            ...fileAttachment,
+            fileType: normalizeAttachmentFileType(
+              fileAttachment.fileName,
+              fileAttachment.fileType,
+              fileAttachment.fileData
+            ),
+          }
+        : null;
+
       const createdAt = Date.now();
-      const selfMessage = {
-        ...outgoing,
-        sender: settings.displayName,
-        messageId,
-        timestamp: createdAt,
-        from: 'self',
-        deliveryStatus: 'pending',
-      };
+      const messagesToPersist = [];
+
+      if (hasFile) {
+        messagesToPersist.push({
+          kind: 'file',
+          content: normalizedFileAttachment.fileName || 'Anhang',
+          fileName: normalizedFileAttachment.fileName,
+          fileSize: normalizedFileAttachment.fileSize,
+          fileType: normalizedFileAttachment.fileType,
+          fileData: normalizedFileAttachment.fileData,
+          localPreviewUrl: normalizedFileAttachment.localPreviewUrl,
+          sender: settings.displayName,
+          messageId: newChatMessageId(),
+          timestamp: createdAt,
+          from: 'self',
+          deliveryStatus: 'pending',
+        });
+      }
+
+      let triggerMessageId = null;
+      if (text) {
+        triggerMessageId = newChatMessageId();
+        const chatMsg = {
+          kind: 'chat',
+          content: text,
+          sender: settings.displayName,
+          messageId: triggerMessageId,
+          timestamp: createdAt + (hasFile ? 1 : 0),
+          from: 'self',
+          deliveryStatus: 'pending',
+        };
+        if (outgoing.replyTo) chatMsg.replyTo = outgoing.replyTo;
+        messagesToPersist.push(chatMsg);
+      } else if (hasFile) {
+        triggerMessageId = messagesToPersist[0].messageId;
+      }
+
+      const prompt = text
+        || `Analysiere die angehängte Datei „${normalizedFileAttachment?.fileName || 'Anhang'}".`;
+      const attachments = hasFile ? [normalizedFileAttachment] : [];
 
       startTransition(() => {
         setMessages((prev) => ({
           ...prev,
-          [peerId]: [...(prev[peerId] || []), selfMessage],
+          [peerId]: [...(prev[peerId] || []), ...messagesToPersist],
         }));
-        setChatMeta((prev) => ({
-          ...prev,
-          [peerId]: {
-            count: (prev[peerId]?.count || 0) + 1,
-            lastMessage: selfMessage,
-          },
-        }));
+        setChatMeta((prev) => {
+          const last = messagesToPersist[messagesToPersist.length - 1];
+          return {
+            ...prev,
+            [peerId]: {
+              count: (prev[peerId]?.count || 0) + messagesToPersist.length,
+              lastMessage: last,
+            },
+          };
+        });
       });
 
       return (async () => {
@@ -1164,17 +1884,19 @@ export default function App() {
         }
 
         try {
-          const meta = await window.bluetalk.messages.append(peerId, selfMessage);
-          if (meta?.count) {
-            setChatMeta((prev) => ({ ...prev, [peerId]: meta }));
+          for (const msg of messagesToPersist) {
+            const meta = await window.bluetalk.messages.append(peerId, msg);
+            if (meta?.count) {
+              setChatMeta((prev) => ({ ...prev, [peerId]: meta }));
+            }
           }
-          await applyMessagePatch(peerId, messageId, { deliveryStatus: 'delivered' });
+          await applyMessagePatch(peerId, triggerMessageId, { deliveryStatus: 'delivered' });
           setMessages((prev) => {
             const list = prev[peerId] || [];
             return {
               ...prev,
               [peerId]: list.map((item) =>
-                item?.messageId === messageId ? { ...item, deliveryStatus: 'delivered' } : item
+                item?.messageId === triggerMessageId ? { ...item, deliveryStatus: 'delivered' } : item
               ),
             };
           });
@@ -1194,9 +1916,11 @@ export default function App() {
             setAiChatProgress({ peerId, requestId, ...lastAiUpdate });
           };
           const scheduleAiProgress = (update) => {
-            const toolEvents = Array.isArray(update.toolResults) && update.toolResults?.length
-              ? [...(lastAiUpdate.toolEvents || []), ...update.toolResults]
-              : (lastAiUpdate.toolEvents || []);
+            const toolEvents = Array.isArray(update.segments)
+              ? toolEventsFromSegments(update.segments)
+              : (Array.isArray(update.toolResults) && update.toolResults?.length
+                ? [...(lastAiUpdate.toolEvents || []), ...update.toolResults]
+                : (lastAiUpdate.toolEvents || []));
             lastAiUpdate = {
               thinking: update.thinking || '',
               content: update.content || '',
@@ -1224,7 +1948,7 @@ export default function App() {
           };
           try {
             result = await window.bluetalk.ollama.chat(
-              { peerId, prompt: outgoing.content, requestId },
+              { peerId, prompt, requestId, attachments },
               scheduleAiProgress
             );
           } finally {
@@ -1273,7 +1997,7 @@ export default function App() {
           const hasResultContent = Boolean(result?.ok)
             && (result?.message?.content?.trim() || (resultSegments && resultSegments.length));
           if (!hasResultContent) {
-            await applyMessagePatch(peerId, messageId, { deliveryStatus: 'scheduled' });
+            await applyMessagePatch(peerId, triggerMessageId, { deliveryStatus: 'scheduled' });
             return { ok: false, error: result?.error || 'chat_failed' };
           }
 
@@ -1303,7 +2027,7 @@ export default function App() {
           console.error('AI chat failed:', error);
           const message = error?.message || 'chat_failed';
           if (message !== 'chat_aborted') {
-            await applyMessagePatch(peerId, messageId, { deliveryStatus: 'scheduled' });
+            await applyMessagePatch(peerId, triggerMessageId, { deliveryStatus: 'scheduled' });
           }
           return {
             ok: false,
@@ -1498,7 +2222,7 @@ export default function App() {
     })();
 
     return sendPromise;
-  }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake]);
+  }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake, sendGroupPacket]);
 
   sendMessageRef.current = sendMessage;
 
@@ -1515,6 +2239,28 @@ export default function App() {
 
   const sendReadReceipt = useCallback(async (peerId, lastReadMessageId) => {
     if (!window.bluetalk || !peerId || !lastReadMessageId) return;
+    if (isGroupChatId(peerId)) {
+      if (!settings.sendReadReceipts) return;
+      const group = groupsRef.current.find((entry) => entry.id === peerId);
+      const message = (messageCacheRef.current[peerId] || []).find((entry) => entry.messageId === lastReadMessageId);
+      if (!group || !message?.senderPeerId || message.from === 'self') return;
+      const receipt = {
+        kind: GROUP_RECEIPT_KIND,
+        protocolVersion: GROUP_PROTOCOL_VERSION,
+        groupId: peerId,
+        refMessageId: lastReadMessageId,
+        senderPeerId: ownPeerIdRef.current,
+        status: 'seen',
+        receivedAt: Date.now(),
+      };
+      await sendGroupPacket(message.senderPeerId, receipt, {
+        packetId: `seen:${lastReadMessageId}`,
+        groupId: peerId,
+        type: 'receipt',
+        queue: false,
+      });
+      return;
+    }
     if (contactsRef.current.some((c) => c?.id === peerId && c.blocked === true)) return;
     if (!settings.sendReadReceipts) return;
     try {
@@ -1529,7 +2275,7 @@ export default function App() {
     } catch (err) {
       console.warn('[App] Read receipt error:', err.message);
     }
-  }, [settings.displayName, settings.sendReadReceipts]);
+  }, [settings.displayName, settings.sendReadReceipts, sendGroupPacket]);
 
   const connectToAddress = useCallback(async (address) => {
     if (!window.bluetalk || !address?.trim()) {
@@ -1607,6 +2353,158 @@ export default function App() {
     if (!peerId) return;
     upsertContact({ id: peerId, pendingMessageRequest: false });
   }, [upsertContact]);
+
+  const createGroupChat = useCallback(async ({ name, image = '', memberIds = [] }) => {
+    const selfPeerId = ownPeerIdRef.current;
+    if (!selfPeerId) throw new Error('identity_not_ready');
+    const selected = [...new Set(memberIds.filter((id) => id && id !== selfPeerId))]
+      .map((peerId) => {
+        const contact = contactsRef.current.find((entry) => entry.id === peerId);
+        return contact ? {
+          peerId,
+          displayName: contact.nickname || contact.name || peerId,
+        } : null;
+      })
+      .filter(Boolean);
+    const group = createGroupModel({
+      name,
+      image,
+      creator: { peerId: selfPeerId, displayName: settingsRef.current.displayName },
+      members: selected,
+    });
+    replaceGroup(group);
+    for (const member of selected) {
+      const invite = createGroupInviteEvent(group, selfPeerId, member.peerId);
+      void sendGroupPacket(member.peerId, invite, {
+        packetId: invite.eventId,
+        groupId: group.id,
+        type: 'control',
+      });
+    }
+    return group;
+  }, [replaceGroup, sendGroupPacket]);
+
+  const updateGroupChat = useCallback(async (groupId, patch = {}) => {
+    const selfPeerId = ownPeerIdRef.current;
+    const current = groupsRef.current.find((group) => group.id === groupId);
+    if (!current) throw new Error('unknown_group');
+    if (!isGroupAdmin(current, selfPeerId)) throw new Error('admin_required');
+    const addIds = [...new Set((patch.addMemberIds || []).filter(Boolean))];
+    const removeIds = new Set((patch.removeMemberIds || []).filter((id) => (
+      id && id !== selfPeerId && Boolean(getGroupMember(current, id))
+    )));
+    const existingIds = new Set(current.members.map((member) => member.peerId));
+    const readdedIds = new Set(addIds.filter((peerId) => {
+      const member = getGroupMember(current, peerId);
+      return member && (member.state === 'left' || member.state === 'removed');
+    }));
+    const addedMembers = addIds
+      .filter((peerId) => !existingIds.has(peerId))
+      .map((peerId) => {
+        const contact = contactsRef.current.find((entry) => entry.id === peerId);
+        return contact ? {
+          peerId,
+          displayName: contact.nickname || contact.name || peerId,
+          role: 'member',
+          state: 'invited',
+          addedAt: Date.now(),
+        } : null;
+      })
+      .filter(Boolean);
+    const now = Date.now();
+    const next = normalizeGroup({
+      ...current,
+      name: Object.prototype.hasOwnProperty.call(patch, 'name') ? patch.name : current.name,
+      image: Object.prototype.hasOwnProperty.call(patch, 'image') ? patch.image : current.image,
+      revision: current.revision + 1,
+      updatedAt: now,
+      members: [
+        ...current.members.map((member) => {
+          if (removeIds.has(member.peerId)) return { ...member, state: 'removed', removedAt: now };
+          if (readdedIds.has(member.peerId)) {
+            const contact = contactsRef.current.find((entry) => entry.id === member.peerId);
+            return {
+              ...member,
+              displayName: contact?.nickname || contact?.name || member.displayName,
+              role: 'member',
+              state: 'invited',
+              addedAt: now,
+              joinedAt: undefined,
+              removedAt: undefined,
+            };
+          }
+          return member;
+        }),
+        ...addedMembers,
+      ],
+    });
+    const update = createGroupUpdateEvent(current, next, selfPeerId, patch.reason || 'group-info');
+    replaceGroup(next);
+
+    const newIds = new Set([...addedMembers.map((member) => member.peerId), ...readdedIds]);
+    const existingRecipients = [...new Set([
+      ...groupPeerIds(current, { excludePeerId: selfPeerId, includeInvited: true }),
+      ...removeIds,
+    ])].filter((peerId) => !newIds.has(peerId));
+    for (const recipientId of existingRecipients) {
+      void sendGroupPacket(recipientId, update, {
+        packetId: update.eventId,
+        groupId: next.id,
+        type: 'control',
+      });
+    }
+    for (const recipientId of newIds) {
+      const invite = createGroupInviteEvent(next, selfPeerId, recipientId);
+      void sendGroupPacket(recipientId, invite, {
+        packetId: invite.eventId,
+        groupId: next.id,
+        type: 'control',
+      });
+    }
+    return next;
+  }, [replaceGroup, sendGroupPacket]);
+
+  const leaveGroupChat = useCallback(async (groupId) => {
+    const selfPeerId = ownPeerIdRef.current;
+    const current = groupsRef.current.find((group) => group.id === groupId);
+    if (!current || !isActiveGroupMember(current, selfPeerId)) throw new Error('active_member_required');
+    const leave = createGroupLeaveEvent(current, selfPeerId);
+    const otherActive = current.members.filter((member) => member.peerId !== selfPeerId && member.state === 'active');
+    const wasAdmin = isGroupAdmin(current, selfPeerId);
+    const hasOtherAdmin = otherActive.some((member) => member.role === 'admin');
+    const now = Date.now();
+    let members = current.members.map((member) => member.peerId === selfPeerId
+      ? { ...member, state: 'left', removedAt: now }
+      : member);
+    if (wasAdmin && !hasOtherAdmin && otherActive[0]) {
+      members = members.map((member) => member.peerId === otherActive[0].peerId
+        ? { ...member, role: 'admin' }
+        : member);
+    }
+    const next = normalizeGroup({ ...current, revision: current.revision + 1, updatedAt: now, members });
+    replaceGroup(next);
+
+    if (wasAdmin) {
+      const update = createGroupUpdateEvent(current, next, selfPeerId, 'member-left');
+      for (const recipientId of otherActive.map((member) => member.peerId)) {
+        void sendGroupPacket(recipientId, update, {
+          packetId: update.eventId,
+          groupId,
+          type: 'control',
+        });
+      }
+    } else {
+      const admins = current.members.filter((member) => member.state === 'active' && member.role === 'admin');
+      for (const admin of admins) {
+        void sendGroupPacket(admin.peerId, leave, {
+          packetId: leave.eventId,
+          groupId,
+          type: 'control',
+        });
+      }
+    }
+    return next;
+  }, [replaceGroup, sendGroupPacket]);
 
   const setContactNickname = useCallback((contactId, nickname) => {
     if (!contactId) return;
@@ -1717,7 +2615,7 @@ export default function App() {
   const deleteChat = useCallback(async (peerId) => {
     if (!window.bluetalk || !peerId) return false;
 
-    if (!isAiChatPeerId(peerId)) {
+    if (!isAiChatPeerId(peerId) && !isGroupChatId(peerId)) {
       try {
         await window.bluetalk.peer.send(peerId, {
           kind: 'chat-deleted',
@@ -1762,11 +2660,87 @@ export default function App() {
       if (Array.isArray(agents)) {
         await window.bluetalk.store.set('aiChat.agents', agents.filter((agent) => agent?.id !== peerId));
       }
-    } else {
+    } else if (!isGroupChatId(peerId)) {
       removeContact(peerId);
     }
     return true;
   }, [removeContact]);
+
+  const deleteGroupChat = useCallback(async (groupId) => {
+    if (!window.bluetalk || !groupId || !isGroupChatId(groupId)) return false;
+
+    const current = groupsRef.current.find((group) => group.id === groupId);
+    if (current && isActiveGroupMember(current, ownPeerIdRef.current)) {
+      try {
+        await leaveGroupChat(groupId);
+      } catch {
+        /* Austritt konnte nicht gemeldet werden – lokales Löschen trotzdem fortsetzen */
+      }
+    }
+
+    removeGroup(groupId);
+    persistGroupOutbox(groupOutboxRef.current.filter((entry) => entry.groupId !== groupId));
+    await deleteChat(groupId);
+    return true;
+  }, [leaveGroupChat, removeGroup, persistGroupOutbox, deleteChat]);
+
+  const joinGameFromPresence = useCallback((presence, hostPeerId) => {
+    if (!presence || !hostPeerId) return false;
+    if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) return false;
+    const game = presence.game;
+    const sessionId = presence.sessionId;
+    if (!game || !sessionId) return false;
+
+    try {
+      window.location.hash = '#/games';
+      if (game === 'poker') {
+        sessionStorage.setItem('bt.poker.pendingJoin', JSON.stringify({
+          hostPeerId,
+          tableId: sessionId,
+          tableName: presence.tableName || 'Poker-Tisch',
+          pokerSettings: {},
+        }));
+        void window.bluetalk?.poker?.openGameWindow?.();
+      } else if (game === 'uno') {
+        sessionStorage.setItem('bt.uno.pendingJoin', JSON.stringify({
+          hostPeerId,
+          gameId: sessionId,
+          tableName: presence.tableName || 'UNO-Tisch',
+          unoSettings: {},
+        }));
+        void window.bluetalk?.uno?.openGameWindow?.();
+      } else if (game === 'connect-four') {
+        sessionStorage.setItem('bt.connectFour.pendingJoin', JSON.stringify({
+          hostPeerId,
+          gameId: sessionId,
+          tableName: presence.tableName || 'Vier-gewinnt-Tisch',
+          connectFourSettings: {},
+        }));
+        void window.bluetalk?.connectFour?.openGameWindow?.();
+      } else if (game === 'chess') {
+        sessionStorage.setItem('bt.chess.pendingJoin', JSON.stringify({
+          hostPeerId,
+          gameId: sessionId,
+          tableName: presence.tableName || 'Schach-Partie',
+          chessSettings: {},
+        }));
+        void window.bluetalk?.chess?.openGameWindow?.();
+      } else if (game === 'tic-tac-toe') {
+        sessionStorage.setItem('bt.ticTacToe.pendingJoin', JSON.stringify({
+          hostPeerId,
+          gameId: sessionId,
+          tableName: presence.tableName || 'Tic-Tac-Toe',
+          ticTacToeSettings: {},
+        }));
+        void window.bluetalk?.ticTacToe?.openGameWindow?.();
+      } else {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+    return true;
+  }, [gameInviteKeys]);
 
   const updateSettings = useCallback((newSettings) => {
     setSettings((prev) => {
@@ -1794,6 +2768,9 @@ export default function App() {
             profilePicture: merged.profilePicture || '',
             sender: merged.displayName,
           });
+        }
+        if (Object.prototype.hasOwnProperty.call(newSettings, 'doNotDisturb')) {
+          window.bluetalk.peer.broadcast(buildUserPresencePayload(merged));
         }
       }
       return merged;
@@ -1855,6 +2832,8 @@ export default function App() {
   const ctx = {
     peers,
     contacts,
+    groups,
+    ownPeerId,
     chatMeta,
     loadedChats,
     messages,
@@ -1866,6 +2845,10 @@ export default function App() {
     peerCount: peers.length,
     peerReadReceipts,
     chatLastViewedPeerTs,
+    peerGamePresence,
+    peerUserPresence,
+    gameInviteKeys,
+    joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
     cancelAiChat,
@@ -1873,6 +2856,10 @@ export default function App() {
     sendReadReceipt,
     loadChatMessages,
     connectToAddress,
+    createGroupChat,
+    updateGroupChat,
+    leaveGroupChat,
+    deleteGroupChat,
     refreshDiscovery,
     setContactNickname,
     setChatPinned,
@@ -1895,7 +2882,7 @@ export default function App() {
 
   useEffect(() => {
     if (!window.bluetalk?.plugins) return undefined;
-    pluginRuntime.setHost({
+    const host = {
       getPeers: () => peersRef.current,
       getContacts: () => contactsRef.current,
       getMessages: (peerId) => (peerId ? messagesRef.current[peerId] || [] : messagesRef.current),
@@ -1908,9 +2895,10 @@ export default function App() {
       setContactNickname,
       setChatPinned,
       toast: null,
-    });
+    };
+    pluginRuntime.setHost(host);
     pluginRuntime.injectReact(React, ReactDOM);
-    void pluginRuntime.boot();
+    void pluginRuntime.boot(host);
     return undefined;
   }, [sendMessage, deleteMessage, deleteChat, upsertContact, removeContact, setContactBlocked, setContactNickname, setChatPinned]);
 
@@ -1936,6 +2924,10 @@ export default function App() {
             <Routes>
               <Route path="/poker-game" element={<PokerGamePage />} />
               <Route path="/uno-game" element={<UnoGamePage />} />
+              <Route path="/connect-four-game" element={<ConnectFourGamePage />} />
+              <Route path="/chess-game" element={<ChessGamePage />} />
+              <Route path="/tic-tac-toe-game" element={<TicTacToeGamePage />} />
+              <Route path="/docs/*" element={<DocsPage />} />
               <Route
                 path="*"
                 element={(
@@ -1966,6 +2958,7 @@ export default function App() {
                     <Route path="/" element={<ChatsPage />} />
                     <Route path="/new" element={<NewConnectionsPage />} />
                     <Route path="/library" element={<LibraryPage />} />
+                    <Route path="/games" element={<GamesPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/settings/account" element={<AccountSettingsPage />} />
                     <Route path="/settings/connection" element={<ConnectionSettingsPage />} />

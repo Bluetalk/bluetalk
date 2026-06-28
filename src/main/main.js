@@ -5,7 +5,7 @@ const { autoUpdater } = require('electron-updater');
 const net = require('net');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { PeerServer, normalizeConnectAddress } = require(path.join(__dirname, '..', 'shared', 'peer-server.js'));
+const { PeerServer, normalizeConnectAddress, isLoopbackConnectAddress } = require(path.join(__dirname, '..', 'shared', 'peer-server.js'));
 const { APIServer } = require(path.join(__dirname, '..', 'shared', 'api-server.js'));
 const Store = require(path.join(__dirname, '..', 'shared', 'store.js'));
 const { isPeerNotificationMuted } = require(path.join(__dirname, '..', 'shared', 'contactNotificationMute.js'));
@@ -18,10 +18,68 @@ let mainWindow = null;
 let pokerGameWindow = null;
 /** Separates Fenster für das UNO-Plugin. */
 let unoGameWindow = null;
+/** Separates Fenster für das Vier-gewinnt-Plugin. */
+let connectFourGameWindow = null;
+/** Separates Fenster für das Schach-Plugin. */
+let chessGameWindow = null;
+/** Separates Fenster für das Tic-Tac-Toe-Plugin. */
+let ticTacToeGameWindow = null;
+/** Cached game UI state — replayed when a game window finishes loading. */
+const gameStateCache = new Map();
+
+function rememberAndRelayGameState(gameId, win, channel, payload) {
+  let cache = gameStateCache.get(gameId);
+  if (!cache) {
+    cache = { dirty: false, payload: null };
+    gameStateCache.set(gameId, cache);
+  }
+  cache.dirty = true;
+  cache.payload = payload;
+  if (win && !win.isDestroyed()) {
+    try {
+      win.webContents.send(channel, payload);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function replayGameState(gameId, win, channel) {
+  const cache = gameStateCache.get(gameId);
+  if (!cache?.dirty || !win || win.isDestroyed()) return;
+  try {
+    win.webContents.send(channel, cache.payload);
+  } catch {
+    /* ignore */
+  }
+}
+
+function bindGameWindowStateReplay(win, gameId, channel) {
+  if (!win) return;
+  win.webContents.on('did-finish-load', () => replayGameState(gameId, win, channel));
+}
+
+function waitForWindowLoad(win) {
+  if (!win || win.isDestroyed()) return Promise.resolve(null);
+  if (!win.webContents.isLoading()) return Promise.resolve(win);
+  return new Promise((resolve) => {
+    win.webContents.once('did-finish-load', () => resolve(win));
+  });
+}
+
+async function openGameWindowAndReplay(createWindow, gameId, channel) {
+  const win = createWindow();
+  await waitForWindowLoad(win);
+  replayGameState(gameId, win, channel);
+  return win;
+}
+
 let tray = null;
 let peerServer = null;
 let apiServer = null;
 let pluginHost = null;
+/** Resolves once bundled plugins are seeded and the host finished its first scan. */
+let pluginHostReady = Promise.resolve();
 let ollamaManager = null;
 let store = null;
 /** Last port the REST API successfully bound to; used to avoid unnecessary restarts. */
@@ -604,10 +662,22 @@ async function seedBundledPlugins(host) {
         readPluginManifest(srcDir),
         readPluginManifest(destDir),
       ]);
-      if (
-        sourceManifest?.id !== entry.name
-        || compareVersionParts(sourceManifest?.version, installedManifest?.version) <= 0
-      ) {
+      let shouldUpdate = sourceManifest?.id === entry.name
+        && compareVersionParts(sourceManifest?.version, installedManifest?.version) > 0;
+      if (!shouldUpdate && sourceManifest?.id === entry.name) {
+        try {
+          const [srcStat, destStat] = await Promise.all([
+            fs.stat(path.join(srcDir, 'ui.js')),
+            fs.stat(path.join(destDir, 'ui.js')),
+          ]);
+          if (srcStat.mtimeMs > destStat.mtimeMs) {
+            shouldUpdate = true;
+          }
+        } catch {
+          /* keep bundled copy if stat fails */
+        }
+      }
+      if (!shouldUpdate) {
         continue;
       }
     }
@@ -798,13 +868,23 @@ function isAppInForeground() {
     (mainWindow && !mainWindow.isDestroyed() && focused === mainWindow)
     || (pokerGameWindow && !pokerGameWindow.isDestroyed() && focused === pokerGameWindow)
     || (unoGameWindow && !unoGameWindow.isDestroyed() && focused === unoGameWindow)
+    || (connectFourGameWindow && !connectFourGameWindow.isDestroyed() && focused === connectFourGameWindow)
+    || (chessGameWindow && !chessGameWindow.isDestroyed() && focused === chessGameWindow)
+    || (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed() && focused === ticTacToeGameWindow)
   );
+}
+
+function areAppNotificationsSuppressed() {
+  if (!store) return false;
+  if (store.get('settings.windowsNotifications', true) === false) return true;
+  if (store.get('settings.doNotDisturb', false) === true) return true;
+  return false;
 }
 
 function showWindowsNotification(title, body = '', options = {}) {
   if (process.platform !== 'win32') return false;
   if (!Notification.isSupported()) return false;
-  if (store && store.get('settings.windowsNotifications', true) === false) {
+  if (areAppNotificationsSuppressed()) {
     return false;
   }
   if (!options.allowInForeground && isAppInForeground()) {
@@ -1148,7 +1228,7 @@ function requestAgentConnectPeer({ address }) {
 }
 
 function queueIncomingChatNotification(data) {
-  if (store && store.get('settings.windowsNotifications', true) === false) {
+  if (areAppNotificationsSuppressed()) {
     return;
   }
   if (isAppInForeground()) {
@@ -1164,6 +1244,12 @@ function queueIncomingChatNotification(data) {
           ? `Poker: ${data.tableName || 'Einladung'}`
           : data.kind === 'uno-invite'
             ? `UNO: ${data.tableName || 'Einladung'}`
+            : data.kind === 'connect-four-invite'
+              ? `Vier gewinnt: ${data.tableName || 'Einladung'}`
+              : data.kind === 'chess-invite'
+                ? `Schach: ${data.tableName || 'Einladung'}`
+                : data.kind === 'tic-tac-toe-invite'
+                  ? `Tic-Tac-Toe: ${data.tableName || 'Einladung'}`
             : data.kind === 'contact-share'
             ? `Kontakt: ${data.sharedContact?.displayName || data.sharedContact?.name || 'geteilt'}`
             : (data.content || 'New message');
@@ -1227,6 +1313,30 @@ function isUnoGameSender(event) {
     unoGameWindow
     && !unoGameWindow.isDestroyed()
     && event.sender === unoGameWindow.webContents,
+  );
+}
+
+function isConnectFourGameSender(event) {
+  return Boolean(
+    connectFourGameWindow
+    && !connectFourGameWindow.isDestroyed()
+    && event.sender === connectFourGameWindow.webContents,
+  );
+}
+
+function isChessGameSender(event) {
+  return Boolean(
+    chessGameWindow
+    && !chessGameWindow.isDestroyed()
+    && event.sender === chessGameWindow.webContents,
+  );
+}
+
+function isTicTacToeGameSender(event) {
+  return Boolean(
+    ticTacToeGameWindow
+    && !ticTacToeGameWindow.isDestroyed()
+    && event.sender === ticTacToeGameWindow.webContents,
   );
 }
 
@@ -1348,6 +1458,7 @@ function createPokerGameWindow() {
     } catch {
       /* ignore */
     }
+    replayGameState('poker', pokerGameWindow, 'poker:state');
     return pokerGameWindow;
   }
 
@@ -1391,6 +1502,7 @@ function createPokerGameWindow() {
   });
 
   bindWindowMaximizeEvents(pokerGameWindow, 'poker:windowMaximized');
+  bindGameWindowStateReplay(pokerGameWindow, 'poker', 'poker:state');
 
   return pokerGameWindow;
 }
@@ -1402,6 +1514,7 @@ function createUnoGameWindow() {
     } catch {
       /* ignore */
     }
+    replayGameState('uno', unoGameWindow, 'uno:state');
     return unoGameWindow;
   }
 
@@ -1445,8 +1558,177 @@ function createUnoGameWindow() {
   });
 
   bindWindowMaximizeEvents(unoGameWindow, 'uno:windowMaximized');
+  bindGameWindowStateReplay(unoGameWindow, 'uno', 'uno:state');
 
   return unoGameWindow;
+}
+
+function createConnectFourGameWindow() {
+  if (connectFourGameWindow && !connectFourGameWindow.isDestroyed()) {
+    try {
+      connectFourGameWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    replayGameState('connect-four', connectFourGameWindow, 'connect-four:state');
+    return connectFourGameWindow;
+  }
+
+  connectFourGameWindow = new BrowserWindow({
+    width: 900,
+    height: 780,
+    minWidth: 640,
+    minHeight: 520,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0a1020',
+    icon: createAppIcon(256),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+    show: false,
+  });
+  hardenWindow(connectFourGameWindow);
+
+  if (isDev) {
+    connectFourGameWindow.loadURL('http://localhost:5173/#/connect-four-game');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    connectFourGameWindow.loadURL(`${pathToFileURL(indexHtml).href}#/connect-four-game`);
+  }
+
+  connectFourGameWindow.once('ready-to-show', () => {
+    try {
+      connectFourGameWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  connectFourGameWindow.on('closed', () => {
+    connectFourGameWindow = null;
+  });
+
+  bindWindowMaximizeEvents(connectFourGameWindow, 'connect-four:windowMaximized');
+  bindGameWindowStateReplay(connectFourGameWindow, 'connect-four', 'connect-four:state');
+
+  return connectFourGameWindow;
+}
+
+function createChessGameWindow() {
+  if (chessGameWindow && !chessGameWindow.isDestroyed()) {
+    try {
+      chessGameWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    replayGameState('chess', chessGameWindow, 'chess:state');
+    return chessGameWindow;
+  }
+
+  chessGameWindow = new BrowserWindow({
+    width: 960,
+    height: 820,
+    minWidth: 640,
+    minHeight: 520,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1510',
+    icon: createAppIcon(256),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+    show: false,
+  });
+  hardenWindow(chessGameWindow);
+
+  if (isDev) {
+    chessGameWindow.loadURL('http://localhost:5173/#/chess-game');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    chessGameWindow.loadURL(`${pathToFileURL(indexHtml).href}#/chess-game`);
+  }
+
+  chessGameWindow.once('ready-to-show', () => {
+    try {
+      chessGameWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  chessGameWindow.on('closed', () => {
+    chessGameWindow = null;
+  });
+
+  bindWindowMaximizeEvents(chessGameWindow, 'chess:windowMaximized');
+  bindGameWindowStateReplay(chessGameWindow, 'chess', 'chess:state');
+
+  return chessGameWindow;
+}
+
+function createTicTacToeGameWindow() {
+  if (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed()) {
+    try {
+      ticTacToeGameWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    replayGameState('tic-tac-toe', ticTacToeGameWindow, 'ticTacToe:state');
+    return ticTacToeGameWindow;
+  }
+
+  ticTacToeGameWindow = new BrowserWindow({
+    width: 900,
+    height: 780,
+    minWidth: 640,
+    minHeight: 520,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0a1020',
+    icon: createAppIcon(256),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+    show: false,
+  });
+  hardenWindow(ticTacToeGameWindow);
+
+  if (isDev) {
+    ticTacToeGameWindow.loadURL('http://localhost:5173/#/tic-tac-toe-game');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    ticTacToeGameWindow.loadURL(`${pathToFileURL(indexHtml).href}#/tic-tac-toe-game`);
+  }
+
+  ticTacToeGameWindow.once('ready-to-show', () => {
+    try {
+      ticTacToeGameWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  ticTacToeGameWindow.on('closed', () => {
+    ticTacToeGameWindow = null;
+  });
+
+  bindWindowMaximizeEvents(ticTacToeGameWindow, 'ticTacToe:windowMaximized');
+  bindGameWindowStateReplay(ticTacToeGameWindow, 'tic-tac-toe', 'ticTacToe:state');
+
+  return ticTacToeGameWindow;
 }
 
 function createTray() {
@@ -1542,9 +1824,9 @@ function setupIPC() {
   ipcMain.handle('window:isMaximized', (event) => windowFromIpcEvent(event)?.isMaximized() ?? false);
   ipcMain.handle('window:close', (event) => windowFromIpcEvent(event)?.close());
 
-  ipcMain.handle('poker:openGameWindow', () => {
+  ipcMain.handle('poker:openGameWindow', async () => {
     try {
-      createPokerGameWindow();
+      await openGameWindowAndReplay(createPokerGameWindow, 'poker', 'poker:state');
       return { ok: true };
     } catch (e) {
       console.error('[Poker] open window:', e);
@@ -1592,12 +1874,7 @@ function setupIPC() {
   ipcMain.on('poker:pumpState', (event, payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (event.sender !== mainWindow.webContents) return;
-    if (!pokerGameWindow || pokerGameWindow.isDestroyed()) return;
-    try {
-      pokerGameWindow.webContents.send('poker:state', payload);
-    } catch {
-      /* ignore */
-    }
+    rememberAndRelayGameState('poker', pokerGameWindow, 'poker:state', payload);
   });
 
   ipcMain.on('poker:fromChild', (event, payload) => {
@@ -1611,9 +1888,9 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('uno:openGameWindow', () => {
+  ipcMain.handle('uno:openGameWindow', async () => {
     try {
-      createUnoGameWindow();
+      await openGameWindowAndReplay(createUnoGameWindow, 'uno', 'uno:state');
       return { ok: true };
     } catch (e) {
       console.error('uno:openGameWindow error:', e);
@@ -1661,12 +1938,7 @@ function setupIPC() {
   ipcMain.on('uno:pumpState', (event, payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (event.sender !== mainWindow.webContents) return;
-    if (!unoGameWindow || unoGameWindow.isDestroyed()) return;
-    try {
-      unoGameWindow.webContents.send('uno:state', payload);
-    } catch {
-      /* ignore */
-    }
+    rememberAndRelayGameState('uno', unoGameWindow, 'uno:state', payload);
   });
 
   ipcMain.on('uno:fromChild', (event, payload) => {
@@ -1675,6 +1947,198 @@ function setupIPC() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
       mainWindow.webContents.send('uno:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  ipcMain.handle('connect-four:openGameWindow', async () => {
+    try {
+      await openGameWindowAndReplay(createConnectFourGameWindow, 'connect-four', 'connect-four:state');
+      return { ok: true };
+    } catch (e) {
+      console.error('connect-four:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('connect-four:closeGameWindow', () => {
+    try {
+      if (connectFourGameWindow && !connectFourGameWindow.isDestroyed()) {
+        connectFourGameWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('connect-four:minimizeWindow', (event) => {
+    if (!isConnectFourGameSender(event)) return { ok: false };
+    try {
+      connectFourGameWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('connect-four:maximizeWindow', (event) => {
+    if (!isConnectFourGameSender(event)) return { ok: false };
+    try {
+      if (connectFourGameWindow?.isMaximized()) connectFourGameWindow.unmaximize();
+      else connectFourGameWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('connect-four:isWindowMaximized', (event) => {
+    if (!isConnectFourGameSender(event)) return false;
+    return connectFourGameWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('connect-four:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    rememberAndRelayGameState('connect-four', connectFourGameWindow, 'connect-four:state', payload);
+  });
+
+  ipcMain.on('connect-four:fromChild', (event, payload) => {
+    if (!connectFourGameWindow || connectFourGameWindow.isDestroyed()) return;
+    if (event.sender !== connectFourGameWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('connect-four:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  ipcMain.handle('chess:openGameWindow', async () => {
+    try {
+      await openGameWindowAndReplay(createChessGameWindow, 'chess', 'chess:state');
+      return { ok: true };
+    } catch (e) {
+      console.error('chess:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('chess:closeGameWindow', () => {
+    try {
+      if (chessGameWindow && !chessGameWindow.isDestroyed()) {
+        chessGameWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('chess:minimizeWindow', (event) => {
+    if (!isChessGameSender(event)) return { ok: false };
+    try {
+      chessGameWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('chess:maximizeWindow', (event) => {
+    if (!isChessGameSender(event)) return { ok: false };
+    try {
+      if (chessGameWindow?.isMaximized()) chessGameWindow.unmaximize();
+      else chessGameWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('chess:isWindowMaximized', (event) => {
+    if (!isChessGameSender(event)) return false;
+    return chessGameWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('chess:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    rememberAndRelayGameState('chess', chessGameWindow, 'chess:state', payload);
+  });
+
+  ipcMain.on('chess:fromChild', (event, payload) => {
+    if (!chessGameWindow || chessGameWindow.isDestroyed()) return;
+    if (event.sender !== chessGameWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('chess:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  ipcMain.handle('ticTacToe:openGameWindow', async () => {
+    try {
+      await openGameWindowAndReplay(createTicTacToeGameWindow, 'tic-tac-toe', 'ticTacToe:state');
+      return { ok: true };
+    } catch (e) {
+      console.error('ticTacToe:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('ticTacToe:closeGameWindow', () => {
+    try {
+      if (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed()) {
+        ticTacToeGameWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('ticTacToe:minimizeWindow', (event) => {
+    if (!isTicTacToeGameSender(event)) return { ok: false };
+    try {
+      ticTacToeGameWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('ticTacToe:maximizeWindow', (event) => {
+    if (!isTicTacToeGameSender(event)) return { ok: false };
+    try {
+      if (ticTacToeGameWindow?.isMaximized()) ticTacToeGameWindow.unmaximize();
+      else ticTacToeGameWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('ticTacToe:isWindowMaximized', (event) => {
+    if (!isTicTacToeGameSender(event)) return false;
+    return ticTacToeGameWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('ticTacToe:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    rememberAndRelayGameState('tic-tac-toe', ticTacToeGameWindow, 'ticTacToe:state', payload);
+  });
+
+  ipcMain.on('ticTacToe:fromChild', (event, payload) => {
+    if (!ticTacToeGameWindow || ticTacToeGameWindow.isDestroyed()) return;
+    if (event.sender !== ticTacToeGameWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('ticTacToe:fromChild', payload);
     } catch {
       /* ignore */
     }
@@ -1737,6 +2201,10 @@ function setupIPC() {
     if (!peerServer) return false;
     return peerServer.sendTo(peerId, data);
   });
+  ipcMain.handle('peer:sendMany', (_, peerIds, data) => {
+    if (!peerServer) return [];
+    return peerServer.sendMany(peerIds, data);
+  });
   ipcMain.handle('peer:broadcast', (_, data) => {
     if (!peerServer) return [];
     return peerServer.broadcast(data);
@@ -1786,7 +2254,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('notify:show', (_, payload = {}) => {
-    if (store && store.get('settings.windowsNotifications', true) === false) {
+    if (areAppNotificationsSuppressed() && payload.allowInForeground !== true) {
       return false;
     }
     return showWindowsNotification(payload.title || 'BlueTalk', payload.body || '', {
@@ -1973,7 +2441,10 @@ function setupIPC() {
 
   ipcMain.handle('app:wipeAllData', () => wipeAllLocalAppData());
 
-  ipcMain.handle('plugins:list', () => pluginHost?.listPlugins() || []);
+  ipcMain.handle('plugins:list', async () => {
+    await pluginHostReady;
+    return pluginHost?.listPlugins() || [];
+  });
   ipcMain.handle('plugins:setEnabled', async (_, id, enabled) => {
     if (!pluginHost) return false;
     return pluginHost.setPluginEnabled(id, Boolean(enabled));
@@ -2075,6 +2546,12 @@ function setupIPC() {
           && data.kind !== 'e2ee-key-handshake'
           && data.kind !== 'poker'
           && data.kind !== 'uno'
+          && data.kind !== 'connect-four'
+          && data.kind !== 'chess'
+          && data.kind !== 'tic-tac-toe'
+          && data.kind !== 'user-presence'
+          && data.kind !== 'game-presence'
+          && data.kind !== 'game-presence-clear'
         ) {
           if (
             data.kind !== 'encrypted-chat-e2ee'
@@ -2123,6 +2600,7 @@ if (!gotSingleInstanceLock) {
         if (Array.isArray(contacts)) {
           for (const contact of contacts) {
             if (!contact?.id || !contact.address) continue;
+            if (isLoopbackConnectAddress(contact.address)) continue;
             // Skip if already connected (e.g. via discovery)
             if (peerServer._getActivePeer(contact.id)) continue;
             peerServer.connectTo({ id: contact.id, address: contact.address }).catch((err) => {
@@ -2145,6 +2623,15 @@ if (!gotSingleInstanceLock) {
       mainWindowRef: () => mainWindow,
       isAppInForegroundRef: isAppInForeground,
     });
+    pluginHostReady = (async () => {
+      try {
+        await seedBundledPlugins(pluginHost);
+        await pluginHost.init();
+        pluginHost._emitChange();
+      } catch (e) {
+        console.error('[PluginHost] init failed:', e);
+      }
+    })();
     ollamaManager = new OllamaManager({
       store,
       onStateChange: broadcastOllamaState,
@@ -2163,14 +2650,6 @@ if (!gotSingleInstanceLock) {
       getContactLabel: getContactLabelFromStore,
     });
     ollamaManager.init().catch((e) => console.error('[Ollama] init failed:', e));
-    (async () => {
-      try {
-        await seedBundledPlugins(pluginHost);
-      } catch (e) {
-        console.error('[PluginHost] seed bundled plugins:', e);
-      }
-      await pluginHost.init().catch((e) => console.error('[PluginHost] init failed:', e));
-    })();
   });
 }
 
@@ -2188,6 +2667,18 @@ app.on('before-quit', () => {
     if (unoGameWindow && !unoGameWindow.isDestroyed()) {
       unoGameWindow.destroy();
       unoGameWindow = null;
+    }
+    if (connectFourGameWindow && !connectFourGameWindow.isDestroyed()) {
+      connectFourGameWindow.destroy();
+      connectFourGameWindow = null;
+    }
+    if (chessGameWindow && !chessGameWindow.isDestroyed()) {
+      chessGameWindow.destroy();
+      chessGameWindow = null;
+    }
+    if (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed()) {
+      ticTacToeGameWindow.destroy();
+      ticTacToeGameWindow = null;
     }
   } catch {
     /* ignore */

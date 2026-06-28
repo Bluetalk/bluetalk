@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Blocks, Bot, Plug, Server, Smile, User } from 'lucide-react';
+import { ArrowUpCircle, Blocks, BookOpen, Bot, Plug, Server, Smile, User } from 'lucide-react';
 
 export const SETTINGS_HUB_NAV = [
   {
@@ -30,6 +30,12 @@ export const SETTINGS_HUB_NAV = [
     icon: Blocks,
     title: 'Erweiterungen',
     subtitle: 'Spiele, Tools und Extras verwalten',
+  },
+  {
+    to: '/docs/getting-started',
+    icon: BookOpen,
+    title: 'Plugin API Docs',
+    subtitle: 'Developer documentation for extensions',
   },
   {
     to: '/settings/updates',

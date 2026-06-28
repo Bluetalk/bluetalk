@@ -24,7 +24,7 @@ function loadPokerEngine() {
     },
     on: (name, handler) => { events.set(name, handler); return () => events.delete(name); },
     onDeactivate: () => {},
-    ui: { registerTab: () => {} },
+    ui: { registerTab: () => {}, registerCommand: () => {} },
     notify: { toast: () => {} },
     log: { info: () => {}, error: () => {} },
   };

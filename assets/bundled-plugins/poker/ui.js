@@ -155,6 +155,7 @@
       turnTimeSec: 0,
       minRaiseBB: 1,
       autoStart: false,
+      lobbyAccess: 'invite',
     };
   }
 
@@ -175,6 +176,7 @@
     next.turnTimeSec = clampInt(next.turnTimeSec, 0, 300, fallback.turnTimeSec || 0);
     next.minRaiseBB = clampInt(next.minRaiseBB, 1, 10, fallback.minRaiseBB || 1);
     next.autoStart = next.autoStart === true;
+    next.lobbyAccess = next.lobbyAccess === 'public' ? 'public' : 'invite';
     return next;
   }
 
@@ -191,6 +193,13 @@
 
   function broadcastWire(body, peerIds) {
     for (const id of peerIds) sendWire(id, body);
+  }
+
+  const GAME_PRESENCE_KIND = 'game-presence';
+  const GAME_PRESENCE_CLEAR_KIND = 'game-presence-clear';
+
+  function isPokerLobbyJoinable(phase) {
+    return phase === 'lobby' || phase === 'between';
   }
 
   /** --- Host --- */
@@ -221,6 +230,7 @@
     let autoStartTimer = null;
     let nextHandTimer = null;
     let savedAt = Number(restoredGame?.savedAt) || 0;
+    const invitedPeers = new Set(Array.isArray(restoredGame?.invitedPeers) ? restoredGame.invitedPeers : []);
 
     for (const row of restoredPlayers) {
       if (!row?.peerId || players.some((p) => p.peerId === row.peerId)) continue;
@@ -948,6 +958,18 @@
       if (!body || body.tableId !== tableId) return;
       if (body.wire === 'join' && from !== selfId) {
         if (isPokerBotId(from)) return;
+        if (!isPokerLobbyJoinable(phase)) {
+          sendWire(from, { wire: 'join_reject', tableId, reason: 'Eine Hand läuft bereits — Beitritt später erneut versuchen.' });
+          return;
+        }
+        if (cfg.lobbyAccess !== 'public' && !invitedPeers.has(from)) {
+          sendWire(from, {
+            wire: 'join_reject',
+            tableId,
+            reason: 'Nur auf Einladung — bitte zuerst eine Einladung im Chat erhalten.',
+          });
+          return;
+        }
         if (addPlayer(from, body.name)) {
           sendWire(from, { wire: 'join_ok', tableId, seat: players.find((p) => p.peerId === from)?.seat });
         } else {
@@ -1048,6 +1070,7 @@
         if (!peerId || players.some((p) => p.peerId === peerId)) return false;
         const connected = (api.peers() || []).some((p) => p.id === peerId);
         if (!connected || isContactBlocked(peerId)) return false;
+        invitedPeers.add(peerId);
         void api.chat.send(peerId, this.invitePayload());
         message = 'Einladung wurde im Chat gesendet.';
         pushState();
@@ -1073,6 +1096,7 @@
           hostPeerId: selfId,
           pokerSettings: { ...cfg },
           pokerSettingsSummary: sum,
+          lobbyAccess: cfg.lobbyAccess,
           content: `🃏 ${cfg.tableName} — ${sum}`,
         };
       },
@@ -1111,7 +1135,47 @@
   let pokerSelfPeerName = '';
   let clientState = null;
   let myHole = [];
-  let rootRender = null;
+  let lastPresenceSession = null;
+
+  function clearGamePresence() {
+    if (!lastPresenceSession) return;
+    api.peer.broadcast({
+      kind: GAME_PRESENCE_CLEAR_KIND,
+      game: 'poker',
+      sessionId: lastPresenceSession,
+      timestamp: Date.now(),
+    });
+    lastPresenceSession = null;
+  }
+
+  function syncGamePresence() {
+    const pub = hostRef ? hostRef.publicState() : clientState;
+    if (!pub || !pokerSelfPeerId) {
+      clearGamePresence();
+      return;
+    }
+    const sessionId = pub.tableId;
+    const playerCount = (pub.players || []).length;
+    const maxPlayers = pub.settings?.maxPlayers || 6;
+    const role = hostRef ? 'host' : 'player';
+    const phase = pub.phase || 'lobby';
+    const joinable = role === 'host' && isPokerLobbyJoinable(phase) && playerCount < maxPlayers;
+    lastPresenceSession = sessionId;
+    api.peer.broadcast({
+      kind: GAME_PRESENCE_KIND,
+      game: 'poker',
+      sessionId,
+      tableName: pub.settings?.tableName || 'Poker-Tisch',
+      phase,
+      lobbyAccess: pub.settings?.lobbyAccess === 'public' ? 'public' : 'invite',
+      role,
+      hostPeerId: pub.hostPeerId || pokerSelfPeerId,
+      playerCount,
+      maxPlayers,
+      joinable,
+      timestamp: Date.now(),
+    });
+  }
 
   async function refreshPokerSelfId() {
     try {
@@ -1130,6 +1194,7 @@
     const pub = hostRef ? hostRef.publicState() : clientState;
     if (!pub) {
       window.bluetalk.poker.pushState(null);
+      clearGamePresence();
       return;
     }
     const hole = hostRef ? hostRef.getMyHole() : myHole;
@@ -1142,6 +1207,7 @@
         name: contact.nickname || contact.name || connected.get(contact.id)?.name || contact.id,
       }));
     window.bluetalk.poker.pushState({ public: pub, myHole: hole, inviteCandidates });
+    syncGamePresence();
   }
 
   async function openGameWindowIfNeeded() {
@@ -1166,13 +1232,13 @@
       myHole = w.cardsRaw || [];
       tryPump();
       void openGameWindowIfNeeded();
-      rootRender?.();
+      notifyLauncherRefresh();
       return;
     }
 
     if (w.wire === 'state' && w.public) {
       if (w.public.hostPeerId === selfId && host) {
-        rootRender?.();
+        notifyLauncherRefresh();
         return;
       }
       if (host) return;
@@ -1181,7 +1247,7 @@
       clientState = w.public;
       tryPump();
       void openGameWindowIfNeeded();
-      rootRender?.();
+      notifyLauncherRefresh();
       return;
     }
 
@@ -1194,21 +1260,21 @@
         clientState = null;
         myHole = [];
         tryPump();
-        rootRender?.();
+        notifyLauncherRefresh();
       }
     }
     if (w.wire === 'leave' && clientState?.tableId === w.tableId && msg.from === clientState.hostPeerId) {
       clientState = null;
       myHole = [];
       tryPump();
-      rootRender?.();
+      notifyLauncherRefresh();
     }
     if (w.wire === 'kicked' && (!w.tableId || w.tableId === clientState?.tableId)) {
       api.notify.toast?.({ title: 'Poker', message: w.reason || 'Du wurdest vom Tisch entfernt.' });
       clientState = null;
       myHole = [];
       tryPump();
-      rootRender?.();
+      notifyLauncherRefresh();
       void window.bluetalk?.poker?.closeGameWindow?.();
     }
   }
@@ -1224,394 +1290,69 @@
     }
   }
 
-  function render(container) {
-    let contacts = api.contacts() || [];
-    let peers = api.peers() || [];
-
-    function refreshLists() {
-      contacts = api.contacts() || [];
-      peers = api.peers() || [];
+  function notifyLauncherRefresh() {
+    try {
+      window.dispatchEvent(new CustomEvent('bt:games-launcher-refresh'));
+    } catch {
+      /* ignore */
     }
+  }
 
-    container.innerHTML = `
-      <div class="poker-plugin-root">
-        <div class="poker-plugin-hero">
-          <h2>Texas Hold'em</h2>
-          <p class="poker-plugin-sub">Host erstellt den Tisch, lädt per Chat ein, alle müssen als Peers verbunden sein.</p>
-        </div>
-        <div class="poker-plugin-panels"></div>
-      </div>
-      <style>
-        .poker-plugin-root { max-width: 880px; margin: 0 auto; padding: 12px 16px 32px; }
-        .poker-plugin-hero h2 { margin: 0 0 6px; font-size: 1.35rem; }
-        .poker-plugin-sub { margin: 0; color: var(--fg-2); font-size: 13px; line-height: 1.45; }
-        .poker-plugin-panels { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
-        .poker-card {
-          background: var(--bg-1);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 14px 16px;
-        }
-        .poker-card h3 { margin: 0 0 10px; font-size: 15px; }
-        .poker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-        .poker-field label { display: block; font-size: 11px; color: var(--fg-3); margin-bottom: 4px; }
-        .poker-field input, .poker-field select {
-          width: 100%; padding: 6px 8px; border-radius: 6px;
-          border: 1px solid var(--border); background: var(--bg-input); color: var(--fg-0); font-size: 13px;
-        }
-        .poker-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-        .poker-board {
-          display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
-          padding: 12px; background: var(--green-soft); border-radius: 8px; margin: 10px 0;
-          min-height: 52px;
-        }
-        .poker-card-chip {
-          display: inline-flex; align-items: center; justify-content: center;
-          min-width: 36px; padding: 6px 8px; border-radius: 6px;
-          background: var(--bg-2); border: 1px solid var(--border-strong);
-          font-family: var(--mono, monospace); font-size: 14px;
-        }
-        .poker-pot { font-weight: 600; margin: 8px 0; text-align: center; }
-        .poker-players { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-        .poker-seat {
-          display: flex; justify-content: space-between; align-items: center;
-          padding: 8px 10px; border-radius: 8px; background: var(--bg-2); font-size: 13px;
-        }
-        .poker-seat span.muted { color: var(--fg-3); font-size: 12px; }
-        .poker-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-        .poker-msg { font-size: 12px; color: var(--fg-2); margin-top: 8px; }
-        .poker-btn { padding: 6px 12px; border-radius: 6px; border: 0; cursor: pointer; font-size: 13px; }
-        .poker-btn-primary { background: var(--accent); color: var(--accent-fg); }
-        .poker-btn-ghost { background: var(--bg-2); color: var(--fg-0); border: 1px solid var(--border); }
-        .poker-launch-card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; }
-        .poker-launch-mark { font-size: 42px; line-height: 1; color: var(--accent); }
-      </style>
-    `;
-
-    const panels = container.querySelector('.poker-plugin-panels');
-
-    async function paint() {
-      {
-        await refreshPokerSelfId();
-        const pending = tryConsumePendingJoin();
-        if (pending?.hostPeerId && pending?.tableId && !host && !clientState) {
-          clientState = {
-            tableId: pending.tableId,
-            hostPeerId: pending.hostPeerId,
-            phase: 'lobby',
-            players: [],
-            settings: sanitizeSettings(pending.pokerSettings || {}),
-            message: 'Verbindung zum Tisch wird hergestellt…',
-          };
-          sendWire(pending.hostPeerId, {
-            wire: 'join',
-            tableId: pending.tableId,
-            name: pokerSelfPeerName || 'Spieler',
-          });
-          await openGameWindowIfNeeded();
-          tryPump();
-        }
-
-        const activeState = host ? host.publicState() : clientState;
-        const savedGame = api.storage.get('savedPokerGame', null);
-        panels.innerHTML = activeState
-          ? `
-            <div class="poker-card poker-launch-card">
-              <div class="poker-launch-mark">♠</div>
-              <div>
-                <h3>${activeState.settings?.tableName || 'Poker-Tisch'}</h3>
-                <p class="poker-plugin-sub">Das Spiel, Einladungen, Chips und Einstellungen werden vollständig im Poker-Fenster verwaltet.</p>
-              </div>
-              <button type="button" class="poker-btn poker-btn-primary" id="poker-launch-open">Poker-Fenster öffnen</button>
-            </div>`
-          : `
-            <div class="poker-card poker-launch-card">
-              <div class="poker-launch-mark">♠</div>
-              <div>
-                <h3>Pokerrunde starten</h3>
-                <p class="poker-plugin-sub">Starte hier nur das Spiel. Alles Weitere erledigst du anschließend direkt am Tisch.</p>
-              </div>
-              <div class="poker-row">
-                <button type="button" class="poker-btn poker-btn-primary" id="poker-launch-new">Neues Spiel</button>
-                ${savedGame?.players?.length ? '<button type="button" class="poker-btn poker-btn-ghost" id="poker-launch-resume">Gespeichertes Spiel fortsetzen</button>' : ''}
-              </div>
-            </div>`;
-
-        const launchHost = async (saved = null) => {
-          const peerInfo = await window.bluetalk?.peer?.getInfo?.();
-          if (!peerInfo?.id) {
-            api.notify.toast?.({ title: 'Poker', message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' });
-            return;
-          }
-          pokerSelfPeerId = peerInfo.id;
-          pokerSelfPeerName = peerInfo.name || '';
-          const settings = saved?.settings || api.storage.get('pokerSettings', defaultSettings());
-          host = createHost(settings, () => {
-            tryPump();
-            rootRender?.();
-          }, { id: peerInfo.id, name: peerInfo.name || 'Host' }, saved);
-          hostRef = host;
-          host.bootstrapHost();
-          clientState = host.publicState();
-          myHole = [];
-          await openGameWindowIfNeeded();
-          tryPump();
-          void paint();
-        };
-
-        panels.querySelector('#poker-launch-open')?.addEventListener('click', () => {
-          void openGameWindowIfNeeded().then(() => tryPump());
-        });
-        panels.querySelector('#poker-launch-new')?.addEventListener('click', () => void launchHost(null));
-        panels.querySelector('#poker-launch-resume')?.addEventListener('click', () => void launchHost(savedGame));
-        return;
-      }
-      refreshLists();
-      await refreshPokerSelfId();
-      let debugPoker = false;
-      try {
-        const appSettings = await window.bluetalk?.store?.get?.('settings', {});
-        debugPoker = Boolean(appSettings?.debugMode);
-      } catch {
-        debugPoker = false;
-      }
-
-      const selfId = pokerSelfPeerId;
-
-      const st = host ? host.publicState() : clientState;
-      const pending = tryConsumePendingJoin();
-      if (pending && pending.hostPeerId && pending.tableId && !host && !clientState) {
-        sendWire(pending.hostPeerId, {
-          wire: 'join',
-          tableId: pending.tableId,
-          name: pokerSelfPeerName || 'Spieler',
-        });
-        clientState = {
-          tableId: pending.tableId,
-          hostPeerId: pending.hostPeerId,
-          phase: 'lobby',
-          players: [],
-          settings: pending.pokerSettings || {},
-        };
-      }
-
-      if (!st && !clientState) {
-        panels.innerHTML = `
-          <div class="poker-card">
-            <h3>Tisch erstellen (du bist Host)</h3>
-            <div class="poker-grid" id="poker-form"></div>
-            <div class="poker-row" style="margin-top:12px">
-              <button type="button" class="poker-btn poker-btn-primary" id="poker-create">Tisch hosten</button>
-            </div>
-          </div>
-          <div class="poker-card">
-            <h3>Per Chat eingeladen?</h3>
-            <p class="poker-plugin-sub">Öffne die Einladung im Chat und tippe auf <strong>Tisch beitreten</strong>, oder verbinde dich mit dem Host und tritt unten bei.</p>
-          </div>
-        `;
-        const form = panels.querySelector('#poker-form');
-        const s = { ...defaultSettings(), ...JSON.parse(JSON.stringify(api.storage.get('pokerSettings', defaultSettings()))) };
-        form.innerHTML = `
-          <div class="poker-field"><label>Name</label><input data-k="tableName" value="${s.tableName.replace(/"/g, '&quot;')}" /></div>
-          <div class="poker-field"><label>Small Blind</label><input data-k="smallBlind" type="number" value="${s.smallBlind}" /></div>
-          <div class="poker-field"><label>Big Blind</label><input data-k="bigBlind" type="number" value="${s.bigBlind}" /></div>
-          <div class="poker-field"><label>Ante</label><input data-k="ante" type="number" value="${s.ante}" /></div>
-          <div class="poker-field"><label>Start-Chips</label><input data-k="startingChips" type="number" value="${s.startingChips}" /></div>
-          <div class="poker-field"><label>Max. Spieler</label><input data-k="maxPlayers" type="number" min="2" max="9" value="${s.maxPlayers}" /></div>
-          <div class="poker-field"><label>Zugzeit (Sek., 0=aus)</label><input data-k="turnTimeSec" type="number" value="${s.turnTimeSec}" /></div>
-          <div class="poker-field"><label>Auto-Start</label><input data-k="autoStart" type="checkbox" ${s.autoStart ? 'checked' : ''} /></div>
-        `;
-        panels.querySelector('#poker-create').onclick = () => {
-          void (async () => {
-            const inputs = form.querySelectorAll('[data-k]');
-            const next = { ...s };
-            inputs.forEach((el) => {
-              const k = el.getAttribute('data-k');
-              const v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
-              next[k] = v;
-            });
-            api.storage.set('pokerSettings', next);
-            const peerInfo = await window.bluetalk?.peer?.getInfo?.();
-            if (!peerInfo?.id) {
-              api.notify.toast?.({ title: 'Poker', message: 'Peer-ID nicht verfügbar. Bitte kurz warten und erneut versuchen.' });
-              return;
-            }
-            pokerSelfPeerId = peerInfo.id;
-            pokerSelfPeerName = peerInfo.name || '';
-            host = createHost(next, () => {
-              void (async () => {
-                await paint();
-                tryPump();
-              })();
-            }, { id: peerInfo.id, name: peerInfo.name || 'Host' });
-            hostRef = host;
-            host.bootstrapHost();
-            clientState = host.publicState();
-            myHole = [];
-            await paint();
-            // Öffne das Spiel-Fenster automatisch
-            try {
-              await window.bluetalk?.poker?.openGameWindow?.();
-            } catch {}
-          })();
-        };
-        return;
-      }
-
-      const view = st || clientState;
-      const isHost = Boolean(host);
-      const tableId = view.tableId;
-      const ps = view.players || [];
-      const inGame = view && view.phase && view.phase !== 'lobby';
-      const hasBot = ps.some((p) => p.peerId === POKER_BOT_PEER_ID);
-
-      let debugHtml = '';
-      if (debugPoker && isHost) {
-        debugHtml = `
-          <div class="poker-card">
-            <h3>Debug</h3>
-            <p class="poker-plugin-sub">Aktiv, weil <strong>Einstellungen → Debug-Modus</strong> eingeschaltet ist. Lokaler Bot ohne Netzwerk.</p>
-            <div class="poker-row">
-              ${
-                hasBot
-                  ? '<button type="button" class="poker-btn poker-btn-ghost" id="poker-rm-bot">Bot entfernen</button>'
-                  : '<button type="button" class="poker-btn poker-btn-primary" id="poker-add-bot">Bot hinzufügen</button>'
-              }
-            </div>
-          </div>
-        `;
-      }
-
-      let inviteHtml = '';
-      if (isHost) {
-        const opts = contacts
-          .filter((c) => c?.id && !c.blocked && peers.some((p) => p.id === c.id))
-          .map((c) => `<option value="${c.id}">${(c.nickname || c.name || c.id).replace(/</g, '')}</option>`)
-          .join('');
-        inviteHtml = `
-          <div class="poker-card">
-            <h3>Spieler einladen</h3>
-            <p class="poker-plugin-sub">Sendet eine Einladung in den Chat — der Kontakt muss online sein.</p>
-            <div class="poker-row">
-              <select id="poker-invite-peer" style="flex:1;min-width:200px;padding:6px;border-radius:6px;border:1px solid var(--border)">${opts || '<option value="">Kein verbundener Kontakt</option>'}</select>
-              <button type="button" class="poker-btn poker-btn-primary" id="poker-send-invite">Einladung senden</button>
-            </div>
-          </div>
-        `;
-      }
-
-      const actionRow =
-        isHost && view.phase !== 'lobby'
-          ? `<div class="poker-row" style="margin-top:10px">
-               <button type="button" class="poker-btn poker-btn-primary" id="poker-next-hand">Nächste Hand</button>
-             </div>`
-          : '';
-
-      panels.innerHTML = `
-        <div class="poker-card">
-          <h3>${view.settings?.tableName || 'Tisch'} <span class="muted" style="font-size:12px;color:var(--fg-3)">(${view.phase})</span></h3>
-          ${
-            inGame
-              ? `<p class="poker-plugin-sub" style="margin:0 0 10px;line-height:1.5">
-                  <strong>Poker-Fenster</strong> — Das Spiel läuft im separaten Fenster.
-                  <button type="button" class="poker-btn poker-btn-primary" id="poker-open-window" style="margin-left:8px">Fenster öffnen</button>
-                </p>
-                <div class="poker-msg">Pot: ${view.pot ?? 0} · Hand #${view.handNumber ?? 0}</div>`
-              : `<p class="poker-plugin-sub" style="margin:0">Lobby — Spieler am Tisch:</p>`
-          }
-          <div class="poker-players" style="margin-top:10px">
-            ${ps
-              .map(
-                (p) => `
-              <div class="poker-seat">
-                <span>${p.name}${p.peerId === selfId ? ' (du)' : ''}${p.peerId === view.hostPeerId ? ' · Host' : ''}${p.isBot || p.peerId === POKER_BOT_PEER_ID ? ' · Bot' : ''}</span>
-                <span class="muted">Chips ${p.chips}${p.folded ? ' · fold' : ''}${p.allIn ? ' · all-in' : ''}</span>
-              </div>`
-              )
-              .join('')}
-          </div>
-          <div class="poker-msg">${view.message || ''}</div>
-          ${actionRow}
-        </div>
-        ${debugHtml}
-        ${inviteHtml}
-        <div class="poker-card">
-          <h3>Host-Steuerung</h3>
-          <div class="poker-row">
-            ${isHost ? `<button type="button" class="poker-btn poker-btn-primary" id="poker-start">Hand starten</button>` : ''}
-            <button type="button" class="poker-btn poker-btn-ghost" id="poker-leave">Tisch verlassen</button>
-          </div>
-        </div>
-      `;
-
-      if (isHost) {
-        const sel = panels.querySelector('#poker-invite-peer');
-        const btn = panels.querySelector('#poker-send-invite');
-        if (btn && sel?.value) {
-          btn.onclick = () => {
-            const peerId = sel.value;
-            const payload = host.invitePayload();
-            api.chat.send(peerId, payload);
-            api.notify.toast?.({ title: 'Poker', message: 'Einladung gesendet.' });
-          };
-        }
-        const sh = panels.querySelector('#poker-start');
-        if (sh) sh.onclick = () => host.startHand();
-        const nh = panels.querySelector('#poker-next-hand');
-        if (nh) nh.onclick = () => host.startHand();
-        const addBot = panels.querySelector('#poker-add-bot');
-        if (addBot) {
-          addBot.onclick = () => {
-            const ok = host.addDebugBot();
-            if (ok) {
-              api.notify.toast?.({ title: 'Poker', message: 'Debug-Bot am Tisch.' });
-            } else {
-              api.notify.toast?.({ title: 'Poker', message: 'Bot konnte nicht hinzugefügt werden (bereits da oder voll).' });
-            }
-            void paint();
-          };
-        }
-        const rmBot = panels.querySelector('#poker-rm-bot');
-        if (rmBot) {
-          rmBot.onclick = () => {
-            host.removeDebugBot();
-            void paint();
-          };
-        }
-      }
-
-      // Öffne Spiel-Fenster Button
-      const openWinBtn = panels.querySelector('#poker-open-window');
-      if (openWinBtn) {
-        openWinBtn.onclick = () => {
-          void openGameWindowIfNeeded();
-        };
-      }
-
-      const leave = panels.querySelector('#poker-leave');
-      if (leave) {
-        leave.onclick = () => {
-          if (host) {
-            broadcastWire({ wire: 'leave', tableId: host.tableId }, host.publicState().players.map((p) => p.peerId));
-            host.destroy();
-            host = null;
-            hostRef = null;
-          } else if (clientState?.hostPeerId) {
-            sendWire(clientState.hostPeerId, { wire: 'leave', tableId: clientState.tableId });
-          }
-          clientState = null;
-          myHole = [];
-          void paint();
-        };
-      }
+  async function launchHostGame(saved = null) {
+    const peerInfo = await window.bluetalk?.peer?.getInfo?.();
+    if (!peerInfo?.id) {
+      api.notify.toast?.({ title: 'Poker', message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' });
+      return { ok: false };
     }
+    pokerSelfPeerId = peerInfo.id;
+    pokerSelfPeerName = peerInfo.name || '';
+    const settings = saved?.settings || api.storage.get('pokerSettings', defaultSettings());
+    host = createHost(settings, () => {
+      tryPump();
+      notifyLauncherRefresh();
+    }, { id: peerInfo.id, name: peerInfo.name || 'Host' }, saved);
+    hostRef = host;
+    host.bootstrapHost();
+    clientState = host.publicState();
+    myHole = [];
+    await openGameWindowIfNeeded();
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }
 
-    rootRender = () => void paint();
-    void paint();
-
-    return () => {
-      rootRender = null;
+  async function getLauncherState() {
+    await refreshPokerSelfId();
+    const activeState = host ? host.publicState() : clientState;
+    const savedGame = api.storage.get('savedPokerGame', null);
+    return {
+      active: Boolean(activeState),
+      tableName: activeState?.settings?.tableName || 'Poker-Tisch',
+      hasSavedGame: Boolean(savedGame?.players?.length),
     };
+  }
+
+  async function bootstrapPendingJoin() {
+    await refreshPokerSelfId();
+    const pending = tryConsumePendingJoin();
+    if (pending?.hostPeerId && pending?.tableId && !host && !clientState) {
+      clientState = {
+        tableId: pending.tableId,
+        hostPeerId: pending.hostPeerId,
+        phase: 'lobby',
+        players: [],
+        settings: sanitizeSettings(pending.pokerSettings || {}),
+        message: 'Verbindung zum Tisch wird hergestellt…',
+      };
+      sendWire(pending.hostPeerId, {
+        wire: 'join',
+        tableId: pending.tableId,
+        name: pokerSelfPeerName || 'Spieler',
+      });
+      await openGameWindowIfNeeded();
+      tryPump();
+      notifyLauncherRefresh();
+    }
   }
 
   const offPokerMessage = api.on('peer:message', (msg) => {
@@ -1631,7 +1372,7 @@
       });
     }
     tryPump();
-    rootRender?.();
+    notifyLauncherRefresh();
   });
 
   // Handle actions from game window
@@ -1667,10 +1408,11 @@
         } else if (clientState?.hostPeerId) {
           sendWire(clientState.hostPeerId, { wire: 'leave', tableId: clientState.tableId });
         }
+        clearGamePresence();
         clientState = null;
         myHole = [];
         tryPump();
-        rootRender?.();
+        notifyLauncherRefresh();
       } else if (payload.type === 'add_bot') {
         if (hostRef) {
           hostRef.addDebugBot();
@@ -1699,23 +1441,27 @@
 
   void refreshPokerSelfId();
 
-  api.ui.registerTab({
-    id: 'table',
-    label: 'Poker',
-    icon: 'Spade',
-    order: 40,
-    render,
-  });
+  api.ui.registerCommand('launcherState', () => getLauncherState());
+  api.ui.registerCommand('launchNew', () => launchHostGame(null));
+  api.ui.registerCommand('launchResume', () => launchHostGame(api.storage.get('savedPokerGame', null)));
+  api.ui.registerCommand('openWindow', () => openGameWindowIfNeeded().then(() => {
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }));
+
+  void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
     offPokerChild?.();
     offPokerMessage?.();
     offPokerDisconnect?.();
     offPokerConnect?.();
+    clearGamePresence();
     host?.destroy?.();
     host = null;
     hostRef = null;
-    rootRender = null;
+    /* noop */
   });
 
   api.log.info('Poker-Plugin UI geladen');

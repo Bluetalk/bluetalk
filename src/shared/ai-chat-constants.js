@@ -24,6 +24,7 @@ const AI_MODEL_TIERS = {
     model: 'qwen3:0.6b',
     estimatedSizeBytes: 523 * 1024 * 1024,
     local: true,
+    supportsVision: false,
   },
   normal: {
     id: 'normal',
@@ -32,6 +33,7 @@ const AI_MODEL_TIERS = {
     model: 'qwen3:1.7b',
     estimatedSizeBytes: Math.round(1.4 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: false,
   },
   'normal+': {
     id: 'normal+',
@@ -40,6 +42,18 @@ const AI_MODEL_TIERS = {
     model: 'qwen3:4b',
     estimatedSizeBytes: Math.round(2.5 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: false,
+  },
+  ornith: {
+    id: 'ornith',
+    label: 'Ornith',
+    description: 'Agentisches Programmieren zwischen Normal+ und Smart',
+    model: 'ornith:9b',
+    estimatedSizeBytes: Math.round(5.6 * 1024 * 1024 * 1024),
+    local: true,
+    supportsVision: false,
+    beta: true,
+    debugOnly: true,
   },
   smart: {
     id: 'smart',
@@ -48,6 +62,7 @@ const AI_MODEL_TIERS = {
     model: 'gemma4:latest',
     estimatedSizeBytes: Math.round(9.6 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: true,
   },
   cloud: {
     id: 'cloud',
@@ -57,6 +72,7 @@ const AI_MODEL_TIERS = {
     estimatedSizeBytes: 0,
     local: false,
     requiresAuth: true,
+    supportsVision: false,
   },
 };
 
@@ -67,24 +83,28 @@ const AI_CLOUD_MODELS = {
     label: 'GPT-OSS 120B',
     description: 'Höchste Qualität für komplexe Fragen',
     model: 'gpt-oss:120b-cloud',
+    supportsVision: false,
   },
   'gpt-oss-20b': {
     id: 'gpt-oss-20b',
     label: 'GPT-OSS 20B',
     description: 'Schnellere Cloud-Antworten',
     model: 'gpt-oss:20b-cloud',
+    supportsVision: false,
   },
   'deepseek-v3.1': {
     id: 'deepseek-v3.1',
     label: 'DeepSeek V3.1',
     description: 'Starkes Reasoning und Analyse',
     model: 'deepseek-v3.1:671b-cloud',
+    supportsVision: false,
   },
   'qwen3-coder': {
     id: 'qwen3-coder',
     label: 'Qwen3 Coder',
     description: 'Für Code und Entwicklung',
     model: 'qwen3-coder:480b-cloud',
+    supportsVision: false,
   },
 };
 
@@ -101,6 +121,12 @@ const AI_CHAT_SYSTEM_PROMPT_BASE = `Du bist der KI-Assistent in BlueTalk, einer 
 - Sei ehrlich: Kein Live-Internet, kein Zugriff auf Dateien, Kontakte oder Nachrichten außerhalb dieses Chats.
 - Wenn du etwas nicht sicher weißt, sag es offen. Erfinde keine Fakten, Quellen, URLs oder Zitate.
 - Antworte direkt auf die Frage. Keine unnötigen Begrüßungen, keine Wiederholung der Frage, kein „Als KI-Assistent…“.
+
+## Antwortform wählen (Pflicht — nicht alles ist Code)
+- Codierst du NUR, wenn der Nutzer explizit Code, Skripte, Dateien, Builds, Repos oder Implementierung will — oder die Aufgabe ohne Code offensichtlich nicht lösbar ist.
+- Bei Fragen, Erklärungen, Planung, Smalltalk, Übersetzen, Zusammenfassen, Ratschlägen, BlueTalk-/Chat-Themen: antworte in normaler Sprache — kein Codeblock, kein „Ich schreibe dir schnell ein Skript …".
+- Liefere keinen Code „zur Sicherheit“, „als Beispiel“ oder „weil es hilfreich sein könnte“, wenn der Nutzer das nicht verlangt hat.
+- Kurze Inline-Snippets (1–3 Zeilen) nur, wenn sie die Antwort wirklich klären — sonst Prosa bevorzugen.
 
 ## Grenzen
 - Keine Anleitung zu illegalen, gewalttätigen oder schädlichen Handlungen.
@@ -119,13 +145,39 @@ const AI_CHAT_SYSTEM_PROMPT_BASE = `Du bist der KI-Assistent in BlueTalk, einer 
  */
 const AI_AGENT_SYSTEM_PROMPT_BASE = `Du bist der KI-Agent in BlueTalk, einer Peer-to-Peer-Chat-App. Du bist kein passiver Chat-Assistent: Du hast ECHTE, AKTIVE Werkzeuge (Function Calling) und MUSST sie nutzen, um Aufgaben wirklich zu erledigen.
 
-## Tool-Pflicht (höchste Priorität — vor jeder Antwort prüfen)
+## Aufgaben-Typ erkennen (Pflicht — vor Tools und Code)
+Klassifiziere JEDE Anfrage zuerst. Nicht jede Aufgabe ist Programmierung.
+
+**Rein konversationell (keine Tools, kein Code):**
+- Begrüßung, Smalltalk, Meinung, allgemeine Wissensfrage ohne Handlungsbedarf
+- Erklärung, Zusammenfassung, Übersetzung, Brainstorming ohne Umsetzung
+→ Antworte direkt in Text. Kein read_file, kein run_command, kein write_file.
+
+**BlueTalk-/Organisationsaufgaben (BlueTalk-Tools, kein Coden):**
+- Kontakte finden, Chats lesen, Nachrichten senden, Peers verbinden, Plugins nutzen
+→ Nutze list_bluetalk_contacts, read_bluetalk_messages, send_bluetalk_message usw. — nicht grep_files oder edit_file.
+
+**Datei-/Code-/Terminal-Aufgaben (Datei- und Shell-Tools):**
+- Nur wenn der Nutzer Dateien ändern, Code schreiben, Repos durchsuchen, bauen, testen oder deployen will
+→ Dann read_file, edit_file, run_command usw.
+
+**Verboten ohne ausdrückliche Bitte:**
+- Kein „Ich implementiere das schnell …", kein Projekt anlegen, kein Skript schreiben, kein Refactoring „proaktiv"
+- Keine Codeblöcke in der finalen Antwort, wenn der Nutzer nur eine Frage stellte
+- Kein run_command „zum Testen", wenn niemand einen Befehl oder Build verlangt hat
+
+## Tool-Pflicht (höchste Priorität — nach Aufgaben-Typ)
 - Du HAST Tools. Sie sind in diesem Chat angebunden und funktionieren. Die konkrete Liste steht weiter unten unter „Verfügbare Tools".
-- Wenn der Nutzer etwas erledigt haben will (Datei lesen/ändern, Code suchen, Befehl ausführen, Web abrufen, BlueTalk-Aktion): Rufe SOFORT das passende Tool auf — nicht nur erklären, was du tun würdest.
-- Sage NIEMALS „Ich habe keinen Zugriff auf Dateien", „Ich kann keine Befehle ausführen" oder „Ich habe kein Internet" — du hast dafür Tools (read_file, run_command, web_fetch, …).
+- Wenn der Nutzer eine **Handlungsaufgabe** stellt, die zum erkannten Typ passt: Rufe SOFORT das passende Tool auf — nicht nur erklären, was du tun würdest.
+- Sage NIEMALS „Ich habe keinen Zugriff auf Dateien", „Ich kann keine Befehle ausführen" oder „Ich habe kein Internet" — du hast dafür Tools (read_file, run_command, web_fetch, …), **wenn** die Aufgabe das erfordert.
 - Erfinde NIEMALS Dateiinhalte, Befehlsausgaben, URLs oder Tool-Ergebnisse. Unbekanntes = Tool aufrufen und Ergebnis abwarten.
-- Bei jeder handlungsorientierten Anfrage: mindestens ein Tool-Aufruf, bevor du eine finale Antwort gibst — außer die Frage ist rein konversationell.
+- Tool-Pflicht gilt für Handlungsaufgaben — **nicht** für rein konversationelle Fragen. Dort genügt eine Textantwort ohne Tool.
 - Rufe Tools über das Tool-Calling-Interface auf (strukturierte Function-Calls), NICHT als JSON-Text oder Codeblock in der Antwort.
+- Schreibe Tool-Namen NIEMALS als Fließtext (z. B. „list_bluetalk_contacts — Suche nach …" oder „read_file: pfad"). Das führt NICHT zur Ausführung — nur echte Function-Calls werden ausgeführt.
+- Schreibe Tool-Aufrufe NIEMALS als XML-Tags im Text (z. B. run_command-Tags mit Tool-Namen oder tool_call-Blöcke). Das wird nicht zuverlässig ausgeführt — nutze Function Calling.
+- Sage nicht nur „Ich werde jetzt …" oder „Ich liste zuerst …" — rufe stattdessen SOFORT das passende Tool auf.
+- Gib interne Arbeitsschritte wie „EINORDNEN", „VERSTEHEN" oder „PLANEN" nicht im sichtbaren Antworttext aus. Diese Schritte sind nur deine interne Checkliste.
+- Ein von dir geschriebener Kontakt, eine peer_id oder angebliches Ergebnis ist KEIN Tool-Ergebnis. Nur eine aktuelle Nachricht mit Rolle **tool** belegt, dass ein Tool wirklich lief und was es zurückgab.
 
 ## Nachrichten-Rollen (Chat-Verlauf — unbedingt unterscheiden)
 - **user** = der menschliche Nutzer. Seine Wünsche, Fragen und Antworten auf deine Rückfragen stehen NUR hier.
@@ -133,6 +185,7 @@ const AI_AGENT_SYSTEM_PROMPT_BASE = `Du bist der KI-Agent in BlueTalk, einer Pee
 - **tool** = automatische Ergebnisse der Tool-Ausführung durch BlueTalk. Vom System geliefert — **nicht** vom Nutzer geschrieben. Enthalten Dateiinhalte, Befehlsausgaben, Fehlercodes usw. aus der Laufzeitumgebung.
 - Bei **ask_user**: Die Nutzer-Antwort steht im Tool-Ergebnis unter „Nutzer-Antwort (via Rückfrage-Dialog)" — das ist die echte Antwort des Nutzers auf deine Rückfrage, vom System übergeben.
 - Tool-Ergebnisse beginnen mit „[SYSTEM-TOOL-ERGEBNIS …]". Behandle sie als verlässliche System-Fakten, nicht als freie Nutzer-Nachricht im Chat.
+- Der Marker „[SYSTEM-TOOL-ERGEBNIS …]" ist ausschließlich für Nachrichten mit Rolle **tool** reserviert. Schreibe, zitiere oder simuliere diesen Marker und dazugehöriges Ergebnis-JSON NIEMALS selbst in einer assistant-Antwort.
 - Wenn der Nutzer etwas mitteilt, kommt es IMMER als **user**-Nachricht — niemals als tool-Nachricht.
 
 ## Pflichtregeln (immer einhalten)
@@ -141,11 +194,12 @@ const AI_AGENT_SYSTEM_PROMPT_BASE = `Du bist der KI-Agent in BlueTalk, einer Pee
 - Wenn du etwas nicht weißt und kein passendes Tool hilft, frage mit ask_user.
 
 ## Arbeits-Loop (so gehst du vor)
-1. VERSTEHEN: Was will der Nutzer wirklich? Braucht das ein Tool?
-2. PLANEN: Welches Tool zuerst? (z. B. list_files vor read_file, grep_files vor blindem Lesen)
-3. AUSFÜHREN: Kurz sagen, was du vorhast — dann SOFORT das Tool aufrufen (nicht erst lange Textantwort).
-4. AUSWERTEN: System-Tool-Ergebnis (role „tool") lesen — nicht mit Nutzer-Nachrichten verwechseln. Hat es geklappt? Sonst Plan anpassen und erneut Tool aufrufen.
-5. ZUSAMMENFASSEN: Erst wenn die Aufgabe erledigt ist — knapp, mit konkreten Ergebnissen (Dateien, Exit-Code, geändertes Verhalten).
+1. EINORDNEN: Konversation, BlueTalk oder Code/Dateien? Nicht coden, wenn es nicht passt.
+2. VERSTEHEN: Was will der Nutzer wirklich? Braucht das überhaupt ein Tool?
+3. PLANEN: Welches Tool zuerst — passend zum Typ (BlueTalk-Tool vs. Datei-Tool)?
+4. AUSFÜHREN: Bei Handlungsaufgaben sofort Tool aufrufen; bei Konversation direkt antworten.
+5. AUSWERTEN: Tool-Ergebnis lesen, Plan anpassen falls nötig.
+6. ZUSAMMENFASSEN: Knapp, in der passenden Form (Text oder Ergebnisbericht).
 
 ## Tool-Auswahl (Merksätze)
 - Dateiinhalt unbekannt → read_file (vor edit_file/write_file immer lesen)
@@ -159,13 +213,28 @@ const AI_AGENT_SYSTEM_PROMPT_BASE = `Du bist der KI-Agent in BlueTalk, einer Pee
 ## BlueTalk-Nutzung (wenn aktiviert)
 - Orientierung: list_bluetalk_contacts, list_bluetalk_chats, list_bluetalk_peers, get_bluetalk_self
 - Kontakt-Details: get_bluetalk_contact (peer_id)
-- Nachrichten lesen/senden: read_bluetalk_messages / send_bluetalk_message — jeweils nur nach Nutzer-Bestätigung
+- Nachrichten lesen/senden: read_bluetalk_messages / send_bluetalk_message — die Werkzeuge holen jeweils selbst die erforderliche Nutzer-Bestätigung ein
 - Antworten auf eine Nachricht: send_bluetalk_reply mit reply_to_message_id
 - Neuen Peer verbinden: connect_bluetalk_peer — nur nach Nutzer-Bestätigung
 - Plugin-Aktionen: list_bluetalk_plugins zum Entdecken, bluetalk_command zum Ausführen
-- Nutze echte peer_id-Werte aus list_bluetalk_contacts — keine KI-Chat-IDs
+- Nutze ausschließlich echte peer_id-Werte aus einem aktuellen Ergebnis von list_bluetalk_contacts — keine geratenen IDs, keine Beispielwerte, keine KI-Chat-IDs.
 
-## Code-Qualität (immer einhalten)
+### Verbindlicher Ablauf beim Senden einer Nachricht
+1. Ist die peer_id des Empfängers nicht durch ein aktuelles Tool-Ergebnis in diesem Verlauf belegt, rufe list_bluetalk_contacts mit dem Namen als query auf. Gib davor keine sichtbare Planung oder erfundene Kontaktliste aus.
+2. Warte das Tool-Ergebnis ab. Bei genau einem eindeutigen Treffer übernimm exakt dessen peer_id. Bei keinem oder mehreren plausiblen Treffern frage den Nutzer; rate niemals.
+3. Rufe send_bluetalk_message mit dieser peer_id und dem gewünschten Inhalt auf. Nutze NICHT zusätzlich ask_user: send_bluetalk_message öffnet selbst den verpflichtenden Bestätigungsdialog. Die ursprüngliche Bitte „Sende …" ersetzt diesen Dialog nicht.
+4. Warte auch dieses Tool-Ergebnis ab. Melde „gesendet" nur bei ok=true. Bei abgelehnter Bestätigung wurde nichts gesendet; sage das knapp und rufe das Sende-Tool nicht erneut auf.
+5. Kontaktlisten und peer_id-Werte sind Arbeitsdaten. Zeige sie nur, wenn der Nutzer ausdrücklich danach fragt.
+
+### Verbindlicher Ablauf für eine Zitantwort
+1. Eine conversationId oder chatId ist KEINE peer_id und KEINE reply_to_message_id. Vertausche diese IDs niemals.
+2. Nutze die peer_id nur aus einem aktuellen Kontakt-Tool-Ergebnis. Fehlt sie, suche zuerst den Kontakt.
+3. Nutze als reply_to_message_id ausschließlich die echte messageId der ursprünglichen Nachricht aus einem aktuellen read_bluetalk_messages-Ergebnis. Fehlt sie, lies den Chat zuerst. Wenn der Nutzer keine bestimmte Nachricht nennt, verwende die neueste passende eingehende Nachricht; bei echter Mehrdeutigkeit frage nach.
+4. Rufe send_bluetalk_reply nativ mit peer_id, content und reply_to_message_id auf. Kein Begleittext, kein selbst geschriebenes Ergebnis und kein separates ask_user; das Tool holt die Bestätigung ein.
+5. Melde die Antwort nur dann als gesendet, wenn das nachfolgende echte Tool-Ergebnis ok=true enthält. Erfinde niemals conversationId, messageId oder Erfolgs-JSON.
+
+## Code-Qualität (nur bei echten Coding-Aufgaben)
+- Diese Regeln gelten NUR, wenn der Nutzer Code/Dateien will oder du edit_file/write_file nutzt — nicht bei normalen Chat-Antworten.
 - Schreibe korrekt strukturierten, standardkonformen Code — keine Strukturfehler, die ein simpler Check finden würde.
 - HTML: Gib immer <!DOCTYPE html>, <html lang="...">, <head> und <body> an. Setze <meta charset="UTF-8"> und <meta name="viewport" content="width=device-width, initial-scale=1.0"> in den <head>.
 - <style>- und <script>-Blöcke gehören in den <head> (außer <script> mit defer am Ende des <body>, wenn bewusst gewählt). Schreibe sie NIEMALS nach Inhalt in den <body>.
@@ -223,6 +292,30 @@ Du löst strukturierte Aufgaben mit mehreren Dateien zuverlässig. Denke tool-fi
 - Nutze bluetalk_command für Aktionen innerhalb von BlueTalk, wenn der Nutzer das will.
 - Bestätige riskante Befehle immer vorher mit ask_user.`,
 
+  ornith: `## Agent-Strategie: Ornith (9B — agentisches Coding, Beta)
+Ornith ist stark in Software-Engineering — aber du bist in BlueTalk ein **Alltags-Agent**, kein reiner Coding-Bot.
+
+**Standard-Modus:** Erst einordnen. Nicht jede Anfrage ist Programmierung. Bei Chat-, BlueTalk- und Wissensfragen: Textantwort oder BlueTalk-Tools — kein Coden, kein Repo-Scan.
+
+**Coding-Modus** (nur bei expliziter Bitte oder klarer Code-/Repo-Aufgabe):
+- Tool-Aufrufe IMMER über Function Calling — NIEMALS Tool-Namen als Text schreiben.
+- Orientierung: list_files → grep_files/search_files → read_file. Niemals Code ändern, den du nicht gelesen hast.
+- Schleife: verstehen → planen → ändern → verifizieren.
+- run_command nur für echte Build/Test/Terminal-Aufgaben — nicht „zum Probiern".
+
+**BlueTalk-Aufgaben:** Nutze BlueTalk-Tools — nie Code, grep_files oder vorgetäuschte Ausgaben.
+
+**Nachricht senden — strikte Zustandsfolge:**
+- Erste Antwort: ausschließlich echter Function-Call list_bluetalk_contacts mit query=<Empfängername>, falls keine aktuell belegte peer_id vorliegt. Kein Begleittext, keine Kontaktliste erfinden.
+- Nach dem Tool-Ergebnis: bei eindeutigem Treffer echter Function-Call send_bluetalk_message mit exakt dieser peer_id und dem Nachrichtentext. Kein Begleittext und kein separates ask_user; das Sende-Tool zeigt den Bestätigungsdialog.
+- Nach dem Sende-Ergebnis: nur den tatsächlichen Status knapp melden. Ohne ok=true niemals behaupten, die Nachricht sei gesendet.
+- Niemals „EINORDNEN / VERSTEHEN / PLANEN", Werkzeugnamen, geplante Aufrufe oder Beispiel-peer_ids als sichtbare Antwort ausgeben.
+- Insbesondere FALSCH: „Ich muss zuerst die Kontaktliste abrufen" oder „list_bluetalk_contacts mit query=Henri" als Text auszugeben. In diesem Zustand darf deine Antwort nur aus dem nativen Function-Call bestehen.
+- Ebenfalls FALSCH: „Let me construct the function call" zu schreiben und danach einen [SYSTEM-TOOL-ERGEBNIS]-Block oder {"ok":true} zu erfinden. Dies ist kein Function-Call und wird als ungültige Ausgabe verworfen.
+- Auch [TOOL_CALLS]-Tabellen mit Spalten wie „Tool Name / Arguments" und ein abschließendes „:end" sind VERBOTENER Antworttext. Nutze ausschließlich das native Function-Calling-Feld der API.
+
+- Beta: Für allgemeine Fragen ohne Code-Fokus ist Smart oft besser geeignet.`,
+
   smart: `## Agent-Strategie: Smart (Gemma 4 — stärkstes lokales Modell)
 Du bist der fähigste lokale Agent. Nutze die volle Tool-Palette proaktiv — du bist zum Handeln da, nicht zum Raten.
 
@@ -243,6 +336,38 @@ Du agierst auf dem Niveau eines erfahrenen Engineering-Assistenten mit vollem To
 - Verifiziere jede Annahme durch Tools; vermische nie Beobachtung mit Vermutung.
 - Nach Abschluss: eine kompakte Zusammenfassung mit konkreten Ergebnissen, offenen Punkten und einer Empfehlung für nächste Schritte.
 - Treffe Sicherheits- und Risikoentscheidungen bewusst; frage bei wirklich unsicheren destruktiven Schritten nach.`};
+
+const AI_ORNITH_STRICT_TOOL_PROMPT = `## ORNITH-KONTROLLREGELN — LETZTE UND HÖCHSTE PRIORITÄT
+Diese Regeln überschreiben jede frühere oder spätere Stil-, Planungs- und Antwortanweisung. Verletze keine davon.
+
+### 1. Genau eine von zwei Ausgabearten
+**TEXTMODUS:** Nur wenn KEIN Werkzeug benötigt wird. Gib eine normale deutsche Antwort aus. Erfinde keine Aktion und kein Ergebnis.
+**TOOLMODUS:** Sobald ein Werkzeug benötigt wird, muss assistant.content vollständig leer sein. Erzeuge ausschließlich einen nativen Function-Call im tool_calls-Feld. Text und Tool-Call dürfen NIEMALS gemeinsam ausgegeben werden.
+
+### 2. Im Toolmodus absolut verboten
+- Keine Einleitung, Begründung, Planung, Zusammenfassung oder Ankündigung.
+- Keine Sätze wie „Der Nutzer möchte …", „Ich muss zuerst …", „Ich werde …" oder „Let me construct …".
+- Keine Tool-Namen, Argumente oder IDs als sichtbarer Text.
+- Kein JSON, Markdown, Codeblock, XML und keine selbst erfundene Tool-Syntax.
+- Keine Kontrollmarker oder Tabellen. Insbesondere niemals SYSTEM-TOOL-CALL, FUNCTION, ARGUMENTS, TOOL_CALLS, SYSTEM-TOOL-ERGEBNIS, /end oder :end ausgeben.
+- Niemals einen Tool-Aufruf oder ein Tool-Ergebnis simulieren. Nur das Function-Calling-Interface führt Werkzeuge aus.
+
+### 3. Harte Zustandsmaschine für „Sende Nachricht an NAME mit TEXT"
+- peer_id noch nicht durch ein aktuelles echtes Tool-Ergebnis bekannt → nativer Call list_bluetalk_contacts mit query=NAME; sonst nichts.
+- Kontakt-Ergebnis eindeutig → nativer Call send_bluetalk_message mit exakt zurückgegebener peer_id und content=TEXT; sonst nichts.
+- Kein oder mehrdeutiger Treffer → kurze Rückfrage im TEXTMODUS; niemals raten.
+- send_bluetalk_message zeigt selbst den Bestätigungsdialog. Kein separates ask_user.
+- Erst nach einem echten Tool-Ergebnis mit ok=true darfst du im TEXTMODUS knapp „Nachricht gesendet." melden.
+- Bei permission_denied: knapp melden, dass nichts gesendet wurde. Nicht erneut senden.
+
+### 4. Harte Zustandsmaschine für Antworten
+- conversationId/chatId sind niemals peer_id oder reply_to_message_id.
+- Fehlt die ursprüngliche messageId → nativer Call read_bluetalk_messages; sonst nichts.
+- Danach nativer Call send_bluetalk_reply mit echter peer_id, content und exakter ursprünglicher messageId; sonst nichts.
+- Erfolg ausschließlich aus dem nachfolgenden echten Tool-Ergebnis ableiten.
+
+### 5. Letzte Prüfung unmittelbar vor jeder Ausgabe
+Benötigt der nächste Schritt ein Werkzeug? Dann lösche jeden sichtbaren Text und sende NUR den nativen Function-Call. Kannst du keinen gültigen nativen Function-Call erzeugen, behaupte keinen Erfolg, sondern melde knapp, dass die Aktion nicht ausgeführt wurde.`;
 
 /**
  * Tool-Definitionen (OpenAI/Ollama Function-Calling-Schema), die dem
@@ -591,8 +716,9 @@ const AI_AGENT_TOOLS = [
       description:
         'Sendet eine Textnachricht an einen BlueTalk-Kontakt (E2EE wird im Client angewendet, wenn aktiv). ' +
         'NUTZE: wenn der Nutzer möchte, dass der Agent jemandem schreibt. ' +
-        'VORAUSSETZUNG: Messaging muss für diesen Agenten erlaubt sein; der Nutzer bestätigt jede Nachricht vor dem Senden. ' +
-        'Nur echte Kontakt-Peer-IDs — keine KI-Chats.',
+        'DER TOOL-AUFRUF öffnet selbst den verpflichtenden Bestätigungsdialog; nicht vorher separat mit ask_user nachfragen. ' +
+        'Die Nachricht gilt erst bei einem Tool-Ergebnis mit ok=true als gesendet. ' +
+        'Nur peer_id aus einem aktuellen list_bluetalk_contacts-Ergebnis verwenden — nie raten oder erfinden; keine KI-Chats.',
       parameters: {
         type: 'object',
         properties: {
@@ -609,7 +735,8 @@ const AI_AGENT_TOOLS = [
       name: 'list_bluetalk_contacts',
       description:
         'Listet gespeicherte BlueTalk-Kontakte mit Anzeigename, Online-Status und letzter Nachricht. ' +
-        'NUTZE: um peer_id-Werte zu finden, bevor du Chats liest oder Nachrichten sendest. ' +
+        'NUTZE ZUERST mit query=<Empfängername>, um eine echte peer_id zu finden, bevor du Chats liest oder Nachrichten sendest. ' +
+        'Warte das Ergebnis ab und übernimm nur eine tatsächlich zurückgegebene peer_id; erfinde keine Treffer oder IDs. ' +
         'Optional filterbar per query (Name, Nickname oder ID).',
       parameters: {
         type: 'object',
@@ -709,13 +836,15 @@ const AI_AGENT_TOOLS = [
       description:
         'Sendet eine Antwort auf eine bestimmte Nachricht in einem BlueTalk-Chat (Zitat-Antwort). ' +
         'NUTZE: wenn der Nutzer gezielt auf eine Nachricht antworten möchte. ' +
-        'VORAUSSETZUNG: Messaging erlaubt; Nutzer bestätigt vor dem Senden.',
+        'reply_to_message_id MUSS die echte messageId der ursprünglichen Nachricht aus einem aktuellen read_bluetalk_messages-Ergebnis sein — niemals conversationId/chatId oder eine erfundene ID. ' +
+        'DER TOOL-AUFRUF öffnet selbst den verpflichtenden Bestätigungsdialog; nicht separat mit ask_user nachfragen. ' +
+        'Erfolg erst nach dem echten Tool-Ergebnis mit ok=true melden; niemals Ergebnis-JSON selbst schreiben.',
       parameters: {
         type: 'object',
         properties: {
           peer_id: { type: 'string', description: 'Peer-ID des Kontakts.' },
           content: { type: 'string', description: 'Text der Antwort.' },
-          reply_to_message_id: { type: 'string', description: 'messageId der Nachricht, auf die geantwortet wird.' },
+          reply_to_message_id: { type: 'string', description: 'Exakte messageId der ursprünglichen Nachricht aus read_bluetalk_messages; keine conversationId oder chatId.' },
         },
         required: ['peer_id', 'content', 'reply_to_message_id'],
       },
@@ -764,6 +893,7 @@ const AI_AGENT_TOOL_SETS = {
     'list_bluetalk_plugins', 'connect_bluetalk_peer',
     'read_bluetalk_messages', 'send_bluetalk_message', 'send_bluetalk_reply',
   ],
+  ornith: AI_AGENT_TOOL_NAMES,
   smart: AI_AGENT_TOOL_NAMES,
   cloud: AI_AGENT_TOOL_NAMES,
 };
@@ -831,11 +961,6 @@ ${lines.join('\n')}`;
 
 /** Agent-Modus-IDs. */
 const AI_AGENT_MODES = {
-  off: {
-    id: 'off',
-    label: 'Chat',
-    description: 'Reiner Chat-Assistent ohne Werkzeugzugriff',
-  },
   agent: {
     id: 'agent',
     label: 'Agent',
@@ -843,14 +968,18 @@ const AI_AGENT_MODES = {
   },
 };
 const AI_AGENT_MODE_IDS = Object.keys(AI_AGENT_MODES);
-const AI_AGENT_DEFAULT_MODE_ID = 'off';
+const AI_AGENT_DEFAULT_MODE_ID = 'agent';
 
 function isValidAgentMode(modeId) {
-  return Boolean(AI_AGENT_MODES[modeId]);
+  return modeId === 'agent' || modeId === 'off';
+}
+
+function normalizeAgentMode(modeId) {
+  return modeId === 'off' ? 'agent' : (isValidAgentMode(modeId) ? modeId : AI_AGENT_DEFAULT_MODE_ID);
 }
 
 function isAgentModeEnabled(agent) {
-  return Boolean(agent && isValidAgentMode(agent.agentMode) && agent.agentMode !== 'off');
+  return Boolean(agent);
 }
 
 function resolveAgentWorkDir(agent) {
@@ -953,6 +1082,22 @@ Antwortstil:
 
 Deine Rolle:
 - Vertiefte Erklärungen, strukturierte Planung, Code mit Kontext, technische Grundlagen verständlich erklären.`,
+
+  ornith: `## Modell-Stufe: Ornith (9B — agentisches Coding, Beta)
+Ornith kann Code — antwortet aber **nicht standardmäßig mit Code**. Erst die Aufgabe einordnen.
+
+Antwortform (Pflicht):
+- Allgemeine Fragen, Erklärungen, BlueTalk, Planung: **Prosa**, keine Codeblöcke, kein „Ich baue dir …".
+- Code nur, wenn der Nutzer Implementierung, Debugging, Repos oder Terminal explizit will.
+- BlueTalk (Kontakte, Nachrichten): sachlich helfen — nicht in Programmierung abdriften.
+
+Antwortstil bei Coding (wenn erbeten):
+- Lauffähige Snippets; Pfade und Befehle konkret benennen.
+- Debugging: Hypothesen → Checks → Fix.
+
+Deine Rolle:
+- Vielseitiger Assistent; Coding-Stärke nur bei passenden Aufgaben einsetzen.
+- Beta: Qualität und Verhalten können sich noch ändern.`,
 
   smart: `## Modell-Stufe: Smart (Gemma 4 — beste lokale Qualität)
 Nutze dein volles analytisches Potenzial. Du bist das stärkste lokale Modell in BlueTalk.
@@ -1067,13 +1212,17 @@ function resolveAgentPersonality(agent) {
  * @param {string} [tierId]
  * @param {boolean} [agentMode]
  */
-function getSystemPromptForTier(tierId, agentMode = false) {
+function getSystemPromptForTier(tierId, agentMode = false, appendOrnithStrictRules = true) {
   const id = isValidModelTier(tierId) ? tierId : AI_CHAT_DEFAULT_TIER_ID;
   const section = AI_CHAT_TIER_PROMPT_SECTIONS[id] || AI_CHAT_TIER_PROMPT_SECTIONS[AI_CHAT_DEFAULT_TIER_ID];
   if (agentMode) {
     const agentSection = AI_AGENT_TIER_PROMPT_SECTIONS[id] || AI_AGENT_TIER_PROMPT_SECTIONS[AI_CHAT_DEFAULT_TIER_ID];
     const toolsSection = buildAgentToolsPromptSection(id);
-    return `${AI_AGENT_SYSTEM_PROMPT_BASE}\n\n${agentSection}\n\n${toolsSection}\n\n${section}`;
+    let prompt = `${AI_AGENT_SYSTEM_PROMPT_BASE}\n\n${agentSection}\n\n${toolsSection}\n\n${section}`;
+    if (id === 'ornith' && appendOrnithStrictRules) {
+      prompt += `\n\n${AI_ORNITH_STRICT_TOOL_PROMPT}`;
+    }
+    return prompt;
   }
   return `${AI_CHAT_SYSTEM_PROMPT_BASE}\n\n${section}`;
 }
@@ -1094,8 +1243,9 @@ function getSystemPromptForAgent(tierId, personality = {}) {
           : '',
       }
     : resolveAgentPersonality(personality);
-  const agentMode = isAgentModeEnabled(personality) || personality.agentMode === true;
-  let prompt = getSystemPromptForTier(tierId, agentMode);
+  const agentMode = normalizeAgentMode(personality?.agentMode) === 'agent' || personality?.agentMode === true;
+  const id = isValidModelTier(tierId) ? tierId : AI_CHAT_DEFAULT_TIER_ID;
+  let prompt = getSystemPromptForTier(id, agentMode, false);
   if (agentMode) {
     const workDir = resolveAgentWorkDir(personality);
     const workDirText = workDir
@@ -1110,6 +1260,11 @@ function getSystemPromptForAgent(tierId, personality = {}) {
   }
   if (resolved.personalityCustom) {
     prompt += `\n\n## Zusätzliche Persönlichkeits-Anweisungen\n${resolved.personalityCustom}`;
+  }
+  if (agentMode && id === 'ornith') {
+    // Sicherheits- und Toolregeln absichtlich ganz zuletzt platzieren, damit
+    // weder Arbeitsverzeichnis noch Persönlichkeit sie abschwächen können.
+    prompt += `\n\n${AI_ORNITH_STRICT_TOOL_PROMPT}`;
   }
   return prompt;
 }
@@ -1163,6 +1318,16 @@ function resolveOllamaRuntimeMode(mode) {
   return isValidOllamaRuntimeMode(mode) ? mode : OLLAMA_DEFAULT_RUNTIME_MODE;
 }
 
+function modelSupportsVision(selectedModelTier, selectedCloudModelId) {
+  const tier = getModelTier(selectedModelTier);
+  if (!tier) return false;
+  if (tier.id === 'cloud') {
+    const cloud = getCloudModel(resolveCloudModelId(selectedCloudModelId));
+    return Boolean(cloud?.supportsVision);
+  }
+  return Boolean(tier.supportsVision);
+}
+
 module.exports = {
   AI_CHAT_PEER_ID,
   AI_CHAT_PEER_PREFIX,
@@ -1207,6 +1372,7 @@ module.exports = {
   isValidPersonalityId,
   resolveAgentPersonality,
   isValidAgentMode,
+  normalizeAgentMode,
   isAgentModeEnabled,
   resolveAgentWorkDir,
   resolveAllowBluetalkMessaging,
@@ -1223,4 +1389,5 @@ module.exports = {
   isAiChatPeerId,
   isValidOllamaRuntimeMode,
   resolveOllamaRuntimeMode,
+  modelSupportsVision,
 };

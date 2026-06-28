@@ -40,9 +40,23 @@ function upsertStreamAnswer(segments, text) {
   segments.push({ type: 'answer', text: trimmed });
 }
 
+/** Entfernt das letzte Antwort-Segment der laufenden Runde (z. B. vor Tool-Ausführung). */
+function clearLastStreamAnswer(segments) {
+  if (!Array.isArray(segments)) return;
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i];
+    if (seg.type === 'answer') {
+      segments.splice(i, 1);
+      return;
+    }
+    if (seg.type === 'tool') return;
+  }
+}
+
 module.exports = {
   upsertStreamThinking,
   upsertStreamAnswer,
+  clearLastStreamAnswer,
   consolidateSegments,
   groupConsecutiveToolSegments,
 };

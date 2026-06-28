@@ -13,6 +13,7 @@ import {
   AI_CLOUD_DEFAULT_MODEL_ID,
   AI_CLOUD_MODELS,
   AI_MODEL_TIERS,
+  isModelTierVisible,
   OLLAMA_DEFAULT_RUNTIME_MODE,
   OLLAMA_RUNTIME_DISCLAIMER_BYTES,
   OLLAMA_RUNTIME_MODE_BLUETALK,
@@ -24,6 +25,7 @@ const TIER_ICONS = {
   fast: Zap,
   normal: Gauge,
   'normal+': Gauge,
+  ornith: Bot,
   smart: Sparkles,
   cloud: Cloud,
 };
@@ -62,7 +64,7 @@ function modelProgressLabel(status) {
   return 'Modell wird geladen...';
 }
 
-export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }) {
+export default function AiChatSetup({ ollamaState, onRefresh, embedded = false, debugMode = false }) {
   const [step, setStep] = useState(1);
   const [selectedTier, setSelectedTier] = useState('');
   const [selectedCloudModel, setSelectedCloudModel] = useState(AI_CLOUD_DEFAULT_MODEL_ID);
@@ -78,7 +80,10 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
   useEffect(() => {
     if (!ollamaState) return;
     if (ollamaState.selectedModelTier) {
-      setSelectedTier(ollamaState.selectedModelTier);
+      const tier = AI_MODEL_TIERS[ollamaState.selectedModelTier];
+      if (isModelTierVisible(tier, debugMode)) {
+        setSelectedTier(ollamaState.selectedModelTier);
+      }
     }
     if (ollamaState.selectedCloudModelId) {
       setSelectedCloudModel(ollamaState.selectedCloudModelId);
@@ -89,7 +94,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
     if (setupComplete) {
       setStep(3);
     }
-  }, [ollamaState, setupComplete, step]);
+  }, [ollamaState, setupComplete, step, debugMode]);
 
   const runAction = useCallback(async (name, fn) => {
     if (action) return null;
@@ -276,7 +281,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
           </p>
 
           <div className="ai-model-tier-grid">
-            {Object.values(AI_MODEL_TIERS).map((tier) => {
+            {Object.values(AI_MODEL_TIERS).filter((tier) => isModelTierVisible(tier, debugMode)).map((tier) => {
               const Icon = TIER_ICONS[tier.id] || Sparkles;
               const status = ollamaState?.modelStatus?.[tier.id] || 'missing';
               const isSelected = selectedTier === tier.id;
@@ -294,6 +299,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false }
                   <div className="ai-model-tier-head">
                     <Icon size={20} strokeWidth={1.75} aria-hidden />
                     <span className="ai-model-tier-label">{tier.label}</span>
+                    {tier.beta && <span className="badge badge-muted">Beta</span>}
                     {status === 'ready' && <span className="badge badge-success">Bereit</span>}
                     {tierBusy && <span className="badge badge-blue">Lädt…</span>}
                     {isCloud && cloudLocked && <span className="badge badge-muted">Anmeldung</span>}

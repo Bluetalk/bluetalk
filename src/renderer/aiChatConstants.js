@@ -22,6 +22,7 @@ export const AI_MODEL_TIERS = {
     model: 'qwen3:0.6b',
     estimatedSizeBytes: 523 * 1024 * 1024,
     local: true,
+    supportsVision: false,
   },
   normal: {
     id: 'normal',
@@ -30,6 +31,7 @@ export const AI_MODEL_TIERS = {
     model: 'qwen3:1.7b',
     estimatedSizeBytes: Math.round(1.4 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: false,
   },
   'normal+': {
     id: 'normal+',
@@ -38,6 +40,18 @@ export const AI_MODEL_TIERS = {
     model: 'qwen3:4b',
     estimatedSizeBytes: Math.round(2.5 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: false,
+  },
+  ornith: {
+    id: 'ornith',
+    label: 'Ornith',
+    description: 'Agentisches Programmieren zwischen Normal+ und Smart',
+    model: 'ornith:9b',
+    estimatedSizeBytes: Math.round(5.6 * 1024 * 1024 * 1024),
+    local: true,
+    supportsVision: false,
+    beta: true,
+    debugOnly: true,
   },
   smart: {
     id: 'smart',
@@ -46,6 +60,7 @@ export const AI_MODEL_TIERS = {
     model: 'gemma4:latest',
     estimatedSizeBytes: Math.round(9.6 * 1024 * 1024 * 1024),
     local: true,
+    supportsVision: true,
   },
   cloud: {
     id: 'cloud',
@@ -55,6 +70,7 @@ export const AI_MODEL_TIERS = {
     estimatedSizeBytes: 0,
     local: false,
     requiresAuth: true,
+    supportsVision: false,
   },
 };
 
@@ -64,24 +80,28 @@ export const AI_CLOUD_MODELS = {
     label: 'GPT-OSS 120B',
     description: 'Höchste Qualität für komplexe Fragen',
     model: 'gpt-oss:120b-cloud',
+    supportsVision: false,
   },
   'gpt-oss-20b': {
     id: 'gpt-oss-20b',
     label: 'GPT-OSS 20B',
     description: 'Schnellere Cloud-Antworten',
     model: 'gpt-oss:20b-cloud',
+    supportsVision: false,
   },
   'deepseek-v3.1': {
     id: 'deepseek-v3.1',
     label: 'DeepSeek V3.1',
     description: 'Starkes Reasoning und Analyse',
     model: 'deepseek-v3.1:671b-cloud',
+    supportsVision: false,
   },
   'qwen3-coder': {
     id: 'qwen3-coder',
     label: 'Qwen3 Coder',
     description: 'Für Code und Entwicklung',
     model: 'qwen3-coder:480b-cloud',
+    supportsVision: false,
   },
 };
 
@@ -160,11 +180,6 @@ export function resolveAgentPersonality(agent) {
 }
 
 export const AI_AGENT_MODES = {
-  off: {
-    id: 'off',
-    label: 'Chat',
-    description: 'Reiner Chat-Assistent ohne Werkzeugzugriff',
-  },
   agent: {
     id: 'agent',
     label: 'Agent',
@@ -172,7 +187,7 @@ export const AI_AGENT_MODES = {
   },
 };
 export const AI_AGENT_MODE_IDS = Object.keys(AI_AGENT_MODES);
-export const AI_AGENT_DEFAULT_MODE_ID = 'off';
+export const AI_AGENT_DEFAULT_MODE_ID = 'agent';
 
 export const AI_THINKING_MODES = {
   auto: { id: 'auto', label: 'Auto', description: 'Thinking je nach Modellstufe automatisch' },
@@ -192,11 +207,15 @@ export function resolveAgentThinkingMode(agent) {
 }
 
 export function isValidAgentMode(modeId) {
-  return Boolean(AI_AGENT_MODES[modeId]);
+  return modeId === 'agent' || modeId === 'off';
+}
+
+export function normalizeAgentMode(modeId) {
+  return modeId === 'off' ? 'agent' : (isValidAgentMode(modeId) ? modeId : AI_AGENT_DEFAULT_MODE_ID);
 }
 
 export function isAgentModeEnabled(agent) {
-  return Boolean(agent && isValidAgentMode(agent.agentMode) && agent.agentMode !== 'off');
+  return Boolean(agent);
 }
 
 export function resolveAgentWorkDir(agent) {
@@ -210,4 +229,21 @@ export function resolveAllowBluetalkMessaging(agent) {
 
 export function isAiChatPeerId(peerId) {
   return peerId === AI_CHAT_PEER_ID || String(peerId || '').startsWith(AI_CHAT_PEER_PREFIX);
+}
+
+export function isModelTierVisible(tier, debugMode = false) {
+  if (!tier) return false;
+  return !tier.debugOnly || Boolean(debugMode);
+}
+
+export function modelSupportsVision(selectedModelTier, selectedCloudModelId) {
+  const tier = AI_MODEL_TIERS[selectedModelTier];
+  if (!tier) return false;
+  if (tier.id === 'cloud') {
+    const cloudId = AI_CLOUD_MODELS[selectedCloudModelId]
+      ? selectedCloudModelId
+      : AI_CLOUD_DEFAULT_MODEL_ID;
+    return Boolean(AI_CLOUD_MODELS[cloudId]?.supportsVision);
+  }
+  return Boolean(tier.supportsVision);
 }

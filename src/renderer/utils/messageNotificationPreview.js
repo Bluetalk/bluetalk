@@ -6,6 +6,7 @@ export function buildMessageNotificationPreview(message) {
   if (message.kind === 'sticker') return 'Sticker';
   if (message.kind === 'poker-invite') return `Poker: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'uno-invite') return `UNO: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'contact-share') {
     return `Kontakt: ${message.sharedContact?.displayName || message.sharedContact?.name || 'geteilt'}`;
   }

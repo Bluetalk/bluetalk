@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('bluetalk', {
     resetAllConnections: () => ipcRenderer.invoke('peer:resetAllConnections'),
     disconnect: (peerId) => ipcRenderer.invoke('peer:disconnect', peerId),
     send: (peerId, data) => ipcRenderer.invoke('peer:send', peerId, data),
+    sendMany: (peerIds, data) => ipcRenderer.invoke('peer:sendMany', peerIds, data),
     broadcast: (data) => ipcRenderer.invoke('peer:broadcast', data),
     getPeers: () => ipcRenderer.invoke('peer:getPeers'),
     refreshDiscovery: () => ipcRenderer.invoke('peer:refreshDiscovery'),
@@ -204,6 +205,93 @@ contextBridge.exposeInMainWorld('bluetalk', {
       const listener = (_, data) => callback(data);
       ipcRenderer.on('uno:fromChild', listener);
       return () => ipcRenderer.removeListener('uno:fromChild', listener);
+    },
+  },
+
+  /** Vier-gewinnt-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  connectFour: {
+    openGameWindow: () => ipcRenderer.invoke('connect-four:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('connect-four:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('connect-four:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('connect-four:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('connect-four:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('connect-four:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('connect-four:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('connect-four:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('connect-four:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('connect-four:state', listener);
+      return () => ipcRenderer.removeListener('connect-four:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('connect-four:fromChild', listener);
+      return () => ipcRenderer.removeListener('connect-four:fromChild', listener);
+    },
+  },
+
+  /** Schach-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  chess: {
+    openGameWindow: () => ipcRenderer.invoke('chess:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('chess:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('chess:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('chess:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('chess:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('chess:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('chess:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('chess:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('chess:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('chess:state', listener);
+      return () => ipcRenderer.removeListener('chess:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('chess:fromChild', listener);
+      return () => ipcRenderer.removeListener('chess:fromChild', listener);
+    },
+  },
+
+  /** Tic-Tac-Toe-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  ticTacToe: {
+    openGameWindow: () => ipcRenderer.invoke('ticTacToe:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('ticTacToe:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('ticTacToe:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('ticTacToe:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('ticTacToe:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('ticTacToe:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('ticTacToe:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('ticTacToe:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('ticTacToe:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('ticTacToe:state', listener);
+      return () => ipcRenderer.removeListener('ticTacToe:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('ticTacToe:fromChild', listener);
+      return () => ipcRenderer.removeListener('ticTacToe:fromChild', listener);
     },
   },
 

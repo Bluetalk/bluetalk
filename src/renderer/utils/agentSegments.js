@@ -44,3 +44,27 @@ export function toolEventsFromSegment(seg) {
   if (seg.event) return [seg.event];
   return [];
 }
+
+export function toolEventsFromSegments(segments) {
+  if (!Array.isArray(segments)) return [];
+  const out = [];
+  for (const seg of segments) {
+    out.push(...toolEventsFromSegment(seg));
+  }
+  return out;
+}
+
+/** run_command nur während pending; abgeschlossene Shell-Aufrufe ausblenden. */
+export function filterToolEventsForDisplay(events, { hideSubagentSpawn = false } = {}) {
+  if (!Array.isArray(events)) return [];
+  return events.filter((evt) => {
+    const name = String(evt?.name || '');
+    if (hideSubagentSpawn && name === 'spawn_subagent') return false;
+    if (name === 'run_command') return evt?.pending === true;
+    return true;
+  });
+}
+
+export function isRunCommandRunning(evt) {
+  return String(evt?.name || '') === 'run_command' && evt?.pending === true;
+}

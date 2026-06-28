@@ -1,0 +1,20 @@
+{
+  "id": "connect-four",
+  "name": "Vier gewinnt",
+  "version": "1.0.0",
+  "description": "Vier gewinnt für 2 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster.",
+  "author": "BlueTalk",
+  "main": "main.js",
+  "ui": "ui.js",
+  "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "tabs:register"],
+  "autoEnable": true,
+  "game": {
+    "mark": "🔴",
+    "title": "Vier gewinnt",
+    "description": "2 Spieler, Einladungen per Chat, separates Spielfenster.",
+    "labels": {
+      "launchNew": "Neues Spiel",
+      "openWindow": "Vier-gewinnt-Fenster öffnen"
+    }
+  }
+}

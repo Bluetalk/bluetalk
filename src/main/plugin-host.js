@@ -28,12 +28,16 @@ const RESERVED_IDS = new Set(['__proto__', 'prototype', 'constructor']);
  *   permissions   string[] (informational; all APIs are currently available)
  *   autoEnable    boolean (default true on first install)
  *   debugOnly     boolean (only visible/active when settings.debugMode is true)
+ *   game          boolean | object (game plugin — appears in built-in Spiele tab, no sidebar tab)
+ *                 object fields: mark, title, description, alphaNotice, labels { launchNew, launchResume, openWindow }
  *
  * Plugin main-process API (exposed via `host.api`):
  *   store.get(key, default) / set(key, value) / delete(key)   // namespaced per plugin
- *   peer.send(peerId, data)   peer.broadcast(data)
+ *   peer.send(peerId, data)   peer.broadcast(data)   peer.sendMany(peerIds, data)
  *   peer.list()               peer.connect(addr)   peer.disconnect(id)
  *   peer.info()
+ *   realtime.createRoom(opts) / joinRoom(opts) / listRooms() / getRoom(id) / on(event, fn)
+ *   realtime rooms: broadcast, sendTo, invite, createDocument, leave — see docs
  *   contacts.list() / update(patch) / remove(id) / block(id) / unblock(id)
  *   messages.list(peerId)     messages.append(peerId, msg)
  *   messages.patch(peerId, messageId, patch)
@@ -169,7 +173,13 @@ class PluginHost extends EventEmitter {
     return manifest?.debugOnly === true;
   }
 
+  _isGameManifest(manifest) {
+    const game = manifest?.game;
+    return game === true || (typeof game === 'object' && game !== null);
+  }
+
   _isPluginVisible(record) {
+    if (this._isGameManifest(record.manifest)) return true;
     if (!this._isDebugOnly(record.manifest)) return true;
     return this._isDebugMode();
   }
@@ -179,7 +189,7 @@ class PluginHost extends EventEmitter {
       Object.prototype.hasOwnProperty.call(enabledMap, id)
         ? Boolean(enabledMap[id])
         : manifest.autoEnable === true;
-    if (this._isDebugOnly(manifest) && !this._isDebugMode()) {
+    if (this._isDebugOnly(manifest) && !this._isDebugMode() && !this._isGameManifest(manifest)) {
       return false;
     }
     return userWantsEnabled;
@@ -284,7 +294,8 @@ class PluginHost extends EventEmitter {
 
     try {
       const code = await readFileSafe(mainFile);
-      const api = this._buildApi(record);
+      const { createRealtimeManager } = await import('../shared/plugin-realtime.mjs');
+      const api = this._buildApi(record, { createRealtimeManager });
       record.api = api;
       const sandbox = {
         module: { exports: {} },
@@ -365,6 +376,14 @@ class PluginHost extends EventEmitter {
       else clearTimeout(t.handle);
     }
     record.timers.clear();
+    if (record.realtimeManager) {
+      try {
+        record.realtimeManager.dispose();
+      } catch {
+        /* ignore */
+      }
+      record.realtimeManager = null;
+    }
     record.eventListeners.clear();
     record.commands.clear();
     record.module = null;
@@ -382,7 +401,7 @@ class PluginHost extends EventEmitter {
     await this._deactivate(record);
   }
 
-  _buildApi(record) {
+  _buildApi(record, { createRealtimeManager } = {}) {
     const { manifest } = record;
     const pluginStoreKey = (sub) => `plugins.data.${manifest.id}${sub ? `.${sub}` : ''}`;
     const peerServer = this.peerServer;
@@ -413,6 +432,7 @@ class PluginHost extends EventEmitter {
         info: () => peerServer.getInfo?.() || null,
         list: () => peerServer.getPeers?.() || [],
         send: (peerId, data) => peerServer.sendTo(peerId, data),
+        sendMany: (peerIds, data) => peerServer.sendMany(peerIds, data),
         broadcast: (data) => peerServer.broadcast(data),
         connect: (address) => peerServer.connectTo(address),
         disconnect: (peerId) => peerServer.disconnectPeer(peerId),
@@ -480,6 +500,9 @@ class PluginHost extends EventEmitter {
       notify: {
         show: (payload = {}) => {
           if (this.store?.get('settings.windowsNotifications', true) === false) {
+            return false;
+          }
+          if (this.store?.get('settings.doNotDisturb', false) === true && payload.allowInForeground !== true) {
             return false;
           }
           if (!payload.allowInForeground && this.isAppInForegroundRef?.()) {
@@ -564,6 +587,26 @@ class PluginHost extends EventEmitter {
         }
       },
     };
+
+    if (typeof createRealtimeManager === 'function') {
+      const realtimeManager = createRealtimeManager({
+        pluginId: manifest.id,
+        peer: api.peer,
+        selfPeerId: () => peerServer.getInfo?.()?.peerId,
+        log: api.log,
+        onPeerMessage: (handler) => api.events.on('peer:message', handler),
+      });
+      record.realtimeManager = realtimeManager;
+      record.disposers.add(() => realtimeManager.dispose());
+
+      api.realtime = {
+        createRoom: (opts) => realtimeManager.createRoom(opts),
+        joinRoom: (opts) => realtimeManager.joinRoom(opts),
+        listRooms: () => realtimeManager.listRooms(),
+        getRoom: (roomId) => realtimeManager.getRoom(roomId),
+        on: (event, handler) => realtimeManager.on(event, handler),
+      };
+    }
 
     return api;
   }

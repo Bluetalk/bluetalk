@@ -9,6 +9,7 @@ import {
   AI_CLOUD_MODELS,
   AI_MODEL_TIERS,
   AI_THINKING_DEFAULT_MODE_ID,
+  isModelTierVisible,
   OLLAMA_DEFAULT_RUNTIME_MODE,
   OLLAMA_RUNTIME_MODE_BLUETALK,
   OLLAMA_RUNTIME_MODE_SYSTEM,
@@ -16,6 +17,7 @@ import {
 } from '../../aiChatConstants';
 import { formatBytes, SETTINGS_ICON_STROKE } from './settingsUtils';
 import { useToast } from '../../components/ToastProvider';
+import { useApp } from '../../App';
 
 function modelStatusLabel(status) {
   if (status === 'ready') return 'Bereit';
@@ -27,6 +29,8 @@ function modelStatusLabel(status) {
 export default function AiSettingsPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { settings } = useApp();
+  const debugMode = settings.debugMode ?? false;
   const [state, setState] = useState(null);
   const [paths, setPaths] = useState(null);
   const [busy, setBusy] = useState('');
@@ -105,7 +109,7 @@ export default function AiSettingsPage() {
           name: cleanName,
           personality,
           personalityCustom: personalityCustom || '',
-          agentMode: agentMode || 'off',
+          agentMode: agentMode || 'agent',
           agentWorkDir: agentWorkDir || '',
           thinkingMode: isValidThinkingMode(thinkingMode) ? thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
           allowBluetalkMessaging: Boolean(allowBluetalkMessaging),
@@ -188,7 +192,7 @@ export default function AiSettingsPage() {
       <div className="page-body">
         {!setupComplete && (
           <section className="settings-section">
-            <AiChatSetup ollamaState={state} onRefresh={refresh} embedded />
+            <AiChatSetup ollamaState={state} onRefresh={refresh} embedded debugMode={debugMode} />
           </section>
         )}
 
@@ -286,7 +290,7 @@ export default function AiSettingsPage() {
             <h2 className="settings-section-title">Modelle</h2>
           </div>
           <div className="ai-settings-model-list">
-            {Object.values(AI_MODEL_TIERS).filter((tier) => tier.local).map((tier) => {
+            {Object.values(AI_MODEL_TIERS).filter((tier) => tier.local && isModelTierVisible(tier, debugMode)).map((tier) => {
               const status = state?.modelStatus?.[tier.id] || 'missing';
               const isReady = status === 'ready';
               const isActive = state?.selectedModelTier === tier.id;
@@ -294,7 +298,10 @@ export default function AiSettingsPage() {
               return (
                 <div className="card ai-settings-model-row" key={tier.id}>
                   <div className="min-w-0">
-                    <div className="font-medium">{tier.label}</div>
+                    <div className="font-medium">
+                      {tier.label}
+                      {tier.beta ? <span className="badge badge-muted" style={{ marginLeft: 8 }}>Beta</span> : null}
+                    </div>
                     <div className="text-sm text-muted">{tier.model} · ca. {formatBytes(tier.estimatedSizeBytes)}</div>
                     <div className={`badge ${isActive ? 'badge-success' : isReady ? 'badge-success' : status === 'error' ? 'badge-danger' : isDownloading ? 'badge-blue' : 'badge-muted'}`}>
                       {isActive ? 'Aktiv im Chat' : modelStatusLabel(isDownloading ? 'downloading' : status)}

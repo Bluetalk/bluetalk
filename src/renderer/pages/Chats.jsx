@@ -7,7 +7,12 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { normalizeChatMarkdown } from '../utils/normalizeChatMarkdown.js';
-import { groupConsecutiveToolSegments, toolEventsFromSegment } from '../utils/agentSegments.js';
+import {
+  filterToolEventsForDisplay,
+  groupConsecutiveToolSegments,
+  isRunCommandRunning,
+  toolEventsFromSegment,
+} from '../utils/agentSegments.js';
 import {
   Archive,
   Ban,
@@ -39,24 +44,39 @@ import {
   Bell,
   BellOff,
   UserRound,
+  Users,
   X,
   MoreVertical,
   Reply,
   Forward,
   CheckSquare,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   Square,
 } from 'lucide-react';
 import { useApp } from '../App';
+import {
+  canJoinGameViaPresence,
+  formatGamePresenceLabel,
+  gameInviteKey,
+  isInviteSessionActive,
+  isPresenceStale,
+} from '../../shared/game-presence.js';
+import {
+  formatUserPresenceLabel,
+  isPeerDoNotDisturb,
+} from '../../shared/user-presence.js';
 import { useToast } from '../components/ToastProvider';
 import StickerPicker from '../components/StickerPicker';
 import StickerMessage from '../components/StickerMessage';
 import VerticalResizeHandle from '../components/VerticalResizeHandle';
+import { CreateGroupModal, GroupInfoModal } from '../components/GroupChatDialogs';
 import { isContactNotificationMuted } from '../contactNotificationMute';
 import { pluginRuntime } from '../plugins/pluginRuntime';
+import { normalizeAttachmentFileType } from '../utils/attachmentImage';
 import {
   AI_AGENT_DEFAULT_MODE_ID,
   AI_CHAT_PEER_ID,
@@ -66,10 +86,15 @@ import {
   AI_PERSONALITY_PRESETS,
   AI_THINKING_DEFAULT_MODE_ID,
   isAiChatPeerId,
-  isValidAgentMode,
+  isModelTierVisible,
   isValidThinkingMode,
+  modelSupportsVision,
+  normalizeAgentMode,
   resolveAgentPersonality,
 } from '../aiChatConstants';
+import groupChat from '../../shared/group-chat.js';
+
+const { getGroupMember, isActiveGroupMember, isGroupChatId } = groupChat;
 
 const CHAT_ICON_STROKE = 1.75;
 const MAX_AVATAR_BYTES = 380 * 1024;
@@ -91,6 +116,43 @@ function readImageDataUrl(file) {
   });
 }
 
+function collectSubagentsByPeer(messages, aiChatProgress) {
+  const result = {};
+
+  const upsert = (peerId, seg) => {
+    if (!peerId || seg?.type !== 'subagent') return;
+    const id = typeof seg.id === 'string' ? seg.id : '';
+    if (!id) return;
+    if (!result[peerId]) result[peerId] = [];
+    const idx = result[peerId].findIndex((entry) => entry.id === id);
+    if (idx >= 0) result[peerId][idx] = { ...result[peerId][idx], ...seg };
+    else result[peerId].push({ ...seg });
+  };
+
+  if (messages && typeof messages === 'object') {
+    for (const [peerId, peerMessages] of Object.entries(messages)) {
+      if (!Array.isArray(peerMessages)) continue;
+      for (const msg of peerMessages) {
+        if (!Array.isArray(msg?.segments)) continue;
+        for (const seg of msg.segments) upsert(peerId, seg);
+      }
+    }
+  }
+
+  if (aiChatProgress?.peerId && Array.isArray(aiChatProgress.segments)) {
+    for (const seg of aiChatProgress.segments) upsert(aiChatProgress.peerId, seg);
+  }
+
+  return result;
+}
+
+function subagentStatusLabel(status) {
+  if (status === 'running') return 'läuft';
+  if (status === 'error') return 'Fehler';
+  if (status === 'done') return 'fertig';
+  return 'Sub-Agent';
+}
+
 function normalizeAiAgent(agent) {
   const personality = resolveAgentPersonality(agent);
   return {
@@ -100,7 +162,7 @@ function normalizeAiAgent(agent) {
     bio: typeof agent.bio === 'string' ? agent.bio.slice(0, 500) : '',
     personality: personality.personalityId,
     personalityCustom: personality.personalityCustom,
-    agentMode: isValidAgentMode(agent.agentMode) ? agent.agentMode : AI_AGENT_DEFAULT_MODE_ID,
+    agentMode: normalizeAgentMode(agent.agentMode),
     agentWorkDir: typeof agent.agentWorkDir === 'string' ? agent.agentWorkDir.trim() : '',
     thinkingMode: isValidThinkingMode(agent.thinkingMode) ? agent.thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
     allowBluetalkMessaging: Boolean(agent.allowBluetalkMessaging),
@@ -163,8 +225,16 @@ function formatGenTime(ms) {
 
 function selfDeliveryLabel(m) {
   if (m.from !== 'self' || !m.messageId) return { text: '', pending: false };
-  if (m.deliveryStatus === 'scheduled') return { text: 'Scheduled', pending: false };
-  if (m.deliveryStatus === 'delivered') return { text: 'Delivered', pending: false };
+  const summary = m.groupDeliverySummary;
+  if (m.deliveryStatus === 'partial') {
+    return { text: `Teilweise zugestellt · ${summary?.delivered || 0}/${summary?.total || 0}`, pending: false };
+  }
+  if (m.deliveryStatus === 'scheduled') {
+    return { text: summary?.total ? `Vorgemerkt · ${summary.offline || 0} offline` : 'Vorgemerkt', pending: false };
+  }
+  if (m.deliveryStatus === 'delivered') {
+    return { text: summary?.total ? `Zugestellt · ${summary.delivered}/${summary.total}` : 'Delivered', pending: false };
+  }
   if (m.deliveryStatus === 'blocked') return { text: 'Blockiert', pending: false };
   if (m.deliveryStatus === 'pending') return { text: 'Sending', pending: true };
   return { text: '', pending: false };
@@ -262,6 +332,9 @@ function getMessagePreviewText(message, debugMode = false) {
     }
     return `UNO: ${message.tableName || 'Einladung'}`;
   }
+  if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
   const content = String(message.content || '').trim();
   if (!content) return 'Nachricht';
   return content.length > 120 ? `${content.slice(0, 117)}…` : content;
@@ -287,6 +360,15 @@ function getMessageCopyText(message, debugMode = false) {
       return String(message.content || message.unoSettingsSummary || '').trim();
     }
     return String(message.unoSettingsSummary || message.content || `UNO: ${message.tableName || 'Einladung'}`).trim();
+  }
+  if (message.kind === 'connect-four-invite') {
+    return String(message.connectFourSettingsSummary || message.content || `Vier gewinnt: ${message.tableName || 'Einladung'}`).trim();
+  }
+  if (message.kind === 'chess-invite') {
+    return String(message.chessSettingsSummary || message.content || `Schach: ${message.tableName || 'Einladung'}`).trim();
+  }
+  if (message.kind === 'tic-tac-toe-invite') {
+    return String(message.ticTacToeSettingsSummary || message.content || `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`).trim();
   }
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments?.length) {
@@ -344,6 +426,15 @@ function getLastPreview(message, debugMode = false) {
       return (message.from === 'self' ? 'Du: ' : '') + (content || 'Nachricht');
     }
     return `${message.from === 'self' ? 'Du: ' : ''}UNO: ${message.tableName || 'Einladung'}`;
+  }
+  if (message.kind === 'connect-four-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}Vier gewinnt: ${message.tableName || 'Einladung'}`;
+  }
+  if (message.kind === 'chess-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}Schach: ${message.tableName || 'Einladung'}`;
+  }
+  if (message.kind === 'tic-tac-toe-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
   }
   return (message.from === 'self' ? 'You: ' : '') + (message.content || 'Message');
 }
@@ -556,7 +647,7 @@ function isBareMediaMessage(message) {
 function isChatEmbedMessage(message, debugMode = false) {
   if (!message) return false;
   if (message.kind === 'uno-invite') return debugMode;
-  return message.kind === 'poker-invite' || message.kind === 'contact-share';
+  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'contact-share';
 }
 
 function FileTypeIcon({ mime, fileName, size = 22 }) {
@@ -743,6 +834,13 @@ function MarkdownBody({ text, className = '' }) {
   );
 }
 
+function stripOrphanThinkingTags(text) {
+  return String(text || '')
+    .replace(/<\/?(?:redacted_thinking|think|redacted_reasoning)>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function splitThinkingText(rawText) {
   const raw = String(rawText || '');
   if (!raw) return { thinking: '', content: '' };
@@ -750,17 +848,17 @@ function splitThinkingText(rawText) {
   let content = '';
   let thinking = '';
   let cursor = 0;
-  const openRe = /<think>/ig;
+  const openRe = /<(?:redacted_thinking|think|redacted_reasoning)>/ig;
   let match = openRe.exec(raw);
 
   while (match) {
     content += raw.slice(cursor, match.index);
     const bodyStart = openRe.lastIndex;
-    const closeRe = /<\/think>/ig;
+    const closeRe = /<\/(?:redacted_thinking|think|redacted_reasoning)>/ig;
     closeRe.lastIndex = bodyStart;
     const close = closeRe.exec(raw);
     if (!close) {
-      thinking += raw.slice(bodyStart);
+      thinking += `${thinking ? '\n\n' : ''}${raw.slice(bodyStart)}`;
       cursor = raw.length;
       break;
     }
@@ -773,7 +871,7 @@ function splitThinkingText(rawText) {
   content += raw.slice(cursor);
   return {
     thinking: thinking.trim(),
-    content: content.trim(),
+    content: stripOrphanThinkingTags(content),
   };
 }
 
@@ -809,6 +907,7 @@ function ContactShareMessage({ message, onConnect, isConnected }) {
 
 function PokerInviteMessage({ message }) {
   const navigate = useNavigate();
+  const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'Poker-Tisch';
   const settings = message.pokerSettings || {};
   const summary = message.pokerSettingsSummary || message.content || '';
@@ -816,13 +915,25 @@ function PokerInviteMessage({ message }) {
   const bigBlind = Number(settings.bigBlind) || 20;
   const maxPlayers = Number(settings.maxPlayers) || 6;
   const startingChips = Number(settings.startingChips) || 2000;
+  const hostPeerId = message.hostPeerId || message.from;
+  const tableId = message.tableId;
+  const hostPresence = hostPeerId ? peerGamePresence?.[hostPeerId] : null;
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const inviteActive = isInviteSessionActive({
+    presence: hostPresence,
+    hostPeerId,
+    sessionId: tableId,
+    game: 'poker',
+    hostOnline,
+  }) && !isPresenceStale(hostPresence);
 
   const joinTable = () => {
+    if (!inviteActive) return;
     try {
       sessionStorage.setItem(
         'bt.poker.pendingJoin',
         JSON.stringify({
-          hostPeerId: message.hostPeerId,
+          hostPeerId,
           tableId: message.tableId,
           tableName,
           pokerSettings: settings,
@@ -831,7 +942,7 @@ function PokerInviteMessage({ message }) {
     } catch {
       /* ignore */
     }
-    navigate(`/plugin/${encodeURIComponent('poker:table')}`);
+    navigate('/games');
     void window.bluetalk?.poker?.openGameWindow?.();
   };
 
@@ -861,13 +972,18 @@ function PokerInviteMessage({ message }) {
           <dd>{startingChips.toLocaleString('de-DE')} Chips</dd>
         </div>
       </dl>
-      <p className="poker-invite-card-hint">Peer-to-Peer am Tisch — du musst mit dem Host verbunden sein.</p>
+      <p className="poker-invite-card-hint">
+        {inviteActive
+          ? 'Peer-to-Peer am Tisch — du musst mit dem Host verbunden sein.'
+          : 'Diese Einladung ist nicht mehr aktiv (Tisch geschlossen, voll oder Hand läuft).'}
+      </p>
       <button
         type="button"
-        className="poker-invite-card-btn"
+        className={`poker-invite-card-btn${inviteActive ? '' : ' poker-invite-card-btn--inactive'}`}
         onClick={joinTable}
+        disabled={!inviteActive}
       >
-        Tisch beitreten
+        {inviteActive ? 'Tisch beitreten' : 'Einladung abgelaufen'}
       </button>
     </div>
   );
@@ -875,6 +991,7 @@ function PokerInviteMessage({ message }) {
 
 function UnoInviteMessage({ message }) {
   const navigate = useNavigate();
+  const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'UNO-Tisch';
   const settings = message.unoSettings || {};
   const summary = message.unoSettingsSummary || message.content || '';
@@ -883,13 +1000,25 @@ function UnoInviteMessage({ message }) {
     ? `Punkte bis ${Number(settings.targetScore) || 500}`
     : 'Einzelrunde';
   const houseRules = settings.houseRules === 'casual' ? 'Casual' : 'Offiziell';
+  const hostPeerId = message.hostPeerId || message.from;
+  const gameId = message.gameId;
+  const hostPresence = hostPeerId ? peerGamePresence?.[hostPeerId] : null;
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const inviteActive = isInviteSessionActive({
+    presence: hostPresence,
+    hostPeerId,
+    sessionId: gameId,
+    game: 'uno',
+    hostOnline,
+  }) && !isPresenceStale(hostPresence);
 
   const joinGame = () => {
+    if (!inviteActive) return;
     try {
       sessionStorage.setItem(
         'bt.uno.pendingJoin',
         JSON.stringify({
-          hostPeerId: message.hostPeerId,
+          hostPeerId,
           gameId: message.gameId,
           tableName,
           unoSettings: settings,
@@ -898,7 +1027,7 @@ function UnoInviteMessage({ message }) {
     } catch {
       /* ignore */
     }
-    navigate(`/plugin/${encodeURIComponent('uno:game')}`);
+    navigate('/games');
     void window.bluetalk?.uno?.openGameWindow?.();
   };
 
@@ -926,11 +1055,316 @@ function UnoInviteMessage({ message }) {
           <dd>{houseRules}</dd>
         </div>
       </dl>
-      <p className="uno-invite-card-hint">Peer-to-Peer — du musst mit dem Host verbunden sein.</p>
+      <p className="uno-invite-card-hint">
+        {inviteActive
+          ? 'Peer-to-Peer — du musst mit dem Host verbunden sein.'
+          : 'Diese Einladung ist nicht mehr aktiv (Spiel geschlossen, voll oder läuft bereits).'}
+      </p>
       <p className="uno-invite-card-alpha" role="note">Alpha: Das UNO-Plugin kann noch Fehler haben und sich ändern.</p>
-      <button type="button" className="uno-invite-card-btn" onClick={joinGame}>
-        Spiel beitreten
+      <button
+        type="button"
+        className={`uno-invite-card-btn${inviteActive ? '' : ' uno-invite-card-btn--inactive'}`}
+        onClick={joinGame}
+        disabled={!inviteActive}
+      >
+        {inviteActive ? 'Spiel beitreten' : 'Einladung abgelaufen'}
       </button>
+    </div>
+  );
+}
+
+function ConnectFourInviteMessage({ message }) {
+  const navigate = useNavigate();
+  const { peers, peerGamePresence } = useApp();
+  const tableName = message.tableName || 'Vier-gewinnt-Tisch';
+  const settings = message.connectFourSettings || {};
+  const summary = message.connectFourSettingsSummary || message.content || '';
+  const hostPeerId = message.hostPeerId || message.from;
+  const gameId = message.gameId;
+  const hostPresence = hostPeerId ? peerGamePresence?.[hostPeerId] : null;
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const inviteActive = isInviteSessionActive({
+    presence: hostPresence,
+    hostPeerId,
+    sessionId: gameId,
+    game: 'connect-four',
+    hostOnline,
+  }) && !isPresenceStale(hostPresence);
+
+  const joinGame = () => {
+    if (!inviteActive) return;
+    try {
+      sessionStorage.setItem(
+        'bt.connectFour.pendingJoin',
+        JSON.stringify({
+          hostPeerId,
+          gameId: message.gameId,
+          tableName,
+          connectFourSettings: settings,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    navigate('/games');
+    void window.bluetalk?.connectFour?.openGameWindow?.();
+  };
+
+  return (
+    <div className="connect-four-invite-card" role="group" aria-label="Vier-gewinnt-Einladung">
+      <div className="connect-four-invite-card-head">
+        <span className="connect-four-invite-card-icon" aria-hidden>🔴</span>
+        <div className="connect-four-invite-card-copy">
+          <div className="connect-four-invite-card-kicker">Vier gewinnt</div>
+          <div className="connect-four-invite-card-title">{tableName}</div>
+          {summary ? <div className="connect-four-invite-card-meta">{summary}</div> : null}
+        </div>
+      </div>
+      <dl className="connect-four-invite-card-stats">
+        <div>
+          <dt>Spieler</dt>
+          <dd>2</dd>
+        </div>
+        <div>
+          <dt>Modus</dt>
+          <dd>Peer-to-Peer</dd>
+        </div>
+        <div>
+          <dt>Ziel</dt>
+          <dd>4 in einer Reihe</dd>
+        </div>
+      </dl>
+      <p className="connect-four-invite-card-hint">
+        {inviteActive
+          ? 'Peer-to-Peer — du musst mit dem Host verbunden sein.'
+          : 'Diese Einladung ist nicht mehr aktiv (Spiel geschlossen, voll oder läuft bereits).'}
+      </p>
+      <button
+        type="button"
+        className={`connect-four-invite-card-btn${inviteActive ? '' : ' connect-four-invite-card-btn--inactive'}`}
+        onClick={joinGame}
+        disabled={!inviteActive}
+      >
+        {inviteActive ? 'Spiel beitreten' : 'Einladung abgelaufen'}
+      </button>
+    </div>
+  );
+}
+
+function ChessInviteMessage({ message }) {
+  const navigate = useNavigate();
+  const { peers, peerGamePresence } = useApp();
+  const tableName = message.tableName || 'Schach-Partie';
+  const settings = message.chessSettings || {};
+  const summary = message.chessSettingsSummary || message.content || '';
+  const timeControlSec = Number(settings.timeControlSec) || 0;
+  const timeLabel = timeControlSec > 0 ? `${Math.round(timeControlSec / 60)} Min./Spieler` : 'Unbegrenzt';
+  const hostPeerId = message.hostPeerId || message.from;
+  const gameId = message.gameId;
+  const hostPresence = hostPeerId ? peerGamePresence?.[hostPeerId] : null;
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const inviteActive = isInviteSessionActive({
+    presence: hostPresence,
+    hostPeerId,
+    sessionId: gameId,
+    game: 'chess',
+    hostOnline,
+  }) && !isPresenceStale(hostPresence);
+
+  const joinGame = () => {
+    if (!inviteActive) return;
+    try {
+      sessionStorage.setItem(
+        'bt.chess.pendingJoin',
+        JSON.stringify({
+          hostPeerId,
+          gameId: message.gameId,
+          tableName,
+          chessSettings: settings,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    navigate('/games');
+    void window.bluetalk?.chess?.openGameWindow?.();
+  };
+
+  return (
+    <div className="chess-invite-card" role="group" aria-label="Schach-Einladung">
+      <div className="chess-invite-card-head">
+        <span className="chess-invite-card-icon" aria-hidden>♟</span>
+        <div className="chess-invite-card-copy">
+          <div className="chess-invite-card-kicker">Schach</div>
+          <div className="chess-invite-card-title">{tableName}</div>
+          {summary ? <div className="chess-invite-card-meta">{summary}</div> : null}
+        </div>
+      </div>
+      <dl className="chess-invite-card-stats">
+        <div>
+          <dt>Spieler</dt>
+          <dd>2</dd>
+        </div>
+        <div>
+          <dt>Zeit</dt>
+          <dd>{timeLabel}</dd>
+        </div>
+        <div>
+          <dt>Modus</dt>
+          <dd>Peer-to-Peer</dd>
+        </div>
+      </dl>
+      <p className="chess-invite-card-hint">
+        {inviteActive
+          ? 'Peer-to-Peer — du musst mit dem Host verbunden sein.'
+          : 'Diese Einladung ist nicht mehr aktiv (Partie geschlossen, voll oder läuft bereits).'}
+      </p>
+      <button
+        type="button"
+        className={`chess-invite-card-btn${inviteActive ? '' : ' chess-invite-card-btn--inactive'}`}
+        onClick={joinGame}
+        disabled={!inviteActive}
+      >
+        {inviteActive ? 'Partie beitreten' : 'Einladung abgelaufen'}
+      </button>
+    </div>
+  );
+}
+
+function TicTacToeInviteMessage({ message }) {
+  const navigate = useNavigate();
+  const { peers, peerGamePresence } = useApp();
+  const tableName = message.tableName || 'Tic-Tac-Toe';
+  const settings = message.ticTacToeSettings || {};
+  const summary = message.ticTacToeSettingsSummary || message.content || '';
+  const boardSize = Number(settings.boardSize) || 3;
+  const winLength = Number(settings.winLength) || 3;
+  const maxPlayers = Number(settings.maxPlayers) || 2;
+  const hostPeerId = message.hostPeerId || message.from;
+  const gameId = message.gameId;
+  const hostPresence = hostPeerId ? peerGamePresence?.[hostPeerId] : null;
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const inviteActive = isInviteSessionActive({
+    presence: hostPresence,
+    hostPeerId,
+    sessionId: gameId,
+    game: 'tic-tac-toe',
+    hostOnline,
+  }) && !isPresenceStale(hostPresence);
+
+  const joinGame = () => {
+    if (!inviteActive) return;
+    try {
+      sessionStorage.setItem(
+        'bt.ticTacToe.pendingJoin',
+        JSON.stringify({
+          hostPeerId,
+          gameId: message.gameId,
+          tableName,
+          ticTacToeSettings: settings,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    navigate('/games');
+    void window.bluetalk?.ticTacToe?.openGameWindow?.();
+  };
+
+  return (
+    <div className="ttt-invite-card" role="group" aria-label="Tic-Tac-Toe-Einladung">
+      <div className="ttt-invite-card-head">
+        <span className="ttt-invite-card-icon" aria-hidden>✕</span>
+        <div className="ttt-invite-card-copy">
+          <div className="ttt-invite-card-kicker">Tic-Tac-Toe</div>
+          <div className="ttt-invite-card-title">{tableName}</div>
+          {summary ? <div className="ttt-invite-card-meta">{summary}</div> : null}
+        </div>
+      </div>
+      <dl className="ttt-invite-card-stats">
+        <div>
+          <dt>Feld</dt>
+          <dd>{boardSize}×{boardSize}</dd>
+        </div>
+        <div>
+          <dt>Gewinn</dt>
+          <dd>{winLength} in einer Reihe</dd>
+        </div>
+        <div>
+          <dt>Spieler</dt>
+          <dd>max. {maxPlayers}</dd>
+        </div>
+      </dl>
+      <p className="ttt-invite-card-hint">
+        {inviteActive
+          ? 'Peer-to-Peer — du musst mit dem Host verbunden sein.'
+          : 'Diese Einladung ist nicht mehr aktiv (Spiel geschlossen, voll oder läuft bereits).'}
+      </p>
+      <button
+        type="button"
+        className={`ttt-invite-card-btn${inviteActive ? '' : ' ttt-invite-card-btn--inactive'}`}
+        onClick={joinGame}
+        disabled={!inviteActive}
+      >
+        {inviteActive ? 'Spiel beitreten' : 'Einladung abgelaufen'}
+      </button>
+    </div>
+  );
+}
+
+function GamePresenceBanner({ peerId, presence }) {
+  const { gameInviteKeys, joinGameFromPresence } = useApp();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  if (!presence || isPresenceStale(presence)) return null;
+  const label = formatGamePresenceLabel(presence);
+  const canJoin = canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId: peerId });
+  const accessLabel = presence.lobbyAccess === 'public' ? 'Öffentliche Lobby' : 'Nur auf Einladung';
+
+  const handleJoin = () => {
+    if (!canJoin) {
+      toast({
+        variant: 'warning',
+        title: 'Beitritt nicht möglich',
+        message: presence.lobbyAccess === 'invite'
+          ? 'Diese Lobby ist nur auf Einladung — zuerst die Chat-Einladung annehmen.'
+          : 'Die Lobby ist derzeit nicht beitrittsfähig.',
+      });
+      return;
+    }
+    if (joinGameFromPresence(presence, peerId)) {
+      navigate('/games');
+      toast({ variant: 'success', title: 'Spiel beitreten', message: 'Verbindung zur Lobby wird hergestellt…' });
+    }
+  };
+
+  return (
+    <div className="game-presence-banner" role="status">
+      <div className="game-presence-banner-copy">
+        <span className="game-presence-banner-icon" aria-hidden>
+          {presence.game === 'poker' ? '♠' : presence.game === 'connect-four' ? '🔴' : presence.game === 'chess' ? '♟' : presence.game === 'tic-tac-toe' ? '✕' : '🎴'}
+        </span>
+        <div>
+          <div className="game-presence-banner-title">{label}</div>
+          <div className="game-presence-banner-meta">
+            {accessLabel}
+            {typeof presence.playerCount === 'number' && typeof presence.maxPlayers === 'number'
+              ? ` · ${presence.playerCount}/${presence.maxPlayers} Spieler`
+              : ''}
+          </div>
+        </div>
+      </div>
+      {presence.joinable ? (
+        <button
+          type="button"
+          className={`game-presence-banner-btn${canJoin ? '' : ' game-presence-banner-btn--inactive'}`}
+          onClick={handleJoin}
+          disabled={!canJoin}
+        >
+          {canJoin ? 'Beitreten' : 'Nur auf Einladung'}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1130,7 +1564,7 @@ function NotificationMuteMenuItems({ contact, contactId, onDone, applyNotificati
   );
 }
 
-function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudModel, onOpenCloudSettings}) {
+function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudModel, onOpenCloudSettings, debugMode = false }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -1151,13 +1585,14 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
 
   const availableOptions = useMemo(() => {
     const localOptions = Object.values(AI_MODEL_TIERS)
-      .filter((tier) => tier.local && ollamaState?.modelStatus?.[tier.id] === 'ready')
+      .filter((tier) => tier.local && isModelTierVisible(tier, debugMode) && ollamaState?.modelStatus?.[tier.id] === 'ready')
       .map((tier) => ({
         key: `local:${tier.id}`,
         kind: 'local',
         tierId: tier.id,
         label: tier.label,
         model: tier.model,
+        beta: Boolean(tier.beta),
       }));
     const cloudOptions = ollamaState?.cloudAuth
       ? Object.values(AI_CLOUD_MODELS).map((cloudModel) => ({
@@ -1169,7 +1604,7 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
       }))
       : [];
     return { localOptions, cloudOptions };
-  }, [ollamaState]);
+  }, [ollamaState, debugMode]);
 
   const hasOptions = availableOptions.localOptions.length > 0 || availableOptions.cloudOptions.length > 0;
 
@@ -1223,7 +1658,10 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
                         className={`ai-chat-model-picker-option${isActive ? ' ai-chat-model-picker-option--active' : ''}`}
                         onClick={() => handleSelect(option)}
                       >
-                        <span className="ai-chat-model-picker-option-label">{option.label}</span>
+                        <span className="ai-chat-model-picker-option-label">
+                          {option.label}
+                          {option.beta ? <span className="badge badge-muted" style={{ marginLeft: 6 }}>Beta</span> : null}
+                        </span>
                         <span className="ai-chat-model-picker-option-model text-muted">{option.model}</span>
                       </button>
                     );
@@ -1352,16 +1790,46 @@ function toolArgPreview(name, args) {
   return '';
 }
 
-function AgentToolEvents({ events = [], live = false, hideSubagentSpawn = false }) {
-  const visibleEvents = hideSubagentSpawn
-    ? events.filter((evt) => String(evt?.name || '') !== 'spawn_subagent')
-    : events;
-  if (!Array.isArray(visibleEvents) || !visibleEvents.length) return null;
+function AgentToolLines({ events = [] }) {
+  if (!Array.isArray(events) || !events.length) return null;
+  return (
+    <>
+      {events.map((evt, idx) => {
+        const name = String(evt?.name || 'tool');
+        const label = TOOL_LABELS[name] || name;
+        const arg = toolArgPreview(name, evt?.arguments);
+        const running = isRunCommandRunning(evt);
+        const ok = running ? true : evt?.result?.ok !== false;
+        const resultText = running ? '' : summarizeToolResult(evt?.result);
+        const shimmerClass = running ? ' msg-agent-tool-line-shimmer' : '';
+        return (
+          <div
+            key={`${name}-${idx}`}
+            className={`msg-agent-tool-line${ok ? '' : ' msg-agent-tool-line--error'}${running ? ' msg-agent-tool-line--running' : ''}`}
+          >
+            <span className="msg-agent-tool-line-dot" aria-hidden />
+            <span className={`msg-agent-tool-line-label${shimmerClass}`}>{label}</span>
+            {arg ? <span className={`msg-agent-tool-line-arg${shimmerClass}`}>{arg}</span> : null}
+            {!ok ? <span className="msg-agent-tool-line-status">fehlgeschlagen</span> : null}
+            {resultText ? <span className="msg-agent-tool-line-result">{resultText}</span> : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
+function AgentToolEvents({ events = [], live = false, hideSubagentSpawn = false }) {
+  const visibleEvents = filterToolEventsForDisplay(events, { hideSubagentSpawn });
+  if (!visibleEvents.length) return null;
+
+  const runningCommand = visibleEvents.some(isRunCommandRunning);
   const failed = visibleEvents.filter((evt) => evt?.result?.ok === false).length;
-  const summaryText = failed
-    ? `Tool-Aufrufe · ${visibleEvents.length} (${failed} fehlgeschlagen)`
-    : `Tool-Aufrufe · ${visibleEvents.length}`;
+  const summaryText = runningCommand
+    ? 'Führt aus · läuft'
+    : failed
+      ? `Tool-Aufrufe · ${visibleEvents.length} (${failed} fehlgeschlagen)`
+      : `Tool-Aufrufe · ${visibleEvents.length}`;
 
   return (
     <details className={`msg-agent-tools${live ? ' msg-agent-tools--live' : ''}`} open={live}>
@@ -1370,37 +1838,14 @@ function AgentToolEvents({ events = [], live = false, hideSubagentSpawn = false 
         {live ? <span className="msg-agent-tools-live-badge">läuft</span> : null}
       </summary>
       <div className="msg-agent-tools-body">
-        {visibleEvents.map((evt, idx) => {
-          const name = String(evt?.name || 'tool');
-          const label = TOOL_LABELS[name] || name;
-          const arg = toolArgPreview(name, evt?.arguments);
-          const ok = evt?.result?.ok !== false;
-          const resultText = summarizeToolResult(evt?.result);
-          return (
-            <div key={`${name}-${idx}`} className={`msg-agent-tool-line${ok ? '' : ' msg-agent-tool-line--error'}`}>
-              <span className="msg-agent-tool-line-dot" aria-hidden />
-              <span className="msg-agent-tool-line-label">{label}</span>
-              {arg ? <span className="msg-agent-tool-line-arg">{arg}</span> : null}
-              {!ok ? <span className="msg-agent-tool-line-status">fehlgeschlagen</span> : null}
-              {resultText ? <span className="msg-agent-tool-line-result">{resultText}</span> : null}
-            </div>
-          );
-        })}
+        <AgentToolLines events={visibleEvents} />
       </div>
     </details>
   );
 }
 
-/** Rendert ein Tool-Segment (ein oder mehrere aufeinanderfolgende Tool-Aufrufe). */
-function AgentToolSegment({ segment, event, events, live = false, hideSubagentSpawn = false }) {
-  const list = Array.isArray(events) && events.length
-    ? events
-    : toolEventsFromSegment(segment || (event ? { type: 'tool', event } : null));
-  return <AgentToolEvents events={list} live={live} hideSubagentSpawn={hideSubagentSpawn} />;
-}
-
 /** Rendert einen laufenden oder abgeschlossenen Sub-Agenten als ausklappbaren Block. */
-function SubAgentBlock({ segment, live = false }) {
+function SubAgentBlock({ segment, live = false, onOpen }) {
   const running = segment?.status === 'running';
   const taskPreview = String(segment?.task || '').trim();
   const displayTask = taskPreview.length > 140 ? `${taskPreview.slice(0, 140)}…` : taskPreview;
@@ -1409,6 +1854,21 @@ function SubAgentBlock({ segment, live = false }) {
     : segment?.status === 'error'
       ? 'Fehler'
       : 'fertig';
+
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        className={`msg-subagent msg-subagent--open${live && running ? ' msg-subagent--live' : ''}`}
+        onClick={() => onOpen(segment)}
+      >
+        <span className="msg-subagent-summary-text">Sub-Agent · {statusLabel}</span>
+        {displayTask ? <span className="msg-subagent-task">{displayTask}</span> : null}
+        {live && running ? <span className="msg-subagent-live-badge">läuft</span> : null}
+        <ChevronRight size={14} strokeWidth={CHAT_ICON_STROKE} className="msg-subagent-open-icon" aria-hidden />
+      </button>
+    );
+  }
 
   return (
     <details className={`msg-subagent${live && running ? ' msg-subagent--live' : ''}`} open={live && running}>
@@ -1439,74 +1899,200 @@ function SubAgentBlock({ segment, live = false }) {
   );
 }
 
-/**
- * Rendert die Agent-Segmente in echter Reihenfolge:
- * thinking (ausklappbar) -> tool (ausklappbar) -> subagent -> ... -> answer.
- * Fehlen Segmente, wird auf das Legacy-Layout (Thinking+Tools+Content) zurückgegriffen.
- */
-function MessageSegments({ segments, content, thinking, toolEvents, live = false, hideSubagentSpawn = false }) {
-  const hasSegments = Array.isArray(segments) && segments.length > 0;
-  const hasSubagentSegments = hasSegments && segments.some((s) => s.type === 'subagent');
-  if (!hasSegments) {
-    return (
-      <>
-        {thinking ? <AiThinkingBlock thinking={thinking} live={live} /> : null}
-        <AgentToolEvents events={toolEvents || []} live={live} hideSubagentSpawn={hideSubagentSpawn || hasSubagentSegments} />
-        {content ? (
-          <MarkdownBody text={content} className={live ? 'msg-markdown--live-answer' : undefined} />
-        ) : null}
-      </>
-    );
-  }
-  // Fallback: Wenn Segmente vorhanden sind, aber kein answer-Segment,
-  // den übergebenen content als Antwort anhängen (verhindert, dass die
-  // finale Antwort unsichtbar bleibt, falls das Streaming sie nicht als
-  // eigenes Segment angelegt hat).
-  const hasAnswer = segments.some((s) => s.type === 'answer' && String(s.text || '').trim());
-  const fallbackContent = !hasAnswer && content && content.trim() ? content : null;
-  const displaySegments = groupConsecutiveToolSegments(segments);
+function SubagentChatView({ segment, parentPeer, live = false, onBack }) {
+  const endRef = useRef(null);
+  const running = segment?.status === 'running';
+  const taskPreview = String(segment?.task || '').trim();
+  const hasOutput = Boolean(
+    segment?.content
+    || segment?.thinking
+    || (Array.isArray(segment?.toolEvents) && segment.toolEvents.length)
+    || (Array.isArray(segment?.segments) && segment.segments.length)
+  );
+
+  useLayoutEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: live && running ? 'auto' : 'smooth' });
+  }, [
+    segment?.content,
+    segment?.segments?.length,
+    live,
+    running,
+    segment?.content ? Math.floor(String(segment.content).length / 320) : 0,
+  ]);
+
   return (
     <>
-      {displaySegments.map((seg, idx) => {
-        if (seg.type === 'thinking') {
-          return <AiThinkingBlock key={`t-${idx}`} thinking={seg.text} live={live} />;
-        }
-        if (seg.type === 'tool') {
-          return (
-            <AgentToolSegment
-              key={`tool-${idx}`}
-              segment={seg}
-              live={live}
-              hideSubagentSpawn={hideSubagentSpawn || hasSubagentSegments}
-            />
-          );
-        }
-        if (seg.type === 'subagent') {
-          return <SubAgentBlock key={`sub-${seg.id || idx}`} segment={seg} live={live} />;
-        }
-        if (seg.type === 'answer') {
-          return (
-            <MarkdownBody
-              key={`a-${idx}`}
-              text={seg.text}
-              className={live ? 'msg-markdown--live-answer' : undefined}
-            />
-          );
-        }
-        return null;
-      })}
-      {fallbackContent ? (
-        <MarkdownBody
-          key="answer-fallback"
-          text={fallbackContent}
-          className={live ? 'msg-markdown--live-answer' : undefined}
-        />
-      ) : null}
+      <div className="chat-header chat-header--subagent">
+        <button
+          type="button"
+          className="btn btn-ghost btn-icon chat-subagent-back"
+          onClick={onBack}
+          aria-label="Zurück zum Agent-Chat"
+          title="Zurück zum Agent-Chat"
+        >
+          <ChevronLeft size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        </button>
+        <div className="ai-chat-list-avatar chat-subagent-header-icon" aria-hidden>
+          <Bot size={18} strokeWidth={CHAT_ICON_STROKE} />
+        </div>
+        <div className="chat-subagent-header-body">
+          <div className="font-medium truncate" style={{ fontSize: 14 }}>
+            Sub-Agent · {subagentStatusLabel(segment?.status)}
+          </div>
+          <div className="text-sm text-muted chat-header-meta truncate">
+            {parentPeer?.displayName || 'Sub-Agent'}
+          </div>
+        </div>
+      </div>
+      <div className="chat-messages chat-messages--ai">
+        {taskPreview ? (
+          <div className="msg-row msg-row-self">
+            <div className="msg msg-subagent-prompt animate-in">
+              <MarkdownBody text={taskPreview} />
+            </div>
+          </div>
+        ) : null}
+        <div className="msg-row msg-row-other msg-row--ai-agent">
+          <div className={`msg msg--ai-agent${live && running ? ' msg--ai-agent-live' : ''} animate-in`}>
+            {hasOutput ? (
+              <MessageSegments
+                segments={segment?.segments}
+                content={segment?.content}
+                thinking={segment?.thinking}
+                toolEvents={segment?.toolEvents}
+                live={live && running}
+                hideSubagentSpawn
+              />
+            ) : running ? (
+              <div className="spinner-label">
+                <span className="spinner spinner--sm" />
+                <span>Sub-Agent arbeitet…</span>
+              </div>
+            ) : segment?.error ? (
+              <span className="msg-subagent-error">{segment.error}</span>
+            ) : (
+              <span className="text-muted">Kein Output für diesen Sub-Agenten.</span>
+            )}
+          </div>
+        </div>
+        <div ref={endRef} />
+      </div>
     </>
   );
 }
 
-function ChatMessage({ message, onExpandImage }) {
+function buildAgentMessageLayout({ segments, content, thinking, toolEvents }) {
+  const answers = [];
+  const working = [];
+
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+  if (!hasSegments) {
+    if (String(thinking || '').trim()) working.push({ type: 'thinking', text: String(thinking).trim() });
+    const evts = filterToolEventsForDisplay(Array.isArray(toolEvents) ? toolEvents.filter(Boolean) : []);
+    if (evts.length) working.push({ type: 'tool', events: evts });
+    if (String(content || '').trim()) answers.push({ text: String(content).trim() });
+    return { answers, working };
+  }
+
+  const displaySegments = groupConsecutiveToolSegments(segments);
+  const hasAnswer = displaySegments.some((s) => s.type === 'answer' && String(s.text || '').trim());
+
+  for (const seg of displaySegments) {
+    if (seg.type === 'thinking' && String(seg.text || '').trim()) {
+      working.push({ type: 'thinking', text: seg.text });
+    } else if (seg.type === 'tool') {
+      const events = filterToolEventsForDisplay(toolEventsFromSegment(seg));
+      if (events.length) working.push({ type: 'tool', events });
+    } else if (seg.type === 'subagent') {
+      working.push({ type: 'subagent', segment: seg });
+    } else if (seg.type === 'answer' && String(seg.text || '').trim()) {
+      answers.push({ text: seg.text });
+    }
+  }
+
+  if (!hasAnswer && String(content || '').trim()) {
+    answers.push({ text: String(content).trim() });
+  }
+
+  return { answers, working };
+}
+
+function AgentWorkingBlock({ items = [], live = false, hideSubagentSpawn = false, onOpenSubagent }) {
+  const sections = [];
+  items.forEach((item, idx) => {
+    const isLast = idx === items.length - 1;
+    const itemLive = live && isLast;
+    if (item.type === 'thinking') {
+      sections.push(<AiThinkingBlock key={`w-thinking-${idx}`} thinking={item.text} live={itemLive} />);
+      return;
+    }
+    if (item.type === 'tool') {
+      sections.push(
+        <AgentToolEvents
+          key={`w-tool-${idx}`}
+          events={item.events}
+          live={itemLive}
+          hideSubagentSpawn={hideSubagentSpawn}
+        />
+      );
+      return;
+    }
+    if (item.type === 'subagent') {
+      sections.push(
+        <SubAgentBlock
+          key={`w-sub-${item.segment?.id || idx}`}
+          segment={item.segment}
+          live={live && item.segment?.status === 'running'}
+          onOpen={onOpenSubagent}
+        />
+      );
+    }
+  });
+
+  if (!sections.length) return null;
+
+  const running = live && items.some(
+    (item) => item.type === 'subagent' && item.segment?.status === 'running'
+  );
+
+  return (
+    <details className={`msg-working${live ? ' msg-working--live' : ''}`} open={live}>
+      <summary>
+        <span className="msg-working-summary-text">Working</span>
+        {live || running ? <span className="msg-working-live-badge">läuft</span> : null}
+      </summary>
+      <div className="msg-working-body">{sections}</div>
+    </details>
+  );
+}
+
+/**
+ * Rendert Working-Schritte zuerst, danach die Agent-Antwort.
+ */
+function MessageSegments({ segments, content, thinking, toolEvents, live = false, hideSubagentSpawn = false, onOpenSubagent }) {
+  const { answers, working } = buildAgentMessageLayout({ segments, content, thinking, toolEvents });
+  const hasSubagentItems = working.some((item) => item.type === 'subagent');
+
+  return (
+    <>
+      <AgentWorkingBlock
+        items={working}
+        live={live}
+        hideSubagentSpawn={hideSubagentSpawn || hasSubagentItems}
+        onOpenSubagent={onOpenSubagent}
+      />
+      {answers.map((answer, idx) => (
+        <MarkdownBody
+          key={`answer-${idx}`}
+          text={answer.text}
+          className={live && idx === answers.length - 1 ? 'msg-markdown--live-answer' : undefined}
+        />
+      ))}
+    </>
+  );
+}
+
+function ChatMessage({ message, onExpandImage, onOpenSubagent }) {
   const imageUrl = getImageUrl(message);
   if (imageUrl) {
     const open = () => {
@@ -1545,6 +2131,7 @@ function ChatMessage({ message, onExpandImage }) {
           content={content}
           thinking={thinking}
           toolEvents={message.toolEvents}
+          onOpenSubagent={onOpenSubagent}
         />
       )}
     </>
@@ -1605,6 +2192,8 @@ export default function ChatsPage() {
   const {
     peers,
     contacts,
+    groups,
+    ownPeerId,
     chatMeta,
     loadedChats,
     messages,
@@ -1620,6 +2209,10 @@ export default function ChatsPage() {
     sendReadReceipt,
     loadChatMessages,
     connectToAddress,
+    createGroupChat,
+    updateGroupChat,
+    leaveGroupChat,
+    deleteGroupChat,
     setContactNickname,
     setChatPinned,
     setContactE2eeEnabled,
@@ -1628,6 +2221,8 @@ export default function ChatsPage() {
     deleteChat,
     deleteMessage,
     updateSettings,
+    peerGamePresence,
+    peerUserPresence,
   } = useApp();
 
   const debugMode = settings.debugMode ?? false;
@@ -1643,6 +2238,8 @@ export default function ChatsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const [showConnect, setShowConnect] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [connectAddress, setConnectAddress] = useState('');
   const [connecting, setConnecting] = useState(false);
 
@@ -1689,6 +2286,8 @@ export default function ChatsPage() {
     personality: 'default',
     personalityCustom: '',
   });
+  const [expandedAgentSubs, setExpandedAgentSubs] = useState(() => new Set());
+  const [selectedSubagent, setSelectedSubagent] = useState(null);
   const aiProfileFileRef = useRef(null);
 
   const chatListCollapsed = settings.uiCollapse?.chatList === true;
@@ -1928,7 +2527,7 @@ export default function ChatsPage() {
     ]);
     ids.delete('self');
     for (const id of [...ids]) {
-      if (isAiChatPeerId(id)) ids.delete(id);
+      if (isAiChatPeerId(id) || isGroupChatId(id)) ids.delete(id);
     }
 
     const list = [];
@@ -1953,6 +2552,10 @@ export default function ChatsPage() {
         e2eePlaintextBadge: contact?.e2eeEnabled === false,
         lastMessage: meta?.lastMessage || null,
         messageCount: meta?.count || 0,
+        gamePresence: peerGamePresence[id] && !isPresenceStale(peerGamePresence[id])
+          ? peerGamePresence[id]
+          : null,
+        userPresence: peerUserPresence[id] || null,
       });
     }
 
@@ -1963,10 +2566,6 @@ export default function ChatsPage() {
       return bTs - aTs;
     });
 
-    return sorted;
-  }, [chatMeta, contactById, contacts, peerById, peers]);
-
-  const aiAgentList = useMemo(() => {
     const aiEntries = aiAgents.map((agent) => {
       const aiMeta = chatMeta[agent.id] || null;
       return {
@@ -1980,7 +2579,7 @@ export default function ChatsPage() {
         offline: false,
         pinned: false,
         isAiChat: true,
-        isAgent: agent.agentMode === 'agent',
+        isAgent: true,
         agentWorkDir: agent.agentWorkDir || '',
         e2eePlaintextBadge: false,
         lastMessage: aiMeta?.lastMessage || null,
@@ -1989,16 +2588,44 @@ export default function ChatsPage() {
       };
     });
 
-    return aiEntries.sort((a, b) => {
-      const aTs = a.lastMessage?.timestamp || a.createdAt || 0;
-      const bTs = b.lastMessage?.timestamp || b.createdAt || 0;
+    const groupEntries = (groups || []).map((group) => {
+      const groupMeta = chatMeta[group.id] || null;
+      const activeMembers = group.members.filter((member) => member.state === 'active');
+      const onlineMembers = activeMembers.filter((member) => member.peerId === ownPeerId || peerById.has(member.peerId));
+      return {
+        id: group.id,
+        peer: null,
+        contact: null,
+        group,
+        isGroup: true,
+        displayName: group.name,
+        baseName: group.name,
+        profilePicture: group.image || '',
+        bio: '',
+        offline: onlineMembers.length <= 1,
+        pinned: false,
+        e2eePlaintextBadge: false,
+        lastMessage: groupMeta?.lastMessage || null,
+        messageCount: groupMeta?.count || 0,
+        activeMemberCount: activeMembers.length,
+        onlineMemberCount: onlineMembers.length,
+        canSend: isActiveGroupMember(group, ownPeerId),
+        createdAt: group.createdAt || 0,
+      };
+    });
+
+    return [...aiEntries, ...groupEntries, ...sorted].sort((a, b) => {
+      if (a.pinned !== b.pinned) return Number(b.pinned) - Number(a.pinned);
+      const aTs = a.lastMessage?.timestamp || a.contact?.addedAt || a.createdAt || 0;
+      const bTs = b.lastMessage?.timestamp || b.contact?.addedAt || b.createdAt || 0;
       return bTs - aTs;
     });
-  }, [aiAgents, chatMeta]);
+  }, [aiAgents, chatMeta, contactById, contacts, groups, ownPeerId, peerById, peers, peerGamePresence, peerUserPresence]);
 
   const mainChatList = useMemo(
     () =>
       chatList.filter((chat) => {
+        if (chat.isAiChat || chat.isGroup) return true;
         if (chat.contact?.pendingMessageRequest === true) return false;
         if (
           chat.messageCount === 0
@@ -2013,31 +2640,25 @@ export default function ChatsPage() {
     [chatList]
   );
 
-  const filteredPeerChats = useMemo(
+  const filtered = useMemo(
     () => mainChatList.filter((chat) =>
       `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
     ),
     [mainChatList, search]
   );
 
-  const filteredAiAgents = useMemo(
-    () => aiAgentList.filter((chat) =>
-      `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
-    ),
-    [aiAgentList, search]
-  );
-
-  const combinedChatList = useMemo(
-    () => [...aiAgentList, ...chatList],
-    [aiAgentList, chatList]
-  );
-
   const selectedPeer = useMemo(
-    () => combinedChatList.find((c) => c.id === selectedPeerId) || null,
-    [combinedChatList, selectedPeerId]
+    () => chatList.find((c) => c.id === selectedPeerId) || null,
+    [chatList, selectedPeerId]
   );
 
   const isAiChatSelected = Boolean(selectedPeer?.isAiChat || isAiChatPeerId(selectedPeer?.id));
+  const isGroupSelected = Boolean(selectedPeer?.isGroup && selectedPeer.group);
+  const aiChatSupportsVision = modelSupportsVision(
+    ollamaState?.selectedModelTier,
+    ollamaState?.selectedCloudModelId
+  );
+  const showAiComposerAttach = !isAiChatSelected || aiChatSupportsVision;
   const aiChatNeedsSetup = isAiChatSelected && !ollamaState?.setupComplete;
   const aiChatPending = isAiChatPending(selectedPeer?.id);
   const liveAiProgress = aiChatProgress?.peerId === selectedPeer?.id ? aiChatProgress : null;
@@ -2048,25 +2669,70 @@ export default function ChatsPage() {
   );
 
   const peerPendingDelete = useMemo(
-    () => (deleteTargetPeerId ? combinedChatList.find((c) => c.id === deleteTargetPeerId) || null : null),
-    [combinedChatList, deleteTargetPeerId]
+    () => (deleteTargetPeerId ? chatList.find((c) => c.id === deleteTargetPeerId) || null : null),
+    [chatList, deleteTargetPeerId]
   );
 
   const peerPendingClear = useMemo(
-    () => (clearContextTargetPeerId ? combinedChatList.find((c) => c.id === clearContextTargetPeerId) || null : null),
-    [combinedChatList, clearContextTargetPeerId]
+    () => (clearContextTargetPeerId ? chatList.find((c) => c.id === clearContextTargetPeerId) || null : null),
+    [chatList, clearContextTargetPeerId]
   );
 
-  const aiAgentsPanelCollapsed = settings.uiCollapse?.aiAgents === true;
+  const subagentsByPeer = useMemo(
+    () => collectSubagentsByPeer(messages, aiChatProgress),
+    [messages, aiChatProgress]
+  );
 
-  const liveSubagentsByPeer = useMemo(() => {
-    if (!aiChatProgress?.peerId || !Array.isArray(aiChatProgress.segments)) return {};
-    const subs = aiChatProgress.segments.filter(
-      (seg) => seg?.type === 'subagent' && seg.status === 'running'
-    );
-    if (!subs.length) return {};
-    return { [aiChatProgress.peerId]: subs };
-  }, [aiChatProgress]);
+  const selectedSubagentSegment = useMemo(() => {
+    if (!selectedSubagent) return null;
+    const subs = subagentsByPeer[selectedSubagent.parentPeerId] || [];
+    return subs.find((entry) => entry.id === selectedSubagent.subagentId) || null;
+  }, [selectedSubagent, subagentsByPeer]);
+
+  const openSubagentChat = useCallback((parentPeerId, subagentId) => {
+    if (!parentPeerId || !subagentId) return;
+    setExpandedAgentSubs((prev) => {
+      const next = new Set(prev);
+      next.add(parentPeerId);
+      return next;
+    });
+    setSelectedPeerId(parentPeerId);
+    setSelectedSubagent({ parentPeerId, subagentId });
+  }, []);
+
+  const closeSubagentChat = useCallback(() => {
+    setSelectedSubagent(null);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSubagent) return;
+    if (!selectedSubagentSegment) setSelectedSubagent(null);
+  }, [selectedSubagent, selectedSubagentSegment]);
+
+  useEffect(() => {
+    setExpandedAgentSubs((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const [peerId, subs] of Object.entries(subagentsByPeer)) {
+        if (subs.some((seg) => seg.status === 'running') && !next.has(peerId)) {
+          next.add(peerId);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [subagentsByPeer]);
+
+  const toggleAgentSubsExpanded = useCallback((peerId, event) => {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    setExpandedAgentSubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(peerId)) next.delete(peerId);
+      else next.add(peerId);
+      return next;
+    });
+  }, []);
 
   const closeListContextMenu = useCallback(() => setListContextMenu(null), []);
 
@@ -2080,9 +2746,9 @@ export default function ChatsPage() {
   useEffect(() => {
     if (openPeerFromNav) return;
     if (selectedPeerId != null) return;
-    const first = mainChatList[0] || aiAgentList[0];
+    const first = mainChatList[0];
     if (first) setSelectedPeerId(first.id);
-  }, [openPeerFromNav, selectedPeerId, mainChatList, aiAgentList]);
+  }, [openPeerFromNav, selectedPeerId, mainChatList]);
 
   useEffect(() => {
     setChatActionsMenuOpen(false);
@@ -2091,6 +2757,11 @@ export default function ChatsPage() {
     setReplyToMessage(null);
     setSelectionMode(false);
     setSelectedMessageIds(new Set());
+    setSelectedSubagent((prev) => {
+      if (!prev) return null;
+      if (prev.parentPeerId === selectedPeerId) return prev;
+      return null;
+    });
   }, [selectedPeerId]);
 
   useEffect(() => {
@@ -2243,6 +2914,7 @@ export default function ChatsPage() {
   const showOfflineComposerReconnect = Boolean(
     selectedPeer &&
       !isAiChatSelected &&
+      !isGroupSelected &&
       !selectedPeer.peer &&
       !selectedPeer.contact?.blocked
   );
@@ -2276,6 +2948,12 @@ export default function ChatsPage() {
     };
   }, [showOfflineComposerReconnect, offlineReconnectAddress, connectToAddress]);
 
+  useEffect(() => {
+    if (showAiComposerAttach) return;
+    setAttachMenuOpen(false);
+    if (pendingFile) clearPendingFile();
+  }, [showAiComposerAttach, pendingFile, clearPendingFile]);
+
   const closeAttachMenu = useCallback(() => {
     setAttachMenuOpen(false);
     setStickerPickerOpen(false);
@@ -2288,7 +2966,8 @@ export default function ChatsPage() {
 
   const composerDisabled = Boolean(
     !selectedPeer
-      || contactOutgoingBlocked(selectedPeer?.contact)
+      || (!isGroupSelected && contactOutgoingBlocked(selectedPeer?.contact))
+      || (isGroupSelected && !selectedPeer.canSend)
       || showOfflineComposerReconnect
   );
 
@@ -2389,13 +3068,14 @@ export default function ChatsPage() {
   }, [selectedPeer, closeAttachMenu, sendMessage, toast, settings, contacts, peers, connectToAddress]);
 
   useEffect(() => {
-    if (selectedPeerId && !combinedChatList.find((chat) => chat.id === selectedPeerId)) {
+    if (selectedPeerId && !chatList.find((chat) => chat.id === selectedPeerId)) {
       setSelectedPeerId(null);
     }
-  }, [combinedChatList, selectedPeerId]);
+  }, [chatList, selectedPeerId]);
 
   useEffect(() => {
     setShowPeerProfile(false);
+    setShowGroupInfo(false);
   }, [selectedPeerId]);
 
   useEffect(() => {
@@ -2701,6 +3381,64 @@ export default function ChatsPage() {
     setWarning('');
     const peerId = selectedPeer.id;
 
+    if (isAiChatSelected) {
+      const text = input.trim();
+      const file = pendingFile;
+      if (file && !aiChatSupportsVision) {
+        toast({
+          variant: 'warning',
+          title: 'Anhänge nicht unterstützt',
+          message: 'Das aktuelle Modell kann keine Bilder verarbeiten. Wähle z. B. die Stufe Smart (Gemma 4).',
+        });
+        return;
+      }
+      setInput('');
+      if (file) setPendingFile(null);
+      setReplyToMessage(null);
+
+      sendMessage(peerId, {
+        kind: 'chat',
+        content: text,
+        fileAttachment: file
+          ? {
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              fileData: file.base64,
+              localPreviewUrl: file.objectUrl,
+            }
+          : undefined,
+      }).then((result) => {
+        const ok = result === true || result?.ok === true;
+        if (!ok) {
+          const rawError = typeof result?.error === 'string' ? result.error : '';
+          if (rawError === 'chat_aborted') return;
+          const aiMessage =
+            rawError === 'chat_busy'
+              ? 'Die KI antwortet noch auf eine vorherige Nachricht.'
+              : rawError === 'setup_incomplete'
+              ? 'Die KI ist noch nicht eingerichtet. Richte Ollama und ein Modell unter Einstellungen → AI Chat ein.'
+              : rawError === 'ollama_handler_missing'
+                ? 'BlueTalk muss einmal komplett neu gestartet werden, damit der neue Ollama-Chat aktiv ist.'
+              : rawError === 'server_not_running'
+                ? 'Ollama konnte nicht gestartet werden.'
+                : rawError === 'model_missing'
+                  ? 'Das ausgewählte Modell fehlt.'
+                  : rawError === 'vision_not_supported'
+                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge. Wähle z. B. die Stufe Smart (Gemma 4).'
+                  : /can't find closing '\}' symbol|looks like object/i.test(rawError)
+                    ? 'Tool-Aufruf konnte nicht verarbeitet werden. Bitte BlueTalk neu starten und erneut versuchen.'
+                  : rawError || 'Prüfe Ollama und das ausgewählte Modell.';
+          toast({
+            variant: 'error',
+            title: 'KI antwortet nicht',
+            message: aiMessage,
+          });
+        }
+      });
+      return;
+    }
+
     // Text messages: clear input immediately, send in background (fire-and-forget)
     if (input.trim()) {
       const text = input.trim();
@@ -2735,6 +3473,8 @@ export default function ChatsPage() {
                 ? 'Ollama konnte nicht gestartet werden.'
                 : rawError === 'model_missing'
                   ? 'Das ausgewählte Modell fehlt.'
+                  : rawError === 'vision_not_supported'
+                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge. Wähle z. B. die Stufe Smart (Gemma 4).'
                   : /can't find closing '\}' symbol|looks like object/i.test(rawError)
                     ? 'Tool-Aufruf konnte nicht verarbeitet werden. Bitte BlueTalk neu starten und erneut versuchen.'
                   : rawError || 'Prüfe Ollama und das ausgewählte Modell.';
@@ -2802,9 +3542,7 @@ export default function ChatsPage() {
     }
   };
 
-  const handleFilePicked = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const queuePendingFile = async (file) => {
     if (!file) return;
 
     if (file.size > MAX_CHAT_FILE_SIZE_BYTES) {
@@ -2840,7 +3578,7 @@ export default function ChatsPage() {
         return {
           name: file.name,
           size: file.size,
-          type: file.type || 'application/octet-stream',
+          type: normalizeAttachmentFileType(file.name, file.type || 'application/octet-stream', data.base64),
           objectUrl,
           base64: data.base64,
         };
@@ -2857,6 +3595,26 @@ export default function ChatsPage() {
     } finally {
       setFileTransfer(null);
     }
+  };
+
+  const handleFilePicked = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    await queuePendingFile(file);
+  };
+
+  const handleComposerPaste = (event) => {
+    if (composerDisabled || readingFile || sendingFile) return;
+    if (isAiChatSelected && !aiChatSupportsVision) return;
+    const items = event.clipboardData?.items;
+    if (!items?.length) return;
+    const fileItem = [...items].find((item) => item.kind === 'file');
+    if (!fileItem) return;
+    const file = fileItem.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    void queuePendingFile(file);
   };
 
   const handleConnect = async () => {
@@ -2907,13 +3665,18 @@ export default function ChatsPage() {
     if (!deleteTargetPeerId) return;
     setDeletingChat(true);
     try {
-      await deleteChat(deleteTargetPeerId);
-      if (isAiChatPeerId(deleteTargetPeerId)) {
-        setAiAgents((prev) => prev.filter((agent) => agent.id !== deleteTargetPeerId));
+      if (isGroupChatId(deleteTargetPeerId)) {
+        await deleteGroupChat(deleteTargetPeerId);
+      } else {
+        await deleteChat(deleteTargetPeerId);
+        if (isAiChatPeerId(deleteTargetPeerId)) {
+          setAiAgents((prev) => prev.filter((agent) => agent.id !== deleteTargetPeerId));
+        }
       }
       if (selectedPeerId === deleteTargetPeerId) {
         setSelectedPeerId(null);
       }
+      setShowGroupInfo(false);
       setWarning('');
       setPendingFile(null);
       setShowDeleteConfirm(false);
@@ -3095,10 +3858,6 @@ export default function ChatsPage() {
     [setContactNotificationMute, toast]
   );
 
-  const toggleAiAgentsPanel = useCallback(() => {
-    updateSettings({ uiCollapse: { aiAgents: !aiAgentsPanelCollapsed } });
-  }, [aiAgentsPanelCollapsed, updateSettings]);
-
   const renderChatListRow = useCallback((chat, { nested = false } = {}) => {
     const chatContact = resolveContact(chat.id);
     const unreadCount = !chat.isAiChat
@@ -3109,16 +3868,46 @@ export default function ChatsPage() {
           chat.lastMessage
         )
       : 0;
-    const runningSubagents = liveSubagentsByPeer[chat.id] || [];
+    const subagents = chat.isAgent ? (subagentsByPeer[chat.id] || []) : [];
+    const hasSubagents = subagents.length > 0;
+    const subagentsExpanded = hasSubagents && expandedAgentSubs.has(chat.id);
+    const runningSubagentCount = subagents.filter((seg) => seg.status === 'running').length;
+    const isParentActive = selectedPeer?.id === chat.id && selectedSubagent?.parentPeerId !== chat.id;
 
     return (
       <React.Fragment key={chat.id}>
         <div
-          className={`list-item ${selectedPeer?.id === chat.id ? 'active' : ''}${chat.contact?.blocked ? ' list-item--blocked' : ''}${chat.contact?.blockedByPeer ? ' list-item--blocked-by-peer' : ''}${unreadCount > 0 ? ' list-item--has-unread' : ''}${chat.isAiChat ? ' list-item--ai' : ''}${nested ? ' list-item--nested' : ''}`}
-          onClick={() => setSelectedPeerId(chat.id)}
+          className={`list-item ${isParentActive ? 'active' : ''}${chat.contact?.blocked ? ' list-item--blocked' : ''}${chat.contact?.blockedByPeer ? ' list-item--blocked-by-peer' : ''}${unreadCount > 0 ? ' list-item--has-unread' : ''}${chat.isAiChat ? ' list-item--ai' : ''}${chat.isGroup ? ' list-item--group' : ''}${nested ? ' list-item--nested' : ''}${hasSubagents ? ' list-item--expandable' : ''}${subagentsExpanded ? ' list-item--expanded' : ''}`}
+          onClick={() => {
+            setSelectedSubagent(null);
+            setSelectedPeerId(chat.id);
+          }}
           onContextMenu={(e) => openChatListContextMenu(e, chat)}
         >
-          {chat.isAiChat ? (
+          {hasSubagents ? (
+            <button
+              type="button"
+              className="list-item-expand-btn"
+              aria-expanded={subagentsExpanded}
+              aria-label={subagentsExpanded ? 'Sub-Agenten einklappen' : 'Sub-Agenten ausklappen'}
+              title={subagentsExpanded ? 'Sub-Agenten einklappen' : 'Sub-Agenten ausklappen'}
+              onClick={(e) => toggleAgentSubsExpanded(chat.id, e)}
+            >
+              <ChevronDown
+                size={14}
+                strokeWidth={CHAT_ICON_STROKE}
+                aria-hidden
+                className={`list-item-expand-chevron${subagentsExpanded ? '' : ' list-item-expand-chevron--collapsed'}`}
+              />
+            </button>
+          ) : null}
+          {chat.isGroup ? (
+            chat.profilePicture ? (
+              <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
+            ) : (
+              <div className="group-chat-list-avatar" aria-hidden><Users size={19} strokeWidth={CHAT_ICON_STROKE} /></div>
+            )
+          ) : chat.isAiChat ? (
             chat.profilePicture ? (
               <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
             ) : (
@@ -3154,13 +3943,23 @@ export default function ChatsPage() {
               )}
             </div>
             <div className="list-item-sub">
-              {chat.isAiChat
+              {chat.isGroup
+                ? (chat.lastMessage
+                  ? `${chat.lastMessage.from === 'self' ? 'Du' : (chat.lastMessage.sender || 'Mitglied')}: ${getLastPreview(chat.lastMessage, debugMode).replace(/^You: |^Du: /, '')}`
+                  : `${chat.activeMemberCount} Mitglieder · Ende-zu-Ende-verschlüsselt`)
+                : chat.isAiChat
                 ? (isAiChatPending(chat.id)
-                  ? 'Antwort wird erstellt…'
-                  : (ollamaState?.setupComplete
-                    ? (chat.isAgent ? 'Agent · bereit' : 'Bereit')
-                    : 'Einrichtung nötig'))
-                : getLastPreview(chat.lastMessage, debugMode)}
+                  ? (runningSubagentCount > 0
+                    ? `${runningSubagentCount} Sub-Agent${runningSubagentCount === 1 ? '' : 'en'} aktiv…`
+                    : 'Antwort wird erstellt…')
+                  : (hasSubagents && !subagentsExpanded
+                    ? `${subagents.length} Sub-Agent${subagents.length === 1 ? '' : 'en'}`
+                    : (ollamaState?.setupComplete
+                      ? 'Agent · bereit'
+                      : 'Einrichtung nötig')))
+                : chat.gamePresence
+                  ? formatGamePresenceLabel(chat.gamePresence)
+                  : getLastPreview(chat.lastMessage, debugMode)}
             </div>
           </div>
           <div className="chat-list-meta">
@@ -3178,7 +3977,9 @@ export default function ChatsPage() {
                   </span>
                 </>
               )}
-              {chat.isAiChat ? (
+              {chat.isGroup ? (
+                <span className="group-chat-list-badge" title={`${chat.activeMemberCount} Mitglieder`}><Users size={12} /> {chat.activeMemberCount}</span>
+              ) : chat.isAiChat ? (
                 isAiChatPending(chat.id) ? (
                   <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Antwort wird erstellt">
                     <span className="spinner spinner--sm" aria-hidden />
@@ -3187,43 +3988,78 @@ export default function ChatsPage() {
                   <span className="ai-chat-list-badge" title="KI-Chat">KI</span>
                 )
               ) : (
-                <span className={chat.offline ? 'offline-dot' : 'online-dot'} />
+                <>
+                {chat.gamePresence ? (
+                  <span className="game-presence-list-badge" title={formatGamePresenceLabel(chat.gamePresence)}>
+                    {chat.gamePresence.game === 'poker' ? '♠' : chat.gamePresence.game === 'connect-four' ? '🔴' : chat.gamePresence.game === 'chess' ? '♟' : chat.gamePresence.game === 'tic-tac-toe' ? '✕' : '🎴'}
+                  </span>
+                ) : null}
+                {!chat.offline && isPeerDoNotDisturb(chat.userPresence) ? (
+                  <span className="dnd-dot" title="Nicht stören" />
+                ) : (
+                  <span className={chat.offline ? 'offline-dot' : 'online-dot'} />
+                )}
+                </>
               )}
             </div>
           </div>
         </div>
-        {runningSubagents.map((sub) => {
+        {subagentsExpanded ? subagents.map((sub) => {
           const taskPreview = String(sub.task || '').trim();
           const shortTask = taskPreview.length > 72 ? `${taskPreview.slice(0, 72)}…` : taskPreview;
+          const running = sub.status === 'running';
+          const failed = sub.status === 'error';
+          const isSubagentActive = selectedSubagent?.parentPeerId === chat.id && selectedSubagent?.subagentId === sub.id;
           return (
-            <div key={`sub-${sub.id}`} className="list-item list-item--subagent" aria-label="Laufender Sub-Agent">
+            <div
+              key={`sub-${sub.id}`}
+              className={`list-item list-item--subagent${isSubagentActive ? ' active' : ''}${running ? ' list-item--subagent-live' : ''}${failed ? ' list-item--subagent-error' : ''}`}
+              aria-label={`Sub-Agent · ${subagentStatusLabel(sub.status)}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => openSubagentChat(chat.id, sub.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openSubagentChat(chat.id, sub.id);
+                }
+              }}
+            >
               <div className="ai-chat-list-avatar list-item--subagent-icon" aria-hidden>
                 <Bot size={16} strokeWidth={CHAT_ICON_STROKE} />
               </div>
               <div className="list-item-info">
                 <div className="list-item-name-row">
-                  <div className="list-item-name">Sub-Agent</div>
-                  <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Sub-Agent läuft">
-                    <span className="spinner spinner--sm" aria-hidden />
-                  </span>
+                  <div className="list-item-name">Sub-Agent · {subagentStatusLabel(sub.status)}</div>
+                  {running ? (
+                    <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Sub-Agent läuft">
+                      <span className="spinner spinner--sm" aria-hidden />
+                    </span>
+                  ) : null}
                 </div>
-                <div className="list-item-sub">{shortTask || 'Teilaufgabe wird bearbeitet…'}</div>
+                <div className="list-item-sub">
+                  {shortTask || (running ? 'Teilaufgabe wird bearbeitet…' : (failed ? (sub.error || 'Fehlgeschlagen') : 'Abgeschlossen'))}
+                </div>
               </div>
             </div>
           );
-        })}
+        }) : null}
       </React.Fragment>
     );
   }, [
     chatLastViewedPeerTs,
     debugMode,
+    expandedAgentSubs,
     isAiChatPending,
-    liveSubagentsByPeer,
     messages,
     ollamaState?.setupComplete,
     openChatListContextMenu,
+    openSubagentChat,
     resolveContact,
     selectedPeer?.id,
+    selectedSubagent,
+    subagentsByPeer,
+    toggleAgentSubsExpanded,
   ]);
 
   return (
@@ -3238,6 +4074,27 @@ export default function ChatsPage() {
           if (!mediaLightbox?.base64) return;
           saveAttachmentToDisk(mediaLightbox.defaultFilename || 'Bild', mediaLightbox.base64);
         }}
+      />
+      <CreateGroupModal
+        open={showCreateGroup}
+        contacts={contacts}
+        peers={peers}
+        onCreate={createGroupChat}
+        onClose={(groupId) => {
+          setShowCreateGroup(false);
+          if (groupId) setSelectedPeerId(groupId);
+        }}
+      />
+      <GroupInfoModal
+        open={showGroupInfo && isGroupSelected}
+        group={selectedPeer?.group || null}
+        ownPeerId={ownPeerId}
+        contacts={contacts}
+        peers={peers}
+        onUpdate={updateGroupChat}
+        onLeave={leaveGroupChat}
+        onDelete={deleteGroupChat}
+        onClose={() => setShowGroupInfo(false)}
       />
       <div className="split-layout">
         {chatListCollapsed ? (
@@ -3258,16 +4115,27 @@ export default function ChatsPage() {
         >
           <div className="split-list-header">
             <h2>Chats</h2>
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon btn-sm"
-              onClick={toggleChatListCollapse}
-              title="Chatliste einklappen"
-              aria-label="Chatliste einklappen"
-              aria-expanded
-            >
-              <PanelLeftClose size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-            </button>
+            <div className="split-list-header-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon btn-sm"
+                onClick={() => setShowCreateGroup(true)}
+                title="Neue Gruppe"
+                aria-label="Neue Gruppe"
+              >
+                <Users size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon btn-sm"
+                onClick={toggleChatListCollapse}
+                title="Chatliste einklappen"
+                aria-label="Chatliste einklappen"
+                aria-expanded
+              >
+                <PanelLeftClose size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+              </button>
+            </div>
           </div>
           <div className="split-list-search-wrap">
             <div className="search-bar">
@@ -3280,44 +4148,13 @@ export default function ChatsPage() {
               />
             </div>
           </div>
-          <div className="split-list-body split-list-body--with-agents">
-            <div className="split-list-chats">
-              {filteredPeerChats.length === 0 && filteredAiAgents.length === 0 && (
-                <div className="empty-state split-list-empty-state">
-                  <p>No chats yet. Use New in the sidebar for peers without a conversation, or connect below.</p>
-                </div>
-              )}
-              {filteredPeerChats.map((chat) => renderChatListRow(chat))}
-            </div>
-            {filteredAiAgents.length > 0 ? (
-              <div className="split-list-agents-panel">
-                <button
-                  type="button"
-                  className="split-list-agents-toggle"
-                  onClick={toggleAiAgentsPanel}
-                  aria-expanded={!aiAgentsPanelCollapsed}
-                >
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={CHAT_ICON_STROKE}
-                    aria-hidden
-                    className={`split-list-agents-chevron${aiAgentsPanelCollapsed ? ' split-list-agents-chevron--collapsed' : ''}`}
-                  />
-                  <span className="split-list-agents-toggle-label">KI-Agenten</span>
-                  <span className="split-list-agents-count">{filteredAiAgents.length}</span>
-                  {filteredAiAgents.some((chat) => isAiChatPending(chat.id)) ? (
-                    <span className="split-list-agents-active" title="KI-Antwort wird erstellt">
-                      <span className="spinner spinner--sm" aria-hidden />
-                    </span>
-                  ) : null}
-                </button>
-                {!aiAgentsPanelCollapsed ? (
-                  <div className="split-list-agents-body">
-                    {filteredAiAgents.map((chat) => renderChatListRow(chat))}
-                  </div>
-                ) : null}
+          <div className="split-list-body">
+            {filtered.length === 0 && (
+              <div className="empty-state split-list-empty-state">
+                <p>No chats yet. Use New in the sidebar for peers without a conversation, or connect below.</p>
               </div>
-            ) : null}
+            )}
+            {filtered.map((chat) => renderChatListRow(chat))}
           </div>
         </div>
         )}
@@ -3340,6 +4177,13 @@ export default function ChatsPage() {
                 </button>
               </div>
             </div>
+          ) : selectedSubagentSegment ? (
+            <SubagentChatView
+              segment={selectedSubagentSegment}
+              parentPeer={selectedPeer}
+              live={aiChatProgress?.peerId === selectedPeer?.id}
+              onBack={closeSubagentChat}
+            />
           ) : aiChatNeedsSetup ? (
             <div className="ai-chat-setup-wrap">
               <div className="chat-header">
@@ -3380,19 +4224,25 @@ export default function ChatsPage() {
                 <button
                   type="button"
                   className="chat-header-profile-btn"
-                  onClick={() => setShowPeerProfile(true)}
+                  onClick={() => isGroupSelected ? setShowGroupInfo(true) : setShowPeerProfile(true)}
                   aria-haspopup="dialog"
-                  aria-expanded={showPeerProfile}
-                  title={isAiChatSelected ? 'Profil bearbeiten' : 'Profil anzeigen'}
+                  aria-expanded={isGroupSelected ? showGroupInfo : showPeerProfile}
+                  title={isGroupSelected ? 'Gruppeninfo' : isAiChatSelected ? 'Profil bearbeiten' : 'Profil anzeigen'}
                 >
                   <PeerAvatar pictureUrl={selectedPeer.profilePicture} name={selectedPeer.displayName} size={40} />
                   <div style={{ minWidth: 0 }}>
                     <div className="font-medium truncate" style={{ fontSize: 14 }}>{selectedPeer.displayName}</div>
                     <div className="text-sm text-muted chat-header-meta">
                       <span>
-                        {isAiChatSelected
+                        {isGroupSelected
+                          ? `${selectedPeer.activeMemberCount} Mitglieder · ${Math.max(0, selectedPeer.onlineMemberCount - 1)} online · E2EE`
+                          : isAiChatSelected
                           ? 'Online'
-                          : selectedPeer.contact?.blocked
+                          : selectedPeer.gamePresence
+                            ? formatGamePresenceLabel(selectedPeer.gamePresence)
+                            : !selectedPeer.offline && isPeerDoNotDisturb(selectedPeer.userPresence)
+                              ? formatUserPresenceLabel(selectedPeer.userPresence)
+                            : selectedPeer.contact?.blocked
                             ? 'Blockiert'
                             : selectedPeer.contact?.blockedByPeer
                               ? 'Du wurdest blockiert'
@@ -3401,7 +4251,7 @@ export default function ChatsPage() {
                                 : selectedPeer.offline
                                   ? 'Offline'
                                   : 'Online'}
-                        {!isAiChatSelected && selectedPeer.contact?.nickname && selectedPeer.baseName !== selectedPeer.contact.nickname
+                        {!isAiChatSelected && !isGroupSelected && selectedPeer.contact?.nickname && selectedPeer.baseName !== selectedPeer.contact.nickname
                           ? ` · ${selectedPeer.baseName}`
                           : ''}
                         {!isAiChatSelected && !contactE2eePreferenceOn(selectedPeer.contact) ? ' · Klartext (ausgehend)' : ''}
@@ -3423,7 +4273,20 @@ export default function ChatsPage() {
                     </div>
                   </div>
                 </button>
-                {!isAiChatSelected && (
+                {isGroupSelected && (
+                  <div className="chat-header-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-icon"
+                      onClick={() => setShowGroupInfo(true)}
+                      title="Gruppeninfo"
+                      aria-label="Gruppeninfo"
+                    >
+                      <Users size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                    </button>
+                  </div>
+                )}
+                {!isAiChatSelected && !isGroupSelected && (
                 <div className="chat-header-actions">
                   {selectionMode ? (
                     <div className="chat-selection-bar">
@@ -3612,6 +4475,7 @@ export default function ChatsPage() {
                     <AiChatModelPicker
                       ollamaState={ollamaState}
                       disabled={aiChatPending}
+                      debugMode={debugMode}
                       onSelectTier={selectAiModelTier}
                       onSelectCloudModel={selectAiCloudModel}
                       onOpenCloudSettings={() => navigate('/settings/ai')}
@@ -3639,7 +4503,7 @@ export default function ChatsPage() {
                 )}
               </div>
 
-              <div className="chat-messages" ref={chatMessagesRef} onScroll={updateChatPinnedState}>
+              <div className={`chat-messages${isAiChatSelected ? ' chat-messages--ai' : ''}`} ref={chatMessagesRef} onScroll={updateChatPinnedState}>
                 {false ? (
                   <div className="empty-state ai-chat-ready-placeholder">
                     <Bot size={36} strokeWidth={1.5} aria-hidden />
@@ -3647,6 +4511,21 @@ export default function ChatsPage() {
                   </div>
                 ) : (
                 <>
+                {isGroupSelected && !selectedPeer.canSend ? (
+                  <div className="chat-warning" role="status">
+                    {getGroupMember(selectedPeer.group, ownPeerId)?.state === 'invited'
+                      ? 'Dein Beitritt wird bestätigt. Danach kannst du in der Gruppe schreiben.'
+                      : 'Du bist nicht mehr Mitglied dieser Gruppe. Der bisherige Verlauf bleibt auf diesem Gerät erhalten, neue Nachrichten werden nicht mehr zugestellt.'}
+                  </div>
+                ) : null}
+                {!selectedPeer.contact?.blocked &&
+                  !selectedPeer.contact?.blockedByPeer &&
+                  selectedPeer.gamePresence ? (
+                    <GamePresenceBanner
+                      peerId={selectedPeer.id}
+                      presence={selectedPeer.gamePresence}
+                    />
+                  ) : null}
                 {selectedPeer.contact?.blocked && (
                   <div className="chat-warning" role="status">
                     Dieser Kontakt ist blockiert. Entblocken, um Nachrichten zu senden.
@@ -3741,9 +4620,15 @@ export default function ChatsPage() {
                 {msgs.map((m, i) => {
                   const isSelf = m.from === 'self';
                   const bubbleName = isSelf ? (settings.displayName || 'You') : (m.sender || selectedPeer.displayName);
-                  const bubblePic = isSelf ? settings.profilePicture : selectedPeer.profilePicture;
+                  const senderContact = isGroupSelected && !isSelf ? contactById.get(m.senderPeerId || m.from) : null;
+                  const bubblePic = isSelf
+                    ? settings.profilePicture
+                    : isGroupSelected
+                      ? (senderContact?.profilePicture || '')
+                      : selectedPeer.profilePicture;
                   const bareMedia = isBareMediaMessage(m);
                   const embedMessage = isChatEmbedMessage(m, debugMode);
+                  const isAiAgentMessage = isAiChatSelected && !isSelf;
                   const outsideBubble = bareMedia || embedMessage;
                   const delivery = selfDeliveryLabel(m);
                   const seen = isSelf && readUpToId && m.messageId && readUpToId === m.messageId ? 'Seen' : '';
@@ -3756,6 +4641,7 @@ export default function ChatsPage() {
                         'msg-row',
                         isSelf ? 'msg-row-self' : 'msg-row-other',
                         outsideBubble && 'msg-row--bare',
+                        isAiAgentMessage && 'msg-row--ai-agent',
                         embedMessage && 'msg-row--embed',
                         selectionMode && 'msg-row--selectable',
                         isSelected && 'msg-row--selected',
@@ -3778,11 +4664,11 @@ export default function ChatsPage() {
                           />
                         </label>
                       ) : null}
-                      {!selectionMode ? (
+                      {!selectionMode && !isAiAgentMessage ? (
                         <PeerAvatar pictureUrl={bubblePic} name={bubbleName} size={28} className="msg-avatar" />
                       ) : null}
                       <div
-                        className={['msg', isSelf ? 'msg-self' : 'msg-other', bareMedia && 'msg--bare-media', embedMessage && 'msg--embed', 'animate-in']
+                        className={['msg', isSelf ? 'msg-self' : isAiAgentMessage ? 'msg--ai-agent' : 'msg-other', bareMedia && 'msg--bare-media', embedMessage && 'msg--embed', 'animate-in']
                           .filter(Boolean)
                           .join(' ')}
                         onContextMenu={selectionMode ? undefined : (e) => openMessageContextMenu(e, m)}
@@ -3802,10 +4688,24 @@ export default function ChatsPage() {
                           <StickerMessage message={m} onExpandImage={setMediaLightbox} />
                         ) : m.kind === 'poker-invite' ? (
                           <PokerInviteMessage message={m} />
+                        ) : m.kind === 'connect-four-invite' ? (
+                          <ConnectFourInviteMessage message={m} />
+                        ) : m.kind === 'chess-invite' ? (
+                          <ChessInviteMessage message={m} />
+                        ) : m.kind === 'tic-tac-toe-invite' ? (
+                          <TicTacToeInviteMessage message={m} />
                         ) : m.kind === 'uno-invite' && debugMode ? (
                           <UnoInviteMessage message={m} />
                         ) : m.kind === 'uno-invite' ? (
-                          <ChatMessage message={m} onExpandImage={setMediaLightbox} />
+                          <ChatMessage
+                            message={m}
+                            onExpandImage={setMediaLightbox}
+                            onOpenSubagent={
+                              isAiChatSelected
+                                ? (segment) => openSubagentChat(selectedPeer.id, segment.id)
+                                : undefined
+                            }
+                          />
                         ) : m.kind === 'contact-share' ? (
                           <ContactShareMessage
                             message={m}
@@ -3813,7 +4713,15 @@ export default function ChatsPage() {
                             onConnect={connectFromSharedContact}
                           />
                         ) : (
-                          <ChatMessage message={m} onExpandImage={setMediaLightbox} />
+                          <ChatMessage
+                            message={m}
+                            onExpandImage={setMediaLightbox}
+                            onOpenSubagent={
+                              isAiChatSelected
+                                ? (segment) => openSubagentChat(selectedPeer.id, segment.id)
+                                : undefined
+                            }
+                          />
                         )}
                         <div className={`msg-meta${isSelf ? ' msg-meta--self' : ''}`}>
                           <span className="msg-time">{formatMessageTime(m.timestamp)}</span>
@@ -3840,14 +4748,8 @@ export default function ChatsPage() {
                   );
                 })}
                 {isAiChatSelected && aiChatPending ? (
-                  <div className="msg-row msg-row-other">
-                    <div className="ai-chat-list-avatar msg-avatar" aria-hidden>
-                      <Bot size={16} strokeWidth={CHAT_ICON_STROKE} />
-                    </div>
-                    <div className="msg msg-other animate-in">
-                      <div className="ai-live-message-head">
-                        <div className="msg-sender">KI-Assistent</div>
-                      </div>
+                  <div className="msg-row msg-row-other msg-row--ai-agent msg-row--ai-agent-live">
+                    <div className="msg msg--ai-agent msg--ai-agent-live animate-in">
       {(() => {
         const split = splitThinkingText(liveAiProgress?.content || '');
         const thinking = [liveAiProgress?.thinking || '', split.thinking].filter(Boolean).join('\n\n');
@@ -3863,6 +4765,7 @@ export default function ChatsPage() {
         thinking={thinking}
         toolEvents={toolEvents}
         live
+        onOpenSubagent={(segment) => openSubagentChat(selectedPeer.id, segment.id)}
       />
       {!hasAnything ? (
         <div className="spinner-label">
@@ -3976,12 +4879,14 @@ export default function ChatsPage() {
                 {warning && <div className="chat-warning">{warning}</div>}
 
                 <div className="chat-input-bar">
+                  {showAiComposerAttach ? (
+                    <>
                   <input
                     type="file"
                     hidden
                     ref={fileInputRef}
                     onChange={handleFilePicked}
-                    disabled={isAiChatSelected || composerDisabled || readingFile || sendingFile}
+                    disabled={composerDisabled || readingFile || sendingFile}
                   />
                   <input
                     type="file"
@@ -4001,7 +4906,7 @@ export default function ChatsPage() {
                     onClick={() => setAttachMenuOpen((o) => !o)}
                     disabled={composerDisabled || readingFile || sendingFile}
                     title="Anhang hinzufügen"
-                    style={{ height: 40, width: 40, display: isAiChatSelected ? 'none' : undefined }}
+                    style={{ height: 40, width: 40 }}
                   >
                     <Plus size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                   </button>
@@ -4021,15 +4926,17 @@ export default function ChatsPage() {
                           overflowY: 'auto',
                         }}
                       >
-                        <button
-                          type="button"
-                          className="chat-list-context-menu-item"
-                          role="menuitem"
-                          onClick={() => openStickerPicker()}
-                        >
-                          <Smile size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                          Sticker
-                        </button>
+                        {!isAiChatSelected ? (
+                          <button
+                            type="button"
+                            className="chat-list-context-menu-item"
+                            role="menuitem"
+                            onClick={() => openStickerPicker()}
+                          >
+                            <Smile size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                            Sticker
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="chat-list-context-menu-item"
@@ -4048,15 +4955,17 @@ export default function ChatsPage() {
                           <FileImage size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                           Bild / Video
                         </button>
-                        <button
-                          type="button"
-                          className="chat-list-context-menu-item"
-                          role="menuitem"
-                          onClick={() => void shareOwnContact()}
-                        >
-                          <UserRound size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-                          Kontakt teilen
-                        </button>
+                        {!isAiChatSelected ? (
+                          <button
+                            type="button"
+                            className="chat-list-context-menu-item"
+                            role="menuitem"
+                            onClick={() => void shareOwnContact()}
+                          >
+                            <UserRound size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                            Kontakt teilen
+                          </button>
+                        ) : null}
                         {composerAttachments.length > 0 ? (
                           <>
                             <div className="chat-list-context-menu-sep" role="separator" />
@@ -4092,10 +5001,13 @@ export default function ChatsPage() {
                     })}
                     disabled={composerDisabled || sendingFile}
                   />
+                    </>
+                  ) : null}
                   <textarea
                     ref={textareaRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    onPaste={handleComposerPaste}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -4105,6 +5017,10 @@ export default function ChatsPage() {
                     placeholder={
                       isAiChatSelected
                         ? aiChatPending ? 'KI antwortet...' : 'Nachricht an KI schreiben...'
+                        : isGroupSelected && !selectedPeer.canSend
+                          ? (getGroupMember(selectedPeer.group, ownPeerId)?.state === 'invited'
+                            ? 'Beitritt wird bestätigt…'
+                            : 'Du bist nicht mehr Mitglied dieser Gruppe.')
                         : selectedPeer.contact?.blocked
                         ? 'Entblocken, um Nachrichten zu senden…'
                         : selectedPeer.contact?.blockedByPeer
@@ -4498,7 +5414,9 @@ export default function ChatsPage() {
         >
           <div className="modal modal-danger animate-scale" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
-              <h3 style={{ margin: 0 }}>Delete chat?</h3>
+              <h3 style={{ margin: 0 }}>
+                {isGroupChatId(deleteTargetPeerId) ? 'Gruppe löschen?' : 'Chat löschen?'}
+              </h3>
               <button
                 className="btn btn-ghost btn-icon"
                 onClick={() => {
@@ -4513,7 +5431,15 @@ export default function ChatsPage() {
               </button>
             </div>
             <p className="text-muted" style={{ margin: '0 0 16px', lineHeight: 1.5 }}>
-              This removes the conversation with <strong>{peerPendingDelete.displayName}</strong> and all messages stored on this device. This cannot be undone.
+              {isGroupChatId(deleteTargetPeerId) ? (
+                <>
+                  {peerPendingDelete?.canSend
+                    ? <>Du verlässt <strong>{peerPendingDelete.displayName}</strong> und entfernst alle Nachrichten auf diesem Gerät. Das kann nicht rückgängig gemacht werden.</>
+                    : <>Die Gruppe <strong>{peerPendingDelete.displayName}</strong> und alle Nachrichten auf diesem Gerät werden entfernt. Das kann nicht rückgängig gemacht werden.</>}
+                </>
+              ) : (
+                <>Der Chat mit <strong>{peerPendingDelete.displayName}</strong> und alle Nachrichten auf diesem Gerät werden entfernt. Das kann nicht rückgängig gemacht werden.</>
+              )}
             </p>
             <div className="modal-actions">
               <button
@@ -4524,7 +5450,7 @@ export default function ChatsPage() {
                 }}
                 disabled={deletingChat}
               >
-                Cancel
+                Abbrechen
               </button>
               <button
                 className="btn btn-danger"
@@ -4534,9 +5460,9 @@ export default function ChatsPage() {
                 {deletingChat ? (
                   <span className="spinner-label">
                     <span className="spinner spinner--sm spinner--accent" />
-                    <span>Deleting</span>
+                    <span>Wird gelöscht…</span>
                   </span>
-                ) : 'Delete chat'}
+                ) : (isGroupChatId(deleteTargetPeerId) ? 'Gruppe löschen' : 'Chat löschen')}
               </button>
             </div>
           </div>
@@ -4592,6 +5518,32 @@ export default function ChatsPage() {
               >
                 <Trash2 size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                 Chat löschen…
+              </button>
+            </>
+          ) : listContextMenu.chat.isGroup ? (
+            <>
+              <button
+                type="button"
+                className="chat-list-context-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setSelectedPeerId(listContextMenu.chat.id);
+                  setShowGroupInfo(true);
+                  closeListContextMenu();
+                }}
+              >
+                <Users size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                Gruppeninfo
+              </button>
+              <div className="chat-list-context-menu-sep" role="separator" />
+              <button
+                type="button"
+                className="chat-list-context-menu-item chat-list-context-menu-item--danger"
+                role="menuitem"
+                onClick={() => openDeleteForPeer(listContextMenu.chat.id)}
+              >
+                <Trash2 size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                Gruppe löschen…
               </button>
             </>
           ) : (
