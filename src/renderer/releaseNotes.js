@@ -3,6 +3,15 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.20': {
+    title: "What's new in BlueTalk 1.1.20",
+    items: [
+      'Spiel-Einladungen und öffentliche Lobbys verbinden jetzt zuverlässig mit Poker, UNO, Vier gewinnt, Schach und Tic-Tac-Toe.',
+      'Wiederholte Beitritts-Klicks senden keine doppelten Join-Anfragen mehr.',
+      'Spielfenster starten deutlich schlanker und besitzen nur noch den minimal erforderlichen App-Zugriff.',
+      'Plugin-Realtime, Timer-Bereinigung und automatische Plugin-Updates wurden stabilisiert.',
+    ],
+  },
   '1.1.19': {
     title: "What's new in BlueTalk 1.1.19",
     items: [

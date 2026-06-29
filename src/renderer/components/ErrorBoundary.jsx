@@ -44,17 +44,19 @@ export default class ErrorBoundary extends React.Component {
               <RefreshCw size={15} strokeWidth={1.75} aria-hidden />
               Reload
             </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                this.setState({ error: null });
-                window.location.hash = '#/';
-              }}
-            >
-              <Home size={15} strokeWidth={1.75} aria-hidden />
-              Back to chats
-            </button>
+            {this.props.showHomeAction !== false ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  this.setState({ error: null });
+                  window.location.hash = '#/';
+                }}
+              >
+                <Home size={15} strokeWidth={1.75} aria-hidden />
+                Back to chats
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

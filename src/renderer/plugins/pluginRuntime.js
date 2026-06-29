@@ -64,7 +64,7 @@ function createEmitter() {
   };
 }
 
-class PluginRuntime {
+export class PluginRuntime {
   constructor() {
     this.plugins = [];
     this.active = new Map(); // id -> active record
@@ -228,7 +228,7 @@ class PluginRuntime {
       commands: new Map(),
       eventListeners: new Map(),
       disposers: new Set(),
-      timers: new Set(),
+      timers: new Map(),
       logger,
     };
     this.active.set(plugin.id, record);
@@ -250,13 +250,13 @@ class PluginRuntime {
       fn(api, api, window, document);
     } catch (e) {
       logger.error('activation failed:', e);
-      this.active.delete(plugin.id);
+      this._deactivate(plugin.id, { emit: false });
       return;
     }
 
     if (record.isGameLauncher && !record.commands.has('launcherState')) {
       logger.error('activation incomplete: missing launcher commands');
-      this.active.delete(plugin.id);
+      this._deactivate(plugin.id, { emit: false });
     }
   }
 
@@ -277,9 +277,9 @@ class PluginRuntime {
         /* ignore */
       }
     }
-    for (const t of record.timers) {
-      if (t.kind === 'interval') clearInterval(t.handle);
-      else clearTimeout(t.handle);
+    for (const [handle, kind] of record.timers) {
+      if (kind === 'interval') clearInterval(handle);
+      else clearTimeout(handle);
     }
     record.disposers.clear();
     record.timers.clear();
@@ -287,14 +287,7 @@ class PluginRuntime {
     record.screens.clear();
     record.composerAttachments.clear();
     record.commands.clear();
-    if (record.realtimeManager) {
-      try {
-        record.realtimeManager.dispose();
-      } catch {
-        /* ignore */
-      }
-      record.realtimeManager = null;
-    }
+    record.realtimeManager = null;
     record.eventListeners.clear();
     this.active.delete(id);
     if (emit) {
@@ -308,9 +301,10 @@ class PluginRuntime {
     const { id, manifest, logger } = record;
     const host = () => this._host || {};
 
-    const trackTimer = (kind, handle) => {
-      record.timers.add({ kind, handle });
-      return handle;
+    const clearTrackedTimer = (handle, kind) => {
+      if (kind === 'interval') clearInterval(handle);
+      else clearTimeout(handle);
+      record.timers.delete(handle);
     };
 
     const api = {
@@ -540,10 +534,22 @@ class PluginRuntime {
         window.bluetalk?.plugins?.invokeCommand?.(id, commandId, args),
 
       timer: {
-        setTimeout: (fn, ms, ...args) => trackTimer('timeout', setTimeout(fn, ms, ...args)),
-        setInterval: (fn, ms, ...args) => trackTimer('interval', setInterval(fn, ms, ...args)),
-        clearTimeout: (h) => clearTimeout(h),
-        clearInterval: (h) => clearInterval(h),
+        setTimeout: (fn, ms, ...args) => {
+          let handle;
+          handle = setTimeout((...callbackArgs) => {
+            record.timers.delete(handle);
+            fn(...callbackArgs);
+          }, ms, ...args);
+          record.timers.set(handle, 'timeout');
+          return handle;
+        },
+        setInterval: (fn, ms, ...args) => {
+          const handle = setInterval(fn, ms, ...args);
+          record.timers.set(handle, 'interval');
+          return handle;
+        },
+        clearTimeout: (handle) => clearTrackedTimer(handle, 'timeout'),
+        clearInterval: (handle) => clearTrackedTimer(handle, 'interval'),
       },
 
       onDeactivate: (fn) => {
@@ -564,7 +570,7 @@ class PluginRuntime {
     const realtimeManager = createRealtimeManager({
       pluginId: id,
       peer: api.peer,
-      selfPeerId: () => window.bluetalk?.peer?.getInfo?.()?.peerId,
+      selfPeerId: () => host().getOwnPeerId?.() || '',
       log: logger,
       onPeerMessage: (handler) => api.on('peer:message', handler),
     });

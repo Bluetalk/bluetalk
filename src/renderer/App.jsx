@@ -87,11 +87,6 @@ const GamesPage = lazy(() => import('./pages/Games'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const PluginsPage = lazy(() => import('./pages/Plugins'));
 const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
-const PokerGamePage = lazy(() => import('./pages/PokerGamePage'));
-const UnoGamePage = lazy(() => import('./pages/UnoGamePage'));
-const ConnectFourGamePage = lazy(() => import('./pages/ConnectFourGamePage'));
-const ChessGamePage = lazy(() => import('./pages/ChessGamePage'));
-const TicTacToeGamePage = lazy(() => import('./pages/TicTacToeGamePage'));
 const DocsPage = lazy(() => import('./docs/DocsPage'));
 
 const AppContext = createContext(null);
@@ -1498,6 +1493,8 @@ export default function App() {
         setTheme('dark');
         setLoadError('');
         setShowVersionWelcome(false);
+        ownPeerIdRef.current = '';
+        setOwnPeerId('');
         ownEcdhPrivateRef.current = null;
         ownEcdhPublicSpkiRef.current = '';
         e2eeSessionsRef.current = {};
@@ -1507,6 +1504,10 @@ export default function App() {
         setE2eeBootNonce((n) => n + 1);
         setUsernameOnboardingGateReady(true);
         setShowUsernameOnboarding(true);
+        void window.bluetalk.peer.getInfo().then((info) => {
+          ownPeerIdRef.current = info?.id || '';
+          setOwnPeerId(info?.id || '');
+        }).catch(() => {});
         window.location.hash = '#/';
         return;
       }
@@ -2684,62 +2685,72 @@ export default function App() {
     return true;
   }, [leaveGroupChat, removeGroup, persistGroupOutbox, deleteChat]);
 
-  const joinGameFromPresence = useCallback((presence, hostPeerId) => {
-    if (!presence || !hostPeerId) return false;
-    if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) return false;
+  const joinGameFromPresence = useCallback(async (presence, hostPeerId) => {
+    if (!presence || !hostPeerId) {
+      return { ok: false, message: 'Spieldaten fehlen.' };
+    }
+    if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) {
+      return { ok: false, message: 'Diese Lobby kann derzeit nicht betreten werden.' };
+    }
     const game = presence.game;
     const sessionId = presence.sessionId;
-    if (!game || !sessionId) return false;
+    if (!game || !sessionId) {
+      return { ok: false, message: 'Die Spiel-ID fehlt.' };
+    }
 
-    try {
-      window.location.hash = '#/games';
-      if (game === 'poker') {
-        sessionStorage.setItem('bt.poker.pendingJoin', JSON.stringify({
-          hostPeerId,
-          tableId: sessionId,
-          tableName: presence.tableName || 'Poker-Tisch',
-          pokerSettings: {},
-        }));
-        void window.bluetalk?.poker?.openGameWindow?.();
-      } else if (game === 'uno') {
-        sessionStorage.setItem('bt.uno.pendingJoin', JSON.stringify({
+    const pending = game === 'poker'
+      ? {
+        hostPeerId,
+        tableId: sessionId,
+        tableName: presence.tableName || 'Poker-Tisch',
+        pokerSettings: {},
+      }
+      : game === 'uno'
+        ? {
           hostPeerId,
           gameId: sessionId,
           tableName: presence.tableName || 'UNO-Tisch',
           unoSettings: {},
-        }));
-        void window.bluetalk?.uno?.openGameWindow?.();
-      } else if (game === 'connect-four') {
-        sessionStorage.setItem('bt.connectFour.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Vier-gewinnt-Tisch',
-          connectFourSettings: {},
-        }));
-        void window.bluetalk?.connectFour?.openGameWindow?.();
-      } else if (game === 'chess') {
-        sessionStorage.setItem('bt.chess.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Schach-Partie',
-          chessSettings: {},
-        }));
-        void window.bluetalk?.chess?.openGameWindow?.();
-      } else if (game === 'tic-tac-toe') {
-        sessionStorage.setItem('bt.ticTacToe.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Tic-Tac-Toe',
-          ticTacToeSettings: {},
-        }));
-        void window.bluetalk?.ticTacToe?.openGameWindow?.();
-      } else {
-        return false;
-      }
-    } catch {
-      return false;
+        }
+        : game === 'connect-four'
+          ? {
+            hostPeerId,
+            gameId: sessionId,
+            tableName: presence.tableName || 'Vier-gewinnt-Tisch',
+            connectFourSettings: {},
+          }
+          : game === 'chess'
+            ? {
+              hostPeerId,
+              gameId: sessionId,
+              tableName: presence.tableName || 'Schach-Partie',
+              chessSettings: {},
+            }
+            : game === 'tic-tac-toe'
+              ? {
+                hostPeerId,
+                gameId: sessionId,
+                tableName: presence.tableName || 'Tic-Tac-Toe',
+                ticTacToeSettings: {},
+              }
+              : null;
+    if (!pending) {
+      return { ok: false, message: 'Dieses Spiel wird nicht unterstützt.' };
     }
-    return true;
+
+    window.location.hash = '#/games';
+    const response = await pluginRuntime.invokePluginCommand(game, 'join', pending);
+    if (!response?.ok) {
+      return {
+        ok: false,
+        message: response?.error === 'not_active'
+          ? 'Aktiviere dieses Spiel zuerst unter Erweiterungen.'
+          : response?.error === 'unknown_command'
+            ? 'Das Spiele-Plugin ist veraltet. Bitte stelle es unter Erweiterungen auf Standard zurück.'
+            : response?.error || 'Beitritt fehlgeschlagen.',
+      };
+    }
+    return response.result?.ok === false ? response.result : { ok: true };
   }, [gameInviteKeys]);
 
   const updateSettings = useCallback((newSettings) => {
@@ -2882,7 +2893,9 @@ export default function App() {
 
   useEffect(() => {
     if (!window.bluetalk?.plugins) return undefined;
+    let cancelled = false;
     const host = {
+      getOwnPeerId: () => ownPeerIdRef.current,
       getPeers: () => peersRef.current,
       getContacts: () => contactsRef.current,
       getMessages: (peerId) => (peerId ? messagesRef.current[peerId] || [] : messagesRef.current),
@@ -2898,8 +2911,19 @@ export default function App() {
     };
     pluginRuntime.setHost(host);
     pluginRuntime.injectReact(React, ReactDOM);
-    void pluginRuntime.boot(host);
-    return undefined;
+    void (async () => {
+      if (!ownPeerIdRef.current) {
+        try {
+          const info = await window.bluetalk.peer.getInfo();
+          ownPeerIdRef.current = info?.id || '';
+          if (!cancelled) setOwnPeerId(info?.id || '');
+        } catch {
+          /* Realtime liest die ID später erneut aus dem aktuellen Ref. */
+        }
+      }
+      if (!cancelled) await pluginRuntime.boot(host);
+    })();
+    return () => { cancelled = true; };
   }, [sendMessage, deleteMessage, deleteChat, upsertContact, removeContact, setContactBlocked, setContactNickname, setChatPinned]);
 
   if (!window.bluetalk) {
@@ -2922,11 +2946,6 @@ export default function App() {
             <PluginRuntimeToastBridge />
             <Suspense fallback={<div className="page"><div className="page-body">Wird geladen…</div></div>}>
             <Routes>
-              <Route path="/poker-game" element={<PokerGamePage />} />
-              <Route path="/uno-game" element={<UnoGamePage />} />
-              <Route path="/connect-four-game" element={<ConnectFourGamePage />} />
-              <Route path="/chess-game" element={<ChessGamePage />} />
-              <Route path="/tic-tac-toe-game" element={<TicTacToeGamePage />} />
               <Route path="/docs/*" element={<DocsPage />} />
               <Route
                 path="*"
