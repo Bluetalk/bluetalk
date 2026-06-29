@@ -106,15 +106,45 @@ async function readFileSafe(filePath) {
   }
 }
 
+function setTrackedTimeout(record, fn, ms, ...args) {
+  let handle;
+  handle = setTimeout((...callbackArgs) => {
+    record.timers.delete(handle);
+    fn(...callbackArgs);
+  }, ms, ...args);
+  record.timers.set(handle, 'timeout');
+  return handle;
+}
+
+function setTrackedInterval(record, fn, ms, ...args) {
+  const handle = setInterval(fn, ms, ...args);
+  record.timers.set(handle, 'interval');
+  return handle;
+}
+
+function clearTrackedTimer(record, handle, kind) {
+  if (kind === 'interval') clearInterval(handle);
+  else clearTimeout(handle);
+  record.timers.delete(handle);
+}
+
+function clearAllTrackedTimers(record) {
+  for (const [handle, kind] of record.timers) {
+    if (kind === 'interval') clearInterval(handle);
+    else clearTimeout(handle);
+  }
+  record.timers.clear();
+}
+
 class PluginHost extends EventEmitter {
-  constructor({ peerServer, store, mainWindowRef, isAppInForegroundRef }) {
+  constructor({ peerServer, store, mainWindowRef, isAppInForegroundRef, pluginsDir }) {
     super();
     this.peerServer = peerServer;
     this.store = store;
     this.mainWindowRef = mainWindowRef;
     this.isAppInForegroundRef = isAppInForegroundRef;
-    this.pluginsDir = path.join(app.getPath('userData'), 'plugins');
-    /** @type {Map<string, { manifest: any, dir: string, enabled: boolean, module?: any, api?: any, context?: any, commands: Map<string, Function>, disposers: Set<Function>, timers: Set<any>, ui?: string, lastError?: string }>} */
+    this.pluginsDir = pluginsDir || path.join(app.getPath('userData'), 'plugins');
+    /** @type {Map<string, { manifest: any, dir: string, enabled: boolean, module?: any, api?: any, context?: any, commands: Map<string, Function>, disposers: Set<Function>, timers: Map<any, string>, ui?: string, lastError?: string }>} */
     this.plugins = new Map();
     this._peerListeners = [];
   }
@@ -269,7 +299,7 @@ class PluginHost extends EventEmitter {
       eventListeners: new Map(),
       commands: new Map(),
       disposers: new Set(),
-      timers: new Set(),
+      timers: new Map(),
       lastError: '',
     };
     this.plugins.set(id, record);
@@ -306,18 +336,10 @@ class PluginHost extends EventEmitter {
           warn: (...args) => console.warn(`[plugin:${manifest.id}]`, ...args),
           error: (...args) => console.error(`[plugin:${manifest.id}]`, ...args),
         },
-        setTimeout: (fn, ms, ...args) => {
-          const handle = setTimeout(fn, ms, ...args);
-          record.timers.add({ kind: 'timeout', handle });
-          return handle;
-        },
-        setInterval: (fn, ms, ...args) => {
-          const handle = setInterval(fn, ms, ...args);
-          record.timers.add({ kind: 'interval', handle });
-          return handle;
-        },
-        clearTimeout,
-        clearInterval,
+        setTimeout: (fn, ms, ...args) => setTrackedTimeout(record, fn, ms, ...args),
+        setInterval: (fn, ms, ...args) => setTrackedInterval(record, fn, ms, ...args),
+        clearTimeout: (handle) => clearTrackedTimer(record, handle, 'timeout'),
+        clearInterval: (handle) => clearTrackedTimer(record, handle, 'interval'),
         Buffer,
         URL,
         URLSearchParams,
@@ -342,6 +364,7 @@ class PluginHost extends EventEmitter {
       }
       this.setEnabled(manifest.id, true);
     } catch (e) {
+      await this._disposeRecordResources(record, { runDeactivate: true });
       record.enabled = false;
       record.lastError = e?.message || String(e);
       console.error(`[PluginHost] activate ${manifest.id}:`, e);
@@ -349,17 +372,16 @@ class PluginHost extends EventEmitter {
     this._emitChange();
   }
 
-  async _deactivate(record) {
-    if (!record.enabled) return;
-    const { manifest } = record;
-
-    try {
-      const mod = record.module;
-      if (mod && typeof mod.deactivate === 'function') {
-        await mod.deactivate();
+  async _disposeRecordResources(record, { runDeactivate = false } = {}) {
+    if (runDeactivate) {
+      try {
+        const mod = record.module;
+        if (mod && typeof mod.deactivate === 'function') {
+          await mod.deactivate();
+        }
+      } catch (e) {
+        console.error(`[PluginHost] deactivate ${record.manifest.id}:`, e);
       }
-    } catch (e) {
-      console.error(`[PluginHost] deactivate ${manifest.id}:`, e);
     }
 
     for (const dispose of record.disposers) {
@@ -370,25 +392,19 @@ class PluginHost extends EventEmitter {
       }
     }
     record.disposers.clear();
-
-    for (const t of record.timers) {
-      if (t.kind === 'interval') clearInterval(t.handle);
-      else clearTimeout(t.handle);
-    }
-    record.timers.clear();
-    if (record.realtimeManager) {
-      try {
-        record.realtimeManager.dispose();
-      } catch {
-        /* ignore */
-      }
-      record.realtimeManager = null;
-    }
+    clearAllTrackedTimers(record);
+    record.realtimeManager = null;
     record.eventListeners.clear();
     record.commands.clear();
     record.module = null;
     record.api = null;
     record.context = null;
+  }
+
+  async _deactivate(record) {
+    if (!record.enabled) return;
+    const { manifest } = record;
+    await this._disposeRecordResources(record, { runDeactivate: true });
     record.enabled = false;
 
     this.setEnabled(manifest.id, false);
@@ -549,18 +565,10 @@ class PluginHost extends EventEmitter {
       },
 
       timer: {
-        setTimeout: (fn, ms, ...args) => {
-          const handle = setTimeout(fn, ms, ...args);
-          record.timers.add({ kind: 'timeout', handle });
-          return handle;
-        },
-        setInterval: (fn, ms, ...args) => {
-          const handle = setInterval(fn, ms, ...args);
-          record.timers.add({ kind: 'interval', handle });
-          return handle;
-        },
-        clearTimeout: (h) => clearTimeout(h),
-        clearInterval: (h) => clearInterval(h),
+        setTimeout: (fn, ms, ...args) => setTrackedTimeout(record, fn, ms, ...args),
+        setInterval: (fn, ms, ...args) => setTrackedInterval(record, fn, ms, ...args),
+        clearTimeout: (handle) => clearTrackedTimer(record, handle, 'timeout'),
+        clearInterval: (handle) => clearTrackedTimer(record, handle, 'interval'),
       },
 
       registerCommand: (commandId, handler) => {
@@ -592,7 +600,7 @@ class PluginHost extends EventEmitter {
       const realtimeManager = createRealtimeManager({
         pluginId: manifest.id,
         peer: api.peer,
-        selfPeerId: () => peerServer.getInfo?.()?.peerId,
+        selfPeerId: () => peerServer.getInfo?.()?.id,
         log: api.log,
         onPeerMessage: (handler) => api.events.on('peer:message', handler),
       });

@@ -12,6 +12,7 @@ const { isPeerNotificationMuted } = require(path.join(__dirname, '..', 'shared',
 const { PluginHost } = require(path.join(__dirname, 'plugin-host.js'));
 const { OllamaManager } = require(path.join(__dirname, 'ollama-manager.js'));
 const { AI_MODEL_TIERS, isAiChatPeerId } = require(path.join(__dirname, '..', 'shared', 'ai-chat-constants.js'));
+const { compareVersionParts } = require(path.join(__dirname, '..', 'shared', 'version.js'));
 
 let mainWindow = null;
 /** Separates Fenster für das Poker-Plugin (Spieltisch). */
@@ -614,16 +615,6 @@ function setupAutoUpdater() {
       void checkForAppUpdates('startup');
     }, 5000);
   }
-}
-
-function compareVersionParts(left, right) {
-  const a = String(left || '0').split('.').map((part) => Number(part) || 0);
-  const b = String(right || '0').split('.').map((part) => Number(part) || 0);
-  const count = Math.max(a.length, b.length);
-  for (let index = 0; index < count; index += 1) {
-    if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
-  }
-  return 0;
 }
 
 async function readPluginManifest(dir) {
@@ -1386,6 +1377,17 @@ function syncPeersToRenderer() {
   }
 }
 
+function gameWindowWebPreferences(gameId) {
+  return {
+    preload: path.join(__dirname, '..', 'preload', 'game-preload.js'),
+    additionalArguments: [`--bluetalk-game=${gameId}`],
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    spellcheck: false,
+  };
+}
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
@@ -1471,13 +1473,7 @@ function createPokerGameWindow() {
     transparent: false,
     backgroundColor: '#071018',
     icon: createAppIcon(256),
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: gameWindowWebPreferences('poker'),
     show: false,
   });
   hardenWindow(pokerGameWindow);
@@ -1527,13 +1523,7 @@ function createUnoGameWindow() {
     transparent: false,
     backgroundColor: '#0a1020',
     icon: createAppIcon(256),
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: gameWindowWebPreferences('uno'),
     show: false,
   });
   hardenWindow(unoGameWindow);
@@ -1583,13 +1573,7 @@ function createConnectFourGameWindow() {
     transparent: false,
     backgroundColor: '#0a1020',
     icon: createAppIcon(256),
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: gameWindowWebPreferences('connect-four'),
     show: false,
   });
   hardenWindow(connectFourGameWindow);
@@ -1639,13 +1623,7 @@ function createChessGameWindow() {
     transparent: false,
     backgroundColor: '#1a1510',
     icon: createAppIcon(256),
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: gameWindowWebPreferences('chess'),
     show: false,
   });
   hardenWindow(chessGameWindow);
@@ -1695,13 +1673,7 @@ function createTicTacToeGameWindow() {
     transparent: false,
     backgroundColor: '#0a1020',
     icon: createAppIcon(256),
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: gameWindowWebPreferences('tic-tac-toe'),
     show: false,
   });
   hardenWindow(ticTacToeGameWindow);

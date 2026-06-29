@@ -8,7 +8,8 @@ const RELEASE_NOTES = {
     items: [
       'Spiel-Einladungen und öffentliche Lobbys verbinden jetzt zuverlässig mit Poker, UNO, Vier gewinnt, Schach und Tic-Tac-Toe.',
       'Wiederholte Beitritts-Klicks senden keine doppelten Join-Anfragen mehr.',
-      'Aktualisierte Spiele-Plugins werden beim App-Start automatisch installiert.',
+      'Spielfenster starten deutlich schlanker und besitzen nur noch den minimal erforderlichen App-Zugriff.',
+      'Plugin-Realtime, Timer-Bereinigung und automatische Plugin-Updates wurden stabilisiert.',
     ],
   },
   '1.1.19': {

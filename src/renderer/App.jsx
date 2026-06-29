@@ -87,11 +87,6 @@ const GamesPage = lazy(() => import('./pages/Games'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const PluginsPage = lazy(() => import('./pages/Plugins'));
 const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
-const PokerGamePage = lazy(() => import('./pages/PokerGamePage'));
-const UnoGamePage = lazy(() => import('./pages/UnoGamePage'));
-const ConnectFourGamePage = lazy(() => import('./pages/ConnectFourGamePage'));
-const ChessGamePage = lazy(() => import('./pages/ChessGamePage'));
-const TicTacToeGamePage = lazy(() => import('./pages/TicTacToeGamePage'));
 const DocsPage = lazy(() => import('./docs/DocsPage'));
 
 const AppContext = createContext(null);
@@ -1498,6 +1493,8 @@ export default function App() {
         setTheme('dark');
         setLoadError('');
         setShowVersionWelcome(false);
+        ownPeerIdRef.current = '';
+        setOwnPeerId('');
         ownEcdhPrivateRef.current = null;
         ownEcdhPublicSpkiRef.current = '';
         e2eeSessionsRef.current = {};
@@ -1507,6 +1504,10 @@ export default function App() {
         setE2eeBootNonce((n) => n + 1);
         setUsernameOnboardingGateReady(true);
         setShowUsernameOnboarding(true);
+        void window.bluetalk.peer.getInfo().then((info) => {
+          ownPeerIdRef.current = info?.id || '';
+          setOwnPeerId(info?.id || '');
+        }).catch(() => {});
         window.location.hash = '#/';
         return;
       }
@@ -2892,7 +2893,9 @@ export default function App() {
 
   useEffect(() => {
     if (!window.bluetalk?.plugins) return undefined;
+    let cancelled = false;
     const host = {
+      getOwnPeerId: () => ownPeerIdRef.current,
       getPeers: () => peersRef.current,
       getContacts: () => contactsRef.current,
       getMessages: (peerId) => (peerId ? messagesRef.current[peerId] || [] : messagesRef.current),
@@ -2908,8 +2911,19 @@ export default function App() {
     };
     pluginRuntime.setHost(host);
     pluginRuntime.injectReact(React, ReactDOM);
-    void pluginRuntime.boot(host);
-    return undefined;
+    void (async () => {
+      if (!ownPeerIdRef.current) {
+        try {
+          const info = await window.bluetalk.peer.getInfo();
+          ownPeerIdRef.current = info?.id || '';
+          if (!cancelled) setOwnPeerId(info?.id || '');
+        } catch {
+          /* Realtime liest die ID später erneut aus dem aktuellen Ref. */
+        }
+      }
+      if (!cancelled) await pluginRuntime.boot(host);
+    })();
+    return () => { cancelled = true; };
   }, [sendMessage, deleteMessage, deleteChat, upsertContact, removeContact, setContactBlocked, setContactNickname, setChatPinned]);
 
   if (!window.bluetalk) {
@@ -2932,11 +2946,6 @@ export default function App() {
             <PluginRuntimeToastBridge />
             <Suspense fallback={<div className="page"><div className="page-body">Wird geladen…</div></div>}>
             <Routes>
-              <Route path="/poker-game" element={<PokerGamePage />} />
-              <Route path="/uno-game" element={<UnoGamePage />} />
-              <Route path="/connect-four-game" element={<ConnectFourGamePage />} />
-              <Route path="/chess-game" element={<ChessGamePage />} />
-              <Route path="/tic-tac-toe-game" element={<TicTacToeGamePage />} />
               <Route path="/docs/*" element={<DocsPage />} />
               <Route
                 path="*"
