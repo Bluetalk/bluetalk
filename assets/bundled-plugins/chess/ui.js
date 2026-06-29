@@ -1205,27 +1205,55 @@
     };
   }
 
-  async function bootstrapPendingJoin() {
+  async function joinGame(pending) {
     await refreshChessSelfId();
-    const pending = tryConsumePendingJoin();
-    if (pending?.hostPeerId && pending?.gameId && !host && !clientState) {
-      clientState = {
-        gameId: pending.gameId,
-        hostPeerId: pending.hostPeerId,
-        phase: 'lobby',
-        players: [],
-        settings: sanitizeSettings(pending.chessSettings || {}),
-        message: 'Verbindung zur Partie wird hergestellt…',
-      };
-      sendWire(pending.hostPeerId, {
-        wire: 'join',
-        gameId: pending.gameId,
-        name: chessSelfPeerName || 'Spieler',
-      });
+    if (!pending?.hostPeerId || !pending?.gameId) {
+      return { ok: false, message: 'Ungültige Schach-Einladung.' };
+    }
+    if (!chessSelfPeerId) {
+      return { ok: false, message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' };
+    }
+
+    const sameGame = !host
+      && clientState?.gameId === pending.gameId
+      && clientState?.hostPeerId === pending.hostPeerId;
+    if ((host || clientState) && !sameGame) {
+      const message = 'Du bist bereits in einer anderen Schach-Partie.';
+      api.notify.toast?.({ title: 'Schach', message });
+      return { ok: false, message };
+    }
+    if (sameGame) {
       await openGameWindowIfNeeded();
       tryPump();
-      notifyLauncherRefresh();
+      return { ok: true };
     }
+
+    clientState = {
+      gameId: pending.gameId,
+      hostPeerId: pending.hostPeerId,
+      phase: 'lobby',
+      players: [],
+      settings: sanitizeSettings(pending.chessSettings || {}),
+      message: 'Verbindung zur Partie wird hergestellt…',
+    };
+    api.log.info('Join-Anfrage wird gesendet', {
+      hostPeerId: pending.hostPeerId,
+      gameId: pending.gameId,
+    });
+    sendWire(pending.hostPeerId, {
+      wire: 'join',
+      gameId: pending.gameId,
+      name: chessSelfPeerName || 'Spieler',
+    });
+    await openGameWindowIfNeeded();
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }
+
+  async function bootstrapPendingJoin() {
+    const pending = tryConsumePendingJoin();
+    if (pending) await joinGame(pending);
   }
 
   const offChessMessage = api.on('peer:message', (msg) => {
@@ -1299,6 +1327,7 @@
   api.ui.registerCommand('launcherState', () => getLauncherState());
   api.ui.registerCommand('launchNew', () => launchHostGame(null));
   api.ui.registerCommand('launchResume', () => launchHostGame(api.storage.get('savedChessGame', null)));
+  api.ui.registerCommand('join', (pending) => joinGame(pending));
   api.ui.registerCommand('openWindow', () => openGameWindowIfNeeded().then(() => {
     tryPump();
     notifyLauncherRefresh();

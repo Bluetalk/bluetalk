@@ -905,8 +905,34 @@ function ContactShareMessage({ message, onConnect, isConnected }) {
   );
 }
 
+function useGameJoinRequest() {
+  const { toast } = useToast();
+  return useCallback(async (game, pending) => {
+    const response = await pluginRuntime.invokePluginCommand(game, 'join', pending);
+    const result = response?.ok
+      ? (response.result?.ok === false ? response.result : { ok: true })
+      : {
+        ok: false,
+        message: response?.error === 'not_active'
+          ? 'Aktiviere dieses Spiel zuerst unter Erweiterungen.'
+          : response?.error === 'unknown_command'
+            ? 'Das Spiele-Plugin ist veraltet. Bitte stelle es unter Erweiterungen auf Standard zurück.'
+            : response?.error || 'Beitritt fehlgeschlagen.',
+      };
+    if (!result.ok) {
+      toast({
+        variant: 'warning',
+        title: 'Beitritt nicht möglich',
+        message: result.message || 'Beitritt fehlgeschlagen.',
+      });
+    }
+    return result;
+  }, [toast]);
+}
+
 function PokerInviteMessage({ message }) {
   const navigate = useNavigate();
+  const requestGameJoin = useGameJoinRequest();
   const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'Poker-Tisch';
   const settings = message.pokerSettings || {};
@@ -927,23 +953,17 @@ function PokerInviteMessage({ message }) {
     hostOnline,
   }) && !isPresenceStale(hostPresence);
 
-  const joinTable = () => {
+  const joinTable = async () => {
     if (!inviteActive) return;
-    try {
-      sessionStorage.setItem(
-        'bt.poker.pendingJoin',
-        JSON.stringify({
-          hostPeerId,
-          tableId: message.tableId,
-          tableName,
-          pokerSettings: settings,
-        })
-      );
-    } catch {
-      /* ignore */
+    const result = await requestGameJoin('poker', {
+      hostPeerId,
+      tableId: message.tableId,
+      tableName,
+      pokerSettings: settings,
+    });
+    if (result.ok) {
+      navigate('/games');
     }
-    navigate('/games');
-    void window.bluetalk?.poker?.openGameWindow?.();
   };
 
   return (
@@ -991,6 +1011,7 @@ function PokerInviteMessage({ message }) {
 
 function UnoInviteMessage({ message }) {
   const navigate = useNavigate();
+  const requestGameJoin = useGameJoinRequest();
   const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'UNO-Tisch';
   const settings = message.unoSettings || {};
@@ -1012,23 +1033,17 @@ function UnoInviteMessage({ message }) {
     hostOnline,
   }) && !isPresenceStale(hostPresence);
 
-  const joinGame = () => {
+  const joinGame = async () => {
     if (!inviteActive) return;
-    try {
-      sessionStorage.setItem(
-        'bt.uno.pendingJoin',
-        JSON.stringify({
-          hostPeerId,
-          gameId: message.gameId,
-          tableName,
-          unoSettings: settings,
-        })
-      );
-    } catch {
-      /* ignore */
+    const result = await requestGameJoin('uno', {
+      hostPeerId,
+      gameId: message.gameId,
+      tableName,
+      unoSettings: settings,
+    });
+    if (result.ok) {
+      navigate('/games');
     }
-    navigate('/games');
-    void window.bluetalk?.uno?.openGameWindow?.();
   };
 
   return (
@@ -1075,6 +1090,7 @@ function UnoInviteMessage({ message }) {
 
 function ConnectFourInviteMessage({ message }) {
   const navigate = useNavigate();
+  const requestGameJoin = useGameJoinRequest();
   const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'Vier-gewinnt-Tisch';
   const settings = message.connectFourSettings || {};
@@ -1091,23 +1107,17 @@ function ConnectFourInviteMessage({ message }) {
     hostOnline,
   }) && !isPresenceStale(hostPresence);
 
-  const joinGame = () => {
+  const joinGame = async () => {
     if (!inviteActive) return;
-    try {
-      sessionStorage.setItem(
-        'bt.connectFour.pendingJoin',
-        JSON.stringify({
-          hostPeerId,
-          gameId: message.gameId,
-          tableName,
-          connectFourSettings: settings,
-        })
-      );
-    } catch {
-      /* ignore */
+    const result = await requestGameJoin('connect-four', {
+      hostPeerId,
+      gameId: message.gameId,
+      tableName,
+      connectFourSettings: settings,
+    });
+    if (result.ok) {
+      navigate('/games');
     }
-    navigate('/games');
-    void window.bluetalk?.connectFour?.openGameWindow?.();
   };
 
   return (
@@ -1153,6 +1163,7 @@ function ConnectFourInviteMessage({ message }) {
 
 function ChessInviteMessage({ message }) {
   const navigate = useNavigate();
+  const requestGameJoin = useGameJoinRequest();
   const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'Schach-Partie';
   const settings = message.chessSettings || {};
@@ -1171,23 +1182,17 @@ function ChessInviteMessage({ message }) {
     hostOnline,
   }) && !isPresenceStale(hostPresence);
 
-  const joinGame = () => {
+  const joinGame = async () => {
     if (!inviteActive) return;
-    try {
-      sessionStorage.setItem(
-        'bt.chess.pendingJoin',
-        JSON.stringify({
-          hostPeerId,
-          gameId: message.gameId,
-          tableName,
-          chessSettings: settings,
-        })
-      );
-    } catch {
-      /* ignore */
+    const result = await requestGameJoin('chess', {
+      hostPeerId,
+      gameId: message.gameId,
+      tableName,
+      chessSettings: settings,
+    });
+    if (result.ok) {
+      navigate('/games');
     }
-    navigate('/games');
-    void window.bluetalk?.chess?.openGameWindow?.();
   };
 
   return (
@@ -1233,6 +1238,7 @@ function ChessInviteMessage({ message }) {
 
 function TicTacToeInviteMessage({ message }) {
   const navigate = useNavigate();
+  const requestGameJoin = useGameJoinRequest();
   const { peers, peerGamePresence } = useApp();
   const tableName = message.tableName || 'Tic-Tac-Toe';
   const settings = message.ticTacToeSettings || {};
@@ -1252,23 +1258,17 @@ function TicTacToeInviteMessage({ message }) {
     hostOnline,
   }) && !isPresenceStale(hostPresence);
 
-  const joinGame = () => {
+  const joinGame = async () => {
     if (!inviteActive) return;
-    try {
-      sessionStorage.setItem(
-        'bt.ticTacToe.pendingJoin',
-        JSON.stringify({
-          hostPeerId,
-          gameId: message.gameId,
-          tableName,
-          ticTacToeSettings: settings,
-        })
-      );
-    } catch {
-      /* ignore */
+    const result = await requestGameJoin('tic-tac-toe', {
+      hostPeerId,
+      gameId: message.gameId,
+      tableName,
+      ticTacToeSettings: settings,
+    });
+    if (result.ok) {
+      navigate('/games');
     }
-    navigate('/games');
-    void window.bluetalk?.ticTacToe?.openGameWindow?.();
   };
 
   return (
@@ -1322,7 +1322,7 @@ function GamePresenceBanner({ peerId, presence }) {
   const canJoin = canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId: peerId });
   const accessLabel = presence.lobbyAccess === 'public' ? 'Öffentliche Lobby' : 'Nur auf Einladung';
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!canJoin) {
       toast({
         variant: 'warning',
@@ -1333,9 +1333,16 @@ function GamePresenceBanner({ peerId, presence }) {
       });
       return;
     }
-    if (joinGameFromPresence(presence, peerId)) {
+    const result = await joinGameFromPresence(presence, peerId);
+    if (result?.ok) {
       navigate('/games');
       toast({ variant: 'success', title: 'Spiel beitreten', message: 'Verbindung zur Lobby wird hergestellt…' });
+    } else {
+      toast({
+        variant: 'warning',
+        title: 'Beitritt nicht möglich',
+        message: result?.message || 'Verbindung zur Lobby konnte nicht hergestellt werden.',
+      });
     }
   };
 

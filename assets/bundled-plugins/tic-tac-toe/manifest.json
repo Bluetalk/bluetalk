@@ -1,7 +1,7 @@
 {
   "id": "tic-tac-toe",
   "name": "Tic-Tac-Toe",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tic-Tac-Toe solo gegen Algorithmus oder online mit bis zu 4 Spielern — konfigurierbares Spielfeld, Einladungen per Chat, separates Spielfenster.",
   "author": "BlueTalk",
   "main": "main.js",

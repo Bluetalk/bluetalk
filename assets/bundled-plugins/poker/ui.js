@@ -1332,27 +1332,55 @@
     };
   }
 
-  async function bootstrapPendingJoin() {
+  async function joinGame(pending) {
     await refreshPokerSelfId();
-    const pending = tryConsumePendingJoin();
-    if (pending?.hostPeerId && pending?.tableId && !host && !clientState) {
-      clientState = {
-        tableId: pending.tableId,
-        hostPeerId: pending.hostPeerId,
-        phase: 'lobby',
-        players: [],
-        settings: sanitizeSettings(pending.pokerSettings || {}),
-        message: 'Verbindung zum Tisch wird hergestellt…',
-      };
-      sendWire(pending.hostPeerId, {
-        wire: 'join',
-        tableId: pending.tableId,
-        name: pokerSelfPeerName || 'Spieler',
-      });
+    if (!pending?.hostPeerId || !pending?.tableId) {
+      return { ok: false, message: 'Ungültige Poker-Einladung.' };
+    }
+    if (!pokerSelfPeerId) {
+      return { ok: false, message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' };
+    }
+
+    const sameTable = !host
+      && clientState?.tableId === pending.tableId
+      && clientState?.hostPeerId === pending.hostPeerId;
+    if ((host || clientState) && !sameTable) {
+      const message = 'Du bist bereits an einem anderen Poker-Tisch.';
+      api.notify.toast?.({ title: 'Poker', message });
+      return { ok: false, message };
+    }
+    if (sameTable) {
       await openGameWindowIfNeeded();
       tryPump();
-      notifyLauncherRefresh();
+      return { ok: true };
     }
+
+    clientState = {
+      tableId: pending.tableId,
+      hostPeerId: pending.hostPeerId,
+      phase: 'lobby',
+      players: [],
+      settings: sanitizeSettings(pending.pokerSettings || {}),
+      message: 'Verbindung zum Tisch wird hergestellt…',
+    };
+    api.log.info('Join-Anfrage wird gesendet', {
+      hostPeerId: pending.hostPeerId,
+      tableId: pending.tableId,
+    });
+    sendWire(pending.hostPeerId, {
+      wire: 'join',
+      tableId: pending.tableId,
+      name: pokerSelfPeerName || 'Spieler',
+    });
+    await openGameWindowIfNeeded();
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }
+
+  async function bootstrapPendingJoin() {
+    const pending = tryConsumePendingJoin();
+    if (pending) await joinGame(pending);
   }
 
   const offPokerMessage = api.on('peer:message', (msg) => {
@@ -1444,6 +1472,7 @@
   api.ui.registerCommand('launcherState', () => getLauncherState());
   api.ui.registerCommand('launchNew', () => launchHostGame(null));
   api.ui.registerCommand('launchResume', () => launchHostGame(api.storage.get('savedPokerGame', null)));
+  api.ui.registerCommand('join', (pending) => joinGame(pending));
   api.ui.registerCommand('openWindow', () => openGameWindowIfNeeded().then(() => {
     tryPump();
     notifyLauncherRefresh();

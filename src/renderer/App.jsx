@@ -2684,62 +2684,72 @@ export default function App() {
     return true;
   }, [leaveGroupChat, removeGroup, persistGroupOutbox, deleteChat]);
 
-  const joinGameFromPresence = useCallback((presence, hostPeerId) => {
-    if (!presence || !hostPeerId) return false;
-    if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) return false;
+  const joinGameFromPresence = useCallback(async (presence, hostPeerId) => {
+    if (!presence || !hostPeerId) {
+      return { ok: false, message: 'Spieldaten fehlen.' };
+    }
+    if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) {
+      return { ok: false, message: 'Diese Lobby kann derzeit nicht betreten werden.' };
+    }
     const game = presence.game;
     const sessionId = presence.sessionId;
-    if (!game || !sessionId) return false;
+    if (!game || !sessionId) {
+      return { ok: false, message: 'Die Spiel-ID fehlt.' };
+    }
 
-    try {
-      window.location.hash = '#/games';
-      if (game === 'poker') {
-        sessionStorage.setItem('bt.poker.pendingJoin', JSON.stringify({
-          hostPeerId,
-          tableId: sessionId,
-          tableName: presence.tableName || 'Poker-Tisch',
-          pokerSettings: {},
-        }));
-        void window.bluetalk?.poker?.openGameWindow?.();
-      } else if (game === 'uno') {
-        sessionStorage.setItem('bt.uno.pendingJoin', JSON.stringify({
+    const pending = game === 'poker'
+      ? {
+        hostPeerId,
+        tableId: sessionId,
+        tableName: presence.tableName || 'Poker-Tisch',
+        pokerSettings: {},
+      }
+      : game === 'uno'
+        ? {
           hostPeerId,
           gameId: sessionId,
           tableName: presence.tableName || 'UNO-Tisch',
           unoSettings: {},
-        }));
-        void window.bluetalk?.uno?.openGameWindow?.();
-      } else if (game === 'connect-four') {
-        sessionStorage.setItem('bt.connectFour.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Vier-gewinnt-Tisch',
-          connectFourSettings: {},
-        }));
-        void window.bluetalk?.connectFour?.openGameWindow?.();
-      } else if (game === 'chess') {
-        sessionStorage.setItem('bt.chess.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Schach-Partie',
-          chessSettings: {},
-        }));
-        void window.bluetalk?.chess?.openGameWindow?.();
-      } else if (game === 'tic-tac-toe') {
-        sessionStorage.setItem('bt.ticTacToe.pendingJoin', JSON.stringify({
-          hostPeerId,
-          gameId: sessionId,
-          tableName: presence.tableName || 'Tic-Tac-Toe',
-          ticTacToeSettings: {},
-        }));
-        void window.bluetalk?.ticTacToe?.openGameWindow?.();
-      } else {
-        return false;
-      }
-    } catch {
-      return false;
+        }
+        : game === 'connect-four'
+          ? {
+            hostPeerId,
+            gameId: sessionId,
+            tableName: presence.tableName || 'Vier-gewinnt-Tisch',
+            connectFourSettings: {},
+          }
+          : game === 'chess'
+            ? {
+              hostPeerId,
+              gameId: sessionId,
+              tableName: presence.tableName || 'Schach-Partie',
+              chessSettings: {},
+            }
+            : game === 'tic-tac-toe'
+              ? {
+                hostPeerId,
+                gameId: sessionId,
+                tableName: presence.tableName || 'Tic-Tac-Toe',
+                ticTacToeSettings: {},
+              }
+              : null;
+    if (!pending) {
+      return { ok: false, message: 'Dieses Spiel wird nicht unterstützt.' };
     }
-    return true;
+
+    window.location.hash = '#/games';
+    const response = await pluginRuntime.invokePluginCommand(game, 'join', pending);
+    if (!response?.ok) {
+      return {
+        ok: false,
+        message: response?.error === 'not_active'
+          ? 'Aktiviere dieses Spiel zuerst unter Erweiterungen.'
+          : response?.error === 'unknown_command'
+            ? 'Das Spiele-Plugin ist veraltet. Bitte stelle es unter Erweiterungen auf Standard zurück.'
+            : response?.error || 'Beitritt fehlgeschlagen.',
+      };
+    }
+    return response.result?.ok === false ? response.result : { ok: true };
   }, [gameInviteKeys]);
 
   const updateSettings = useCallback((newSettings) => {

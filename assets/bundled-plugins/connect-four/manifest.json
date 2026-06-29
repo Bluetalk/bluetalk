@@ -1,7 +1,7 @@
 {
   "id": "connect-four",
   "name": "Vier gewinnt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Vier gewinnt für 2 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster.",
   "author": "BlueTalk",
   "main": "main.js",

@@ -929,27 +929,55 @@
     };
   }
 
-  async function bootstrapPendingJoin() {
+  async function joinGame(pending) {
     await refreshSelfId();
-    const pending = tryConsumePendingJoin();
-    if (pending?.hostPeerId && pending?.gameId && !host && !clientState) {
-      clientState = {
-        gameId: pending.gameId,
-        hostPeerId: pending.hostPeerId,
-        phase: 'lobby',
-        players: [],
-        settings: sanitizeSettings(pending.ticTacToeSettings || {}),
-        message: 'Verbindung zum Tisch wird hergestellt…',
-      };
-      sendWire(pending.hostPeerId, {
-        wire: 'join',
-        gameId: pending.gameId,
-        name: tttSelfPeerName || 'Spieler',
-      });
+    if (!pending?.hostPeerId || !pending?.gameId) {
+      return { ok: false, message: 'Ungültige Tic-Tac-Toe-Einladung.' };
+    }
+    if (!tttSelfPeerId) {
+      return { ok: false, message: 'Peer-ID noch nicht verfügbar. Bitte erneut versuchen.' };
+    }
+
+    const sameGame = !host
+      && clientState?.gameId === pending.gameId
+      && clientState?.hostPeerId === pending.hostPeerId;
+    if ((host || clientState) && !sameGame) {
+      const message = 'Du bist bereits in einem anderen Tic-Tac-Toe-Spiel.';
+      api.notify.toast?.({ title: 'Tic-Tac-Toe', message });
+      return { ok: false, message };
+    }
+    if (sameGame) {
       await openGameWindowIfNeeded();
       tryPump();
-      notifyLauncherRefresh();
+      return { ok: true };
     }
+
+    clientState = {
+      gameId: pending.gameId,
+      hostPeerId: pending.hostPeerId,
+      phase: 'lobby',
+      players: [],
+      settings: sanitizeSettings(pending.ticTacToeSettings || {}),
+      message: 'Verbindung zum Tisch wird hergestellt…',
+    };
+    api.log.info('Join-Anfrage wird gesendet', {
+      hostPeerId: pending.hostPeerId,
+      gameId: pending.gameId,
+    });
+    sendWire(pending.hostPeerId, {
+      wire: 'join',
+      gameId: pending.gameId,
+      name: tttSelfPeerName || 'Spieler',
+    });
+    await openGameWindowIfNeeded();
+    tryPump();
+    notifyLauncherRefresh();
+    return { ok: true };
+  }
+
+  async function bootstrapPendingJoin() {
+    const pending = tryConsumePendingJoin();
+    if (pending) await joinGame(pending);
   }
 
   const offMessage = api.on('peer:message', (msg) => {
@@ -1022,6 +1050,7 @@
   api.ui.registerCommand('launcherState', () => getLauncherState());
   api.ui.registerCommand('launchNew', () => launchHostGame(null));
   api.ui.registerCommand('launchResume', () => launchHostGame(api.storage.get('savedTicTacToeGame', null)));
+  api.ui.registerCommand('join', (pending) => joinGame(pending));
   api.ui.registerCommand('openWindow', () => openGameWindowIfNeeded().then(() => {
     tryPump();
     notifyLauncherRefresh();
