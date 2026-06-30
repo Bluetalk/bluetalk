@@ -1,7 +1,7 @@
 {
   "id": "racing-3d",
   "name": "3D Live Autorennen",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Mehrspieler-3D-Rennen mit 5 Strecken, Host-Lobby und Realtime-API-Synchronisierung.",
   "author": "BlueTalk",
   "main": "main.js",
