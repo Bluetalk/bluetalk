@@ -15,6 +15,7 @@
   let screenOpen = false;
   let localInput = { throttle: 0, brake: 0, steer: 0, boost: 0 };
   let lastInputSent = 0;
+  let pendingRoom = null;
 
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
   const uid = () => `race_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -28,6 +29,16 @@
     const contact = api.contacts().find((c) => c.id === peerId);
     return contact?.nickname || contact?.name || peerId?.slice(0, 8) || 'Fahrer';
   };
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[ch]));
+  const safeColor = (value) => /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : '#38bdf8';
+  const isValidState = (value) => Boolean(
+    value && typeof value === 'object'
+      && typeof value.roomId === 'string'
+      && typeof value.hostPeerId === 'string'
+      && ['lobby', 'countdown', 'racing', 'finished'].includes(value.phase)
+      && typeof value.players === 'object'
+      && value.players !== null
+  );
 
   function createState(hostPeerId, trackId = TRACKS[0].id) {
     return {
@@ -108,15 +119,19 @@
   }
 
   async function hostRace(trackId) {
+    if (room) return false;
     const info = await me();
     const selfId = info?.id || `local_${uid()}`;
     setState(createState(selfId, trackId));
     ensurePlayer(selfId, info?.name || 'Host');
+    if (room) return false;
     room = api.realtime.createRoom({ roomId: state.roomId, name: '3D Autorennen', access: 'public', maxPeers: MAX_PLAYERS });
+    if (!room) return false;
     wireRoom();
     screenOpen = true;
     api.ui.openScreen('race');
     sync();
+    return true;
   }
 
   async function joinRace(hostPeerId, roomId) {
@@ -135,7 +150,10 @@
     if (!room) return;
     room.on('message', ({ payload, from }) => {
       if (!payload) return;
-      if (payload.type === 'state') setState(payload.state);
+      if (payload.type === 'state') {
+        if (!room.isHost && from === room.hostPeerId && isValidState(payload.state)) setState(payload.state);
+        return;
+      }
       if (room.isHost && payload.type === 'join') {
         if (Object.keys(state.players).length >= MAX_PLAYERS) return;
         ensurePlayer(from || payload.peerId, payload.name);
@@ -256,7 +274,10 @@
       const s = state;
       const track = getTrackById(selected);
       const players = rankPlayers(Object.values(s?.players || {}));
-      return `<h3>${s ? ({ lobby: 'Lobby', countdown: 'Countdown', racing: 'Rennen', finished: 'Ergebnis' }[s.phase] || s.phase) : '3D Rennen'}</h3><div class="r3dMeta">Raum: <span class="r3dInvite">${s?.roomId || '—'}</span></div><div class="r3dTrack">${TRACKS.map((t) => `<button class="r3dBtn ${selected === t.id ? 'active' : ''}" data-track="${t.id}">${t.name}<br><span class="r3dMeta">${t.laps} Runden · ${t.length} m · ${t.difficulty}</span></button>`).join('')}</div><div class="r3dActions"><button class="r3dBtn primary" data-act="host">Neue Lobby</button><button class="r3dBtn" data-act="start" ${room?.isHost && s?.phase === 'lobby' && players.length >= 1 ? '' : 'disabled'}>Rennen starten</button><button class="r3dBtn" data-act="reset" ${room?.isHost && s ? '' : 'disabled'}>Zurücksetzen</button></div><p class="r3dHelp">${track.name}: Hindernisse bremsen, Boost-Pads geben Tempo. Der Host simuliert alle Fahrzeuge autoritativ und sendet laufend den Spielstand.</p><h3>Fahrer</h3><div class="r3dPlayers">${players.map((p, i) => `<div class="r3dPlayer"><span>${i + 1}.</span><span class="r3dDot" style="background:${p.color}"></span><div><b>${p.name}</b><div class="r3dBar"><span style="width:${clamp(((p.lap - 1) * getTrack().length + p.progress) / (getTrack().length * getTrack().laps) * 100, 0, 100)}%"></span></div></div><span class="r3dMeta">${p.finished ? formatMs(p.finishMs) : `R${p.lap}/${getTrack().laps}`}</span></div>`).join('') || '<div class="r3dMeta">Noch keine Fahrer</div>'}</div>${s?.results?.length ? `<h3>Podium</h3>${s.results.map((r, i) => `<div class="r3dResult">${i + 1}. <b style="color:${r.color}">${r.name}</b> · ${formatMs(r.finishMs)}</div>`).join('')}` : ''}<h3>Log</h3><div class="r3dLog">${(s?.chat || []).map((m) => `<div class="r3dMeta">${m.text}</div>`).join('') || '<div class="r3dMeta">Bereit.</div>'}</div>`;
+      const phase = escapeHtml(s ? ({ lobby: 'Lobby', countdown: 'Countdown', racing: 'Rennen', finished: 'Ergebnis' }[s.phase] || s.phase) : '3D Rennen');
+      const roomId = escapeHtml(s?.roomId || '—');
+      const pending = pendingRoom && !room ? `<div class="r3dResult"><b>Gefunden:</b> ${escapeHtml(pendingRoom.name || '3D Autorennen')}<br><span class="r3dInvite">${escapeHtml(pendingRoom.roomId)}</span><div class="r3dActions" style="margin-top:8px"><button class="r3dBtn primary" data-act="joinPending">Beitreten</button><button class="r3dBtn" data-act="dismissPending">Ignorieren</button></div></div>` : '';
+      return `<h3>${phase}</h3><div class="r3dMeta">Raum: <span class="r3dInvite">${roomId}</span></div>${pending}<div class="r3dTrack">${TRACKS.map((t) => `<button class="r3dBtn ${selected === t.id ? 'active' : ''}" data-track="${escapeHtml(t.id)}">${escapeHtml(t.name)}<br><span class="r3dMeta">${t.laps} Runden · ${t.length} m · ${escapeHtml(t.difficulty)}</span></button>`).join('')}</div><div class="r3dActions"><button class="r3dBtn primary" data-act="host" ${room ? 'disabled' : ''}>Neue Lobby</button><button class="r3dBtn" data-act="start" ${room?.isHost && s?.phase === 'lobby' && players.length >= 1 ? '' : 'disabled'}>Rennen starten</button><button class="r3dBtn" data-act="reset" ${room?.isHost && s ? '' : 'disabled'}>Zurücksetzen</button></div><p class="r3dHelp">${escapeHtml(track.name)}: Hindernisse bremsen, Boost-Pads geben Tempo. Der Host simuliert alle Fahrzeuge autoritativ und sendet laufend den Spielstand.</p><h3>Fahrer</h3><div class="r3dPlayers">${players.map((p, i) => `<div class="r3dPlayer"><span>${i + 1}.</span><span class="r3dDot" style="background:${safeColor(p.color)}"></span><div><b>${escapeHtml(p.name)}</b><div class="r3dBar"><span style="width:${clamp(((p.lap - 1) * getTrack().length + p.progress) / (getTrack().length * getTrack().laps) * 100, 0, 100)}%"></span></div></div><span class="r3dMeta">${p.finished ? formatMs(p.finishMs) : `R${p.lap}/${getTrack().laps}`}</span></div>`).join('') || '<div class="r3dMeta">Noch keine Fahrer</div>'}</div>${s?.results?.length ? `<h3>Podium</h3>${s.results.map((r, i) => `<div class="r3dResult">${i + 1}. <b style="color:${safeColor(r.color)}">${escapeHtml(r.name)}</b> · ${formatMs(r.finishMs)}</div>`).join('')}` : ''}<h3>Log</h3><div class="r3dLog">${(s?.chat || []).map((m) => `<div class="r3dMeta">${escapeHtml(m.text)}</div>`).join('') || '<div class="r3dMeta">Bereit.</div>'}</div>`;
     }
     function renderSide() { side.innerHTML = sideHtml(); }
     function drawWorld() {
@@ -279,7 +300,7 @@
         const x = w / 2 + curve + (p.x || 0) * w * .20 * z + (idx - 2) * 5;
         const y = h * (.92 - z * .35);
         const cw = 58 * z + 34; const ch = 28 * z + 18;
-        ctx.fillStyle = p.color; ctx.fillRect(x - cw / 2, y - ch, cw, ch); ctx.fillStyle = '#020617'; ctx.fillRect(x - cw * .22, y - ch * .86, cw * .44, ch * .38); ctx.fillStyle = '#e5e7eb'; ctx.font = `${Math.max(12, 17 * z)}px sans-serif`; ctx.fillText(p.name || 'Fahrer', x - cw / 2, y - ch - 8);
+        ctx.fillStyle = safeColor(p.color); ctx.fillRect(x - cw / 2, y - ch, cw, ch); ctx.fillStyle = '#020617'; ctx.fillRect(x - cw * .22, y - ch * .86, cw * .44, ch * .38); ctx.fillStyle = '#e5e7eb'; ctx.font = `${Math.max(12, 17 * z)}px sans-serif`; ctx.fillText(String(p.name || 'Fahrer').slice(0, 24), x - cw / 2, y - ch - 8);
       }
       speedEl.textContent = Math.round((self.speed || 0) * 3.6); lapEl.textContent = `Runde ${Math.min(self.lap || 1, track.laps)}/${track.laps} · Boost ${Math.round(self.boostFuel || 0)}%`;
     }
@@ -296,11 +317,13 @@
       sendLocalInput(); renderCenter(); drawWorld(); raf = requestAnimationFrame(frame);
     }
     function key(e, on) {
-      if (['ArrowUp', 'w', 'W'].includes(e.key)) localInput.throttle = on ? 1 : 0;
-      if (['ArrowDown', 's', 'S'].includes(e.key)) localInput.brake = on ? 1 : 0;
-      if (['ArrowLeft', 'a', 'A'].includes(e.key)) localInput.steer = on ? -1 : (localInput.steer < 0 ? 0 : localInput.steer);
-      if (['ArrowRight', 'd', 'D'].includes(e.key)) localInput.steer = on ? 1 : (localInput.steer > 0 ? 0 : localInput.steer);
-      if (e.code === 'Space') localInput.boost = on ? 1 : 0;
+      let handled = false;
+      if (['ArrowUp', 'w', 'W'].includes(e.key)) { localInput.throttle = on ? 1 : 0; handled = true; }
+      if (['ArrowDown', 's', 'S'].includes(e.key)) { localInput.brake = on ? 1 : 0; handled = true; }
+      if (['ArrowLeft', 'a', 'A'].includes(e.key)) { localInput.steer = on ? -1 : (localInput.steer < 0 ? 0 : localInput.steer); handled = true; }
+      if (['ArrowRight', 'd', 'D'].includes(e.key)) { localInput.steer = on ? 1 : (localInput.steer > 0 ? 0 : localInput.steer); handled = true; }
+      if (e.code === 'Space') { localInput.boost = on ? 1 : 0; handled = true; }
+      if (handled) e.preventDefault?.();
     }
     const onState = () => renderSide(); const onKeyDown = (e) => key(e, true); const onKeyUp = (e) => key(e, false);
     window.addEventListener('bt:racing3d-state', onState); window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp);
@@ -309,17 +332,19 @@
       if (tr) { selected = tr.dataset.track; if (state && room?.isHost && state.phase === 'lobby') resetLobby(selected); renderSide(); }
       const act = e.target.closest('[data-act]')?.dataset.act;
       if (act === 'host') void hostRace(selected);
+      if (act === 'joinPending' && pendingRoom) void joinRace(pendingRoom.hostPeerId, pendingRoom.roomId);
+      if (act === 'dismissPending') { pendingRoom = null; renderSide(); }
       if (act === 'start') startCountdown();
       if (act === 'reset') resetLobby(selected);
-      if (act === 'close') api.ui.closeScreen();
+      if (act === 'close') { screenOpen = false; api.ui.closeScreen(); }
     });
     renderSide(); raf = requestAnimationFrame(frame);
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('bt:racing3d-state', onState); window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    return () => { screenOpen = false; cancelAnimationFrame(raf); window.removeEventListener('bt:racing3d-state', onState); window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
   } });
 
   api.ui.registerCommand('launcherState', () => ({ active: screenOpen, hasSavedGame: false, tableName: state ? `${getTrack().name} Rennen` : null }));
-  api.ui.registerCommand('launchNew', () => { void hostRace(TRACKS[0].id); return { ok: true }; });
+  api.ui.registerCommand('launchNew', () => (room ? { ok: false, message: 'Es läuft bereits ein Rennen.' } : (void hostRace(TRACKS[0].id), { ok: true }))); 
   api.ui.registerCommand('openWindow', () => { screenOpen = true; api.ui.openScreen('race'); return { ok: true }; });
-  api.realtime.on('room-invite', (invite) => { if (invite?.roomId && invite?.hostPeerId) void joinRace(invite.hostPeerId, invite.roomId); });
-  api.realtime.on('room-discovered', (found) => { if (!room && found?.roomId && found?.hostPeerId) void joinRace(found.hostPeerId, found.roomId); });
+  api.realtime.on('room-invite', (invite) => { if (!room && invite?.roomId && invite?.hostPeerId) { pendingRoom = { ...invite, source: 'invite' }; emitState(); } });
+  api.realtime.on('room-discovered', (found) => { if (!room && found?.roomId && found?.hostPeerId) { pendingRoom = { ...found, source: 'discovery' }; emitState(); } });
 })();
