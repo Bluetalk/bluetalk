@@ -2099,7 +2099,9 @@ function MessageSegments({ segments, content, thinking, toolEvents, live = false
   );
 }
 
-function ChatMessage({ message, onExpandImage, onOpenSubagent }) {
+// Memoisiert, damit die (teure) Markdown/KaTeX-Darstellung nicht bei jedem
+// Tastendruck im Composer neu gerendert wird — Props müssen dafür stabil sein.
+const ChatMessage = React.memo(function ChatMessage({ message, onExpandImage, onOpenSubagent }) {
   const imageUrl = getImageUrl(message);
   if (imageUrl) {
     const open = () => {
@@ -2143,7 +2145,7 @@ function ChatMessage({ message, onExpandImage, onOpenSubagent }) {
       )}
     </>
   );
-}
+});
 
 function MediaLightbox({ open, src, alt, canSave, onClose, onSave }) {
   if (!open) return null;
@@ -2286,6 +2288,7 @@ export default function ChatsPage() {
   const [forwardingMessages, setForwardingMessages] = useState(false);
   const [ollamaState, setOllamaState] = useState(null);
   const [aiAgents, setAiAgents] = useState([]);
+  const [aiAgentsLoaded, setAiAgentsLoaded] = useState(false);
   const [aiProfileDraft, setAiProfileDraft] = useState({
     name: '',
     bio: '',
@@ -2377,35 +2380,63 @@ export default function ChatsPage() {
     await refreshOllamaState();
   }, [refreshOllamaState, toast]);
 
+  const chatMetaRef = useRef(chatMeta);
   useEffect(() => {
-    if (!window.bluetalk?.store) return undefined;
+    chatMetaRef.current = chatMeta;
+  }, [chatMeta]);
+
+  // chatMeta ändert sich bei jeder Nachricht in irgendeinem Chat. Für die
+  // Agentenliste ist aber nur relevant, welche KI-Chat-Einträge existieren —
+  // sonst würde jeder Tastendruck/jede Nachricht einen Store-Reload auslösen.
+  const aiAgentMetaSignal = useMemo(() => {
+    const ids = Object.keys(chatMeta || {}).filter((id) => isAiChatPeerId(id)).sort();
+    const legacyHasMessages = (chatMeta?.[AI_CHAT_PEER_ID]?.count || 0) > 0;
+    return `${legacyHasMessages ? '1' : '0'}:${ids.join('|')}`;
+  }, [chatMeta]);
+
+  useEffect(() => {
+    if (!window.bluetalk?.store) {
+      setAiAgentsLoaded(true);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       const stored = await window.bluetalk.store.get('aiChat.agents', []);
       if (cancelled) return;
+      const meta = chatMetaRef.current || {};
       const normalized = Array.isArray(stored)
         ? stored
             .filter((agent) => agent?.id && isAiChatPeerId(agent.id))
             .map(normalizeAiAgent)
         : [];
 
-      if (normalized.length === 0 && chatMeta[AI_CHAT_PEER_ID]?.count > 0) {
+      if (normalized.length === 0 && meta[AI_CHAT_PEER_ID]?.count > 0) {
         const legacyAgent = {
           id: AI_CHAT_PEER_ID,
           name: 'KI-Assistent',
-          createdAt: chatMeta[AI_CHAT_PEER_ID]?.lastMessage?.timestamp || Date.now(),
+          createdAt: meta[AI_CHAT_PEER_ID]?.lastMessage?.timestamp || Date.now(),
         };
         await window.bluetalk.store.set('aiChat.agents', [legacyAgent]);
-        if (!cancelled) setAiAgents([legacyAgent]);
+        if (!cancelled) {
+          setAiAgents([legacyAgent]);
+          setAiAgentsLoaded(true);
+        }
         return;
       }
 
-      setAiAgents(normalized);
+      // Identische Payloads nicht neu setzen — sonst invalidieren frische
+      // Array-Referenzen unnötig das chatList-Memo.
+      setAiAgents((prev) => (
+        prev.length === normalized.length && JSON.stringify(prev) === JSON.stringify(normalized)
+          ? prev
+          : normalized
+      ));
+      setAiAgentsLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [chatMeta]);
+  }, [aiAgentMetaSignal]);
 
   const updateAiAgent = useCallback(async (agentId, patch) => {
     setAiAgents((prev) => {
@@ -2707,6 +2738,13 @@ export default function ChatsPage() {
     setSelectedSubagent({ parentPeerId, subagentId });
   }, []);
 
+  // Stabile Referenz für ChatMessage (React.memo) — eine Inline-Closure würde
+  // das Memo bei jedem Render der Nachrichtenliste aushebeln.
+  const openSubagentForSelectedChat = useCallback(
+    (segment) => openSubagentChat(selectedPeerId, segment?.id),
+    [openSubagentChat, selectedPeerId]
+  );
+
   const closeSubagentChat = useCallback(() => {
     setSelectedSubagent(null);
   }, []);
@@ -2987,7 +3025,9 @@ export default function ChatsPage() {
         ...payload,
         localPreviewUrl: payload.fileData ? `data:${mime};base64,${payload.fileData}` : undefined,
       };
-      const ok = await sendMessage(selectedPeer.id, withPreview);
+      const result = await sendMessage(selectedPeer.id, withPreview);
+      // Gruppen-Sends liefern ein Objekt ({ ok, error }), Direkt-Sends ein Boolean.
+      const ok = result === true || result?.ok === true;
       if (!ok) {
         toast({ variant: 'error', title: 'Sticker nicht gesendet' });
       }
@@ -3076,9 +3116,13 @@ export default function ChatsPage() {
 
   useEffect(() => {
     if (selectedPeerId && !chatList.find((chat) => chat.id === selectedPeerId)) {
+      // KI-Agenten erst verwerfen, wenn die Agentenliste geladen ist — sonst
+      // geht die Auswahl eines frisch erstellten Agenten (openPeerId aus der
+      // Navigation) verloren, bevor er in chatList auftauchen kann.
+      if (isAiChatPeerId(selectedPeerId) && !aiAgentsLoaded) return;
       setSelectedPeerId(null);
     }
-  }, [chatList, selectedPeerId]);
+  }, [chatList, selectedPeerId, aiAgentsLoaded]);
 
   useEffect(() => {
     setShowPeerProfile(false);
@@ -3515,9 +3559,11 @@ export default function ChatsPage() {
         fileType: file.type,
         fileData: file.base64,
         localPreviewUrl: file.objectUrl,
-      }).then((ok) => {
+      }).then((result) => {
         if (progressTimer) clearInterval(progressTimer);
         progressTimer = null;
+        // Gruppen-Sends liefern ein Objekt ({ ok, error }), Direkt-Sends ein Boolean.
+        const ok = result === true || result?.ok === true;
         if (!ok) {
           toast({ variant: 'error', title: 'File not sent', message: 'Peer is probably offline.' });
           setFileTransfer(null);
@@ -4707,11 +4753,7 @@ export default function ChatsPage() {
                           <ChatMessage
                             message={m}
                             onExpandImage={setMediaLightbox}
-                            onOpenSubagent={
-                              isAiChatSelected
-                                ? (segment) => openSubagentChat(selectedPeer.id, segment.id)
-                                : undefined
-                            }
+                            onOpenSubagent={isAiChatSelected ? openSubagentForSelectedChat : undefined}
                           />
                         ) : m.kind === 'contact-share' ? (
                           <ContactShareMessage
@@ -4723,11 +4765,7 @@ export default function ChatsPage() {
                           <ChatMessage
                             message={m}
                             onExpandImage={setMediaLightbox}
-                            onOpenSubagent={
-                              isAiChatSelected
-                                ? (segment) => openSubagentChat(selectedPeer.id, segment.id)
-                                : undefined
-                            }
+                            onOpenSubagent={isAiChatSelected ? openSubagentForSelectedChat : undefined}
                           />
                         )}
                         <div className={`msg-meta${isSelf ? ' msg-meta--self' : ''}`}>

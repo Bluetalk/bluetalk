@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, startTransition, createContext, useContext, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, startTransition, createContext, useContext, lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom';
 import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
@@ -796,6 +796,8 @@ export default function App() {
         const isBlocked = fromId && contactsRef.current.some((c) => c?.id === fromId && c.blocked === true);
 
         if (msg.kind === 'contact-blocked' && fromId) {
+          // Von uns blockierte Kontakte dürfen keine Status-Frames mehr auslösen
+          if (isBlocked) return;
           const blocked = msg.blocked === true;
           upsertContact({ id: fromId, blockedByPeer: blocked });
           inboundToastRef.current?.({
@@ -809,6 +811,7 @@ export default function App() {
         }
 
         if (msg.kind === 'chat-deleted' && fromId) {
+          if (isBlocked) return;
           upsertContact({ id: fromId, chatDeletedByPeer: true });
           inboundToastRef.current?.({
             variant: 'info',
@@ -819,6 +822,7 @@ export default function App() {
         }
 
         if (msg.kind === 'messaging-blocked' && msg.refMessageId && fromId) {
+          if (isBlocked) return;
           const tid = deliveryTimersRef.current.get(msg.refMessageId);
           if (tid) clearTimeout(tid);
           deliveryTimersRef.current.delete(msg.refMessageId);
@@ -1581,12 +1585,13 @@ export default function App() {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      if (window.bluetalk) window.bluetalk.store.set('settings.theme', next);
-      return next;
-    });
-  }, []);
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    // Auch den settings-State mitziehen, sonst überschreibt ein späteres
+    // updateSettings (persistiert das ganze Objekt) das Theme mit dem alten Wert.
+    setSettings((prev) => ({ ...prev, theme: next }));
+    if (window.bluetalk) window.bluetalk.store.set('settings.theme', next);
+  }, [theme]);
 
   const sendPairwiseEncrypted = useCallback(async (peerId, innerPayload) => {
     if (!window.bluetalk?.peer || !peerId || !innerPayload) return false;
@@ -1824,6 +1829,8 @@ export default function App() {
       const messagesToPersist = [];
 
       if (hasFile) {
+        // localPreviewUrl (blob:) bewusst nicht persistieren — nach einem
+        // Neustart rendert das Bild aus fileData (wie im Direkt- und Gruppen-Pfad).
         messagesToPersist.push({
           kind: 'file',
           content: normalizedFileAttachment.fileName || 'Anhang',
@@ -1831,7 +1838,6 @@ export default function App() {
           fileSize: normalizedFileAttachment.fileSize,
           fileType: normalizedFileAttachment.fileType,
           fileData: normalizedFileAttachment.fileData,
-          localPreviewUrl: normalizedFileAttachment.localPreviewUrl,
           sender: settings.displayName,
           messageId: newChatMessageId(),
           timestamp: createdAt,
@@ -1862,17 +1868,30 @@ export default function App() {
         || `Analysiere die angehängte Datei „${normalizedFileAttachment?.fileName || 'Anhang'}".`;
       const attachments = hasFile ? [normalizedFileAttachment] : [];
 
+      // Busy-Check VOR dem optimistischen UI-Update, sonst bleiben
+      // Phantom-Nachrichten hängen, die nie persistiert werden.
+      if (activeAiChatRequestRef.current) {
+        return Promise.resolve({ ok: false, error: 'chat_busy' });
+      }
+
+      // Die Blob-Vorschau nur in der In-Memory-/UI-Kopie behalten.
+      const messagesForUi = hasFile && normalizedFileAttachment.localPreviewUrl
+        ? messagesToPersist.map((msg) => (msg.kind === 'file'
+          ? { ...msg, localPreviewUrl: normalizedFileAttachment.localPreviewUrl }
+          : msg))
+        : messagesToPersist;
+
       startTransition(() => {
         setMessages((prev) => ({
           ...prev,
-          [peerId]: [...(prev[peerId] || []), ...messagesToPersist],
+          [peerId]: [...(prev[peerId] || []), ...messagesForUi],
         }));
         setChatMeta((prev) => {
-          const last = messagesToPersist[messagesToPersist.length - 1];
+          const last = messagesForUi[messagesForUi.length - 1];
           return {
             ...prev,
             [peerId]: {
-              count: (prev[peerId]?.count || 0) + messagesToPersist.length,
+              count: (prev[peerId]?.count || 0) + messagesForUi.length,
               lastMessage: last,
             },
           };
@@ -1880,10 +1899,6 @@ export default function App() {
       });
 
       return (async () => {
-        if (activeAiChatRequestRef.current) {
-          return { ok: false, error: 'chat_busy' };
-        }
-
         try {
           for (const msg of messagesToPersist) {
             const meta = await window.bluetalk.messages.append(peerId, msg);
@@ -2840,7 +2855,14 @@ export default function App() {
 
   const versionWelcomeNotes = getReleaseNotesForVersion(APP_VERSION);
 
-  const ctx = {
+  const isAiChatPending = useCallback(
+    (peerId) => Boolean(peerId && aiChatPendingPeerId === peerId),
+    [aiChatPendingPeerId]
+  );
+
+  // Memoisiert, damit nicht jeder App-Render alle useApp-Consumer neu rendert
+  // (z. B. ~60/s während KI-Streaming). Deps müssen JEDEN referenzierten Wert enthalten.
+  const ctx = useMemo(() => ({
     peers,
     contacts,
     groups,
@@ -2850,7 +2872,7 @@ export default function App() {
     messages,
     aiChatProgress,
     aiChatPendingPeerId,
-    isAiChatPending: (peerId) => Boolean(peerId && aiChatPendingPeerId === peerId),
+    isAiChatPending,
     settings,
     theme,
     peerCount: peers.length,
@@ -2884,7 +2906,50 @@ export default function App() {
     acceptMessageRequest,
     setContactBlocked,
     setContactNotificationMute,
-  };
+  }), [
+    peers,
+    contacts,
+    groups,
+    ownPeerId,
+    chatMeta,
+    loadedChats,
+    messages,
+    aiChatProgress,
+    aiChatPendingPeerId,
+    isAiChatPending,
+    settings,
+    theme,
+    peerReadReceipts,
+    chatLastViewedPeerTs,
+    peerGamePresence,
+    peerUserPresence,
+    gameInviteKeys,
+    joinGameFromPresence,
+    markPeerChatViewed,
+    sendMessage,
+    cancelAiChat,
+    clearAiChatContext,
+    sendReadReceipt,
+    loadChatMessages,
+    connectToAddress,
+    createGroupChat,
+    updateGroupChat,
+    leaveGroupChat,
+    deleteGroupChat,
+    refreshDiscovery,
+    setContactNickname,
+    setChatPinned,
+    setContactE2eeEnabled,
+    deleteMessage,
+    deleteChat,
+    removeContact,
+    updateSettings,
+    toggleTheme,
+    upsertContact,
+    acceptMessageRequest,
+    setContactBlocked,
+    setContactNotificationMute,
+  ]);
 
   const peersRef = useRef(peers);
   const messagesRef = useRef(messages);

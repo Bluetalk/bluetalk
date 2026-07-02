@@ -54,7 +54,7 @@ function downloadBase64AsFile(fileName, base64) {
 export default function LibraryPage() {
   const { contacts } = useApp();
   const navigate = useNavigate();
-  const toast = useToast();
+  const { toast } = useToast();
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -87,7 +87,7 @@ export default function LibraryPage() {
   const contactName = useCallback(
     (peerId, sender) => {
       const c = contacts.find((x) => x.id === peerId);
-      return c?.nickname || c?.displayName || sender || peerId?.slice(0, 8) || 'Unbekannt';
+      return c?.nickname || c?.name || sender || peerId?.slice(0, 8) || 'Unbekannt';
     },
     [contacts]
   );

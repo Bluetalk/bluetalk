@@ -34,6 +34,21 @@ export default function ProfileMenu({ variant = 'default' }) {
   const wrapRef = useRef(null);
   const fileRef = useRef(null);
   const prevOpenRef = useRef(false);
+  const openRef = useRef(false);
+  const commitDraftsRef = useRef(() => {});
+
+  // Kept in a ref (updated every render) so the unmount cleanup below
+  // always commits the latest drafts without stale closures.
+  commitDraftsRef.current = () => {
+    const nextName = nameDraft.trim() || 'Anonymous';
+    if (nextName !== (settings.displayName || '').trim()) {
+      updateSettings({ displayName: nextName });
+    }
+    const nextBio = bioDraft.slice(0, 500);
+    if (nextBio !== (settings.bio || '')) {
+      updateSettings({ bio: nextBio });
+    }
+  };
 
   useEffect(() => {
     const wasOpen = prevOpenRef.current;
@@ -42,17 +57,21 @@ export default function ProfileMenu({ variant = 'default' }) {
       setBioDraft(settings.bio || '');
     }
     if (wasOpen && !open) {
-      const nextName = nameDraft.trim() || 'Anonymous';
-      if (nextName !== (settings.displayName || '').trim()) {
-        updateSettings({ displayName: nextName });
-      }
-      const nextBio = bioDraft.slice(0, 500);
-      if (nextBio !== (settings.bio || '')) {
-        updateSettings({ bio: nextBio });
-      }
+      commitDraftsRef.current();
     }
     prevOpenRef.current = open;
-  }, [open, nameDraft, bioDraft, settings.displayName, settings.bio, updateSettings]);
+    openRef.current = open;
+  }, [open, settings.displayName, settings.bio]);
+
+  // Commit pending drafts when the component unmounts while still open
+  // (e.g. sidebar collapse). openRef guards against a double commit after
+  // a normal close already committed.
+  useEffect(() => () => {
+    if (openRef.current) {
+      openRef.current = false;
+      commitDraftsRef.current();
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
