@@ -15,7 +15,6 @@ const GAMES = [
   { id: 'connect-four', bridge: 'connectFour', channel: 'connect-four' },
   { id: 'chess', bridge: 'chess', channel: 'chess' },
   { id: 'tic-tac-toe', bridge: 'ticTacToe', channel: 'ticTacToe' },
-  { id: 'racing-3d', bridge: 'racing', channel: 'racing' },
 ];
 
 function loadBridge(config) {

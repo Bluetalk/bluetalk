@@ -242,7 +242,10 @@ function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
 
 function UnoHand({ cards, topCard, activeColor, houseRules, canAct, pendingDrawStack, pendingDrawType, onPlay, animatingId }) {
   if (!cards.length) return <div className="uno-hand-empty">Keine Karten</div>;
-  const spread = Math.min(28, 360 / Math.max(cards.length, 1));
+  // Fächere die Hand über einen begrenzten Gesamtwinkel auf (nicht pro Karte),
+  // damit große Hände nicht zu einem 180°-Bogen mit fast liegenden Karten werden.
+  const maxArc = 48;
+  const spread = Math.min(9, maxArc / Math.max(cards.length - 1, 1));
   const offset = ((cards.length - 1) * spread) / 2;
 
   return (

@@ -140,82 +140,93 @@ export default function GamesPage() {
 
       {!loading && entries.length > 0 ? (
         <div className="games-grid">
-          {entries.map(({ game, state, labels }) => (
-            <article key={game.id} className="games-launch-card">
-              <div className="games-launch-card-head">
-                <div className={`games-launch-mark games-launch-mark--${game.id}`} aria-hidden>
-                  {game.mark}
-                </div>
-                <div className="games-launch-copy">
-                  <div className="games-launch-title-row">
-                    <h3>{game.name}</h3>
-                    {game.tag ? <span className="plugin-tag-badge">{game.tag}</span> : null}
+          {entries.map(({ game, state, labels }) => {
+            const cardClass = `games-launch-card${state.active ? ' is-active' : ''}${!game.enabled ? ' is-inactive' : ''}`;
+            return (
+              <article key={game.id} className={cardClass}>
+                <div className="games-launch-card-head">
+                  <div className={`games-launch-mark games-launch-mark--${game.id}`} aria-hidden>
+                    {game.mark}
                   </div>
+                  <div className="games-launch-heading">
+                    <div className="games-launch-title-row">
+                      <h3>{game.name}</h3>
+                      {game.tag ? <span className="plugin-tag-badge plugin-tag-badge--card">{game.tag}</span> : null}
+                    </div>
+                    {state.active ? (
+                      <span className="games-launch-status games-launch-status--live">
+                        <span className="games-launch-status-dot" aria-hidden />
+                        Läuft
+                      </span>
+                    ) : !game.enabled ? (
+                      <span className="games-launch-status">Inaktiv</span>
+                    ) : state.hasSavedGame ? (
+                      <span className="games-launch-status">Gespeichertes Spiel</span>
+                    ) : (
+                      <span className="games-launch-status games-launch-status--ready">Bereit</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="games-launch-body">
+                  <p className="games-launch-desc">{game.description}</p>
+                  {!game.enabled ? (
+                    <p className="games-launch-hint">Installiert, aber noch nicht aktiviert.</p>
+                  ) : state.active ? (
+                    <p className="games-launch-hint">
+                      <strong>{state.tableName || game.name}</strong> läuft — Einladungen und Einstellungen im Spielfenster.
+                    </p>
+                  ) : game.alphaNotice ? (
+                    <p className="games-alpha-notice" role="note">{game.alphaNotice}</p>
+                  ) : null}
+                </div>
+
+                <div className="games-launch-actions">
                   {!game.enabled ? (
                     <>
-                      <p className="games-launch-desc">{game.description}</p>
-                      <p className="games-launch-desc">
-                        Dieses Spiel ist installiert, aber noch nicht aktiv.
-                      </p>
-                      <div className="games-launch-actions">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => void enableGame(game.id)}
-                        >
-                          Spiel aktivieren
-                        </button>
-                        <Link to="/plugins" className="btn btn-secondary btn-sm">
-                          Erweiterungen
-                        </Link>
-                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void enableGame(game.id)}
+                      >
+                        Spiel aktivieren
+                      </button>
+                      <Link to="/plugins" className="btn btn-secondary btn-sm">
+                        Erweiterungen
+                      </Link>
                     </>
                   ) : state.active ? (
-                    <>
-                      <p className="games-launch-desc">{game.description}</p>
-                      <p className="games-launch-desc">
-                        <strong>{state.tableName || game.name}</strong> läuft — Einladungen und Einstellungen im Spielfenster.
-                      </p>
-                      <div className="games-launch-actions">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => void invokeGame(game.id, 'openWindow')}
-                        >
-                          {labels.openWindow}
-                        </button>
-                      </div>
-                    </>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void invokeGame(game.id, 'openWindow')}
+                    >
+                      {labels.openWindow}
+                    </button>
                   ) : (
                     <>
-                      <p className="games-launch-desc">{game.description}</p>
-                      {game.alphaNotice ? (
-                        <p className="games-alpha-notice" role="note">{game.alphaNotice}</p>
-                      ) : null}
-                      <div className="games-launch-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void invokeGame(game.id, 'launchNew')}
+                      >
+                        {labels.launchNew}
+                      </button>
+                      {state.hasSavedGame ? (
                         <button
                           type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => void invokeGame(game.id, 'launchNew')}
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => void invokeGame(game.id, 'launchResume')}
                         >
-                          {labels.launchNew}
+                          {labels.launchResume}
                         </button>
-                        {state.hasSavedGame ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => void invokeGame(game.id, 'launchResume')}
-                          >
-                            {labels.launchResume}
-                          </button>
-                        ) : null}
-                      </div>
+                      ) : null}
                     </>
                   )}
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       ) : null}
     </div>

@@ -800,3 +800,152 @@ body:has(.ttt-game-root) {
     transition: none;
   }
 }
+
+/* ----- KI-Training ------------------------------------------------------- */
+.ttt-settings-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ttt-muted);
+}
+
+.ttt-training {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ttt-training-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ttt-muted);
+}
+
+.ttt-training-intro strong,
+.ttt-training-intro em {
+  color: var(--ttt-ink);
+}
+
+.ttt-training-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.ttt-training-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: var(--ttt-glass);
+  border: 1px solid var(--ttt-line);
+  text-align: center;
+}
+
+.ttt-training-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--ttt-ink);
+}
+
+.ttt-training-stat-value.ttt-training-ready { color: var(--ttt-tri); font-size: 16px; }
+.ttt-training-stat-value.ttt-training-empty { color: var(--ttt-muted); font-size: 16px; }
+
+.ttt-training-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ttt-muted);
+}
+
+.ttt-training-subhead {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ttt-muted);
+}
+
+.ttt-training-presets {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.ttt-training-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--ttt-line);
+  color: var(--ttt-ink);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ttt-training-preset:hover { border-color: rgba(34, 211, 238, 0.4); }
+
+.ttt-training-preset.active {
+  border-color: rgba(34, 211, 238, 0.6);
+  background: rgba(34, 211, 238, 0.1);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.12);
+}
+
+.ttt-training-preset-label { font-size: 13px; font-weight: 700; }
+.ttt-training-preset-note {
+  font-size: 11px;
+  color: var(--ttt-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttt-training-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ttt-training-select {
+  align-self: flex-start;
+}
+
+.ttt-training-active-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ttt-tri);
+}
+
+.ttt-training-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ttt-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttt-training-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ttt-training-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ttt-x), var(--ttt-o));
+  transition: width 0.3s ease;
+}

@@ -9,9 +9,10 @@
   "permissions": ["peer:send", "contacts:read"],
   "autoEnable": true,
   "game": {
+    "tool": true,
     "mark": "📝",
-    "title": "Live Dokumente",
-    "description": "Gemeinsames Schreiben in Echtzeit: Word-Datei (.docx) öffnen oder neu anfangen, Kontakte einladen und live zusammen am selben Dokument arbeiten.",
+    "title": "Dokumente",
+    "description": "Word-Dokumente gemeinsam in Echtzeit bearbeiten — mit Formatierung, Live-Cursor und .docx-Import/-Export.",
     "tag": "Live",
     "labels": {
       "launchNew": "Neues Dokument",

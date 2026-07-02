@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, startTransition, createContext, useContext, lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom';
 import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { MessageCircle, Settings as SettingsIcon, UserPlus, Minus, Maximize2, SquareStack, X, Blocks, Plug, FolderOpen, FileText, Palette, Sparkles, Spade, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 import ChatsPage from './pages/Chats';
 import RuntimeUnavailablePage from './pages/RuntimeUnavailable';
@@ -84,6 +84,7 @@ const NewConnectionsPage = lazy(() => import('./pages/NewConnections'));
 const CloudSyncPage = lazy(() => import('./pages/CloudSync'));
 const LibraryPage = lazy(() => import('./pages/Library'));
 const GamesPage = lazy(() => import('./pages/Games'));
+const DocumentsLauncherPage = lazy(() => import('./pages/DocumentsLauncher'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
 const PluginsPage = lazy(() => import('./pages/Plugins'));
 const PluginTabView = lazy(() => import('./plugins/PluginTabView'));
@@ -349,6 +350,7 @@ function Sidebar() {
     { to: '/', label: 'Chats', icon: MessageCircle },
     { to: '/new', label: 'New', icon: UserPlus },
     { to: '/library', label: 'Bibliothek', icon: FolderOpen },
+    { to: '/documents', label: 'Dokumente', icon: FileText },
     { to: '/games', label: 'Spiele', icon: Sparkles },
     { to: '/plugins', label: 'Erweiterungen', icon: Blocks },
     { to: '/settings', label: 'Settings', icon: SettingsIcon },
@@ -3042,6 +3044,7 @@ export default function App() {
                     <Route path="/" element={<ChatsPage />} />
                     <Route path="/new" element={<NewConnectionsPage />} />
                     <Route path="/library" element={<LibraryPage />} />
+                    <Route path="/documents" element={<DocumentsLauncherPage />} />
                     <Route path="/games" element={<GamesPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/settings/account" element={<AccountSettingsPage />} />

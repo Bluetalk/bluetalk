@@ -8,7 +8,6 @@ const GAME_WINDOW_ROUTES = new Set([
   '/connect-four-game',
   '/chess-game',
   '/tic-tac-toe-game',
-  '/racing-game',
   '/docs-editor',
 ]);
 

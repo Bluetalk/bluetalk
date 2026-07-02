@@ -5,7 +5,7 @@
  * damit die Sitzung weiterläuft, auch wenn das Editor-Fenster geschlossen wird.
  * Die Darstellung übernimmt das separate Editor-Fenster
  * (src/renderer/pages/DocsEditorPage.jsx), verbunden über window.bluetalk.docs
- * (pushState / onFromChild) — gleiches Muster wie das 3D-Autorennen.
+ * (pushState / onFromChild) — gleiches Muster wie die Spielfenster.
  *
  * Synchronisation: host-autoritatives SharedDocument (plugin-realtime).
  * Clients schicken Text-Ops (insert/delete/replace) mit baseRevision; veraltete
@@ -25,6 +25,35 @@
   let selfPeerId = '';
   let selfName = '';
   let offDocChange = null;
+  let sessionDocId = '';
+  let recentTimer = null;
+
+  // „Zuletzt bearbeitet": im (persistenten) Plugin-Speicher gehalten, damit die
+  // Dokumente-Seite sie auch nach dem Schließen einer Sitzung anzeigen kann.
+  const RECENT_KEY = 'recentDocs';
+  const RECENT_MAX = 12;
+  const RECENT_HTML_MAX = 200000;
+  const newDocId = () => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+  function loadRecent() {
+    const list = api.storage?.get(RECENT_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+  function saveRecentEntry() {
+    if (!doc || !sessionDocId) return;
+    const html = String(doc.getState() ?? '').slice(0, RECENT_HTML_MAX);
+    const rest = loadRecent().filter((e) => e && e.id !== sessionDocId);
+    rest.unshift({ id: sessionDocId, fileName, html, updatedAt: Date.now() });
+    api.storage?.set(RECENT_KEY, rest.slice(0, RECENT_MAX));
+  }
+  function scheduleRecent() {
+    if (recentTimer) return;
+    recentTimer = setTimeout(() => { recentTimer = null; saveRecentEntry(); }, 4000);
+  }
+  function flushRecent() {
+    if (recentTimer) { clearTimeout(recentTimer); recentTimer = null; }
+    saveRecentEntry();
+  }
 
   const cleanName = (value, fallback) => String(value || fallback || '').slice(0, 120) || 'Unbenanntes Dokument';
   const me = async () => api.peer.info?.().catch(() => null);
@@ -96,22 +125,43 @@
 
   function wireDoc() {
     offDocChange?.();
-    offDocChange = doc?.on('change', () => pushToChild()) || null;
+    offDocChange = doc?.on('change', () => {
+      pushToChild();
+      scheduleRecent();
+    }) || null;
+  }
+
+  function pushPresence(payload) {
+    try {
+      window.bluetalk?.docs?.pushPresence?.(payload);
+    } catch {
+      /* ignore */
+    }
   }
 
   function wireRoom() {
     if (!room) return;
-    room.on('message', ({ payload }) => {
+    room.on('message', ({ from, payload }) => {
       if (payload?.type === 'meta' && typeof payload.fileName === 'string') {
         fileName = cleanName(payload.fileName, fileName);
         pushToChild();
+      } else if (payload?.type === 'cursor') {
+        // Ephemerer Fremd-Cursor: direkt (ohne pushToChild) ans Editor-Fenster.
+        pushPresence({
+          peerId: from,
+          name: typeof payload.name === 'string' ? payload.name.slice(0, 60) : '',
+          caret: payload.caret || null,
+        });
       }
     });
     room.on('peer-joined', ({ peerId, name }) => {
       api.notify.toast?.({ title: 'Live Dokumente', message: `${name || contactName(peerId)} arbeitet jetzt mit.` });
       pushToChild();
     });
-    room.on('peer-left', () => pushToChild());
+    room.on('peer-left', ({ peerId }) => {
+      pushPresence({ peerId, gone: true });
+      pushToChild();
+    });
     room.on('closed', () => {
       if (!room) return;
       api.notify.toast?.({ title: 'Live Dokumente', message: 'Die Sitzung wurde beendet.' });
@@ -120,14 +170,16 @@
   }
 
   function resetSession() {
+    flushRecent();
     offDocChange?.();
     offDocChange = null;
     doc = null;
     room = null;
+    sessionDocId = '';
     pushToChild();
   }
 
-  async function hostSession(initialText = '', name) {
+  async function hostSession(initialText = '', name, docId) {
     if (room) return false;
     await refreshSelf();
     if (room) return false;
@@ -138,9 +190,11 @@
       pushToChild();
       return false;
     }
+    sessionDocId = docId || newDocId();
     wireRoom();
     doc = room.createDocument({ docId: DOC_ID, initial: String(initialText || '').slice(0, MAX_DOC_CHARS) });
     wireDoc();
+    saveRecentEntry(); // sofort in „Zuletzt bearbeitet" aufnehmen
     pushToChild();
     return true;
   }
@@ -155,6 +209,7 @@
       return false;
     }
     room = joined;
+    sessionDocId = newDocId();
     fileName = cleanName(name, fileName);
     wireRoom();
     // Sofort (synchron) anlegen, damit der DOC_SYNC des Hosts direkt nach dem
@@ -182,17 +237,18 @@
         pushToChild();
         break;
       case 'new_doc':
-        if (!room) void hostSession('', payload.fileName);
+        if (!room) void hostSession('', payload.fileName, newDocId());
         break;
       case 'import_text': {
         const text = String(payload.text || '').slice(0, MAX_DOC_CHARS);
         if (!room) {
-          void hostSession(text, payload.fileName);
+          void hostSession(text, payload.fileName, newDocId());
         } else if (doc) {
           fileName = cleanName(payload.fileName, fileName);
           if (room.isHost) doc.setState(text);
           else doc.applyOp({ type: 'replace', value: text });
           room.broadcast({ type: 'meta', fileName });
+          flushRecent();
           pushToChild();
         }
         break;
@@ -211,9 +267,14 @@
           pushToChild();
         }
         break;
+      case 'cursor':
+        // Eigene Cursor-/Auswahlposition an alle Mit-Bearbeiter (ephemer).
+        room?.broadcast({ type: 'cursor', caret: payload.caret || null, name: selfName || '' });
+        break;
       case 'set_filename':
         fileName = cleanName(payload.fileName, fileName);
         room?.broadcast({ type: 'meta', fileName });
+        saveRecentEntry();
         pushToChild();
         break;
       case 'invite':
@@ -253,16 +314,35 @@
     active: Boolean(room),
     hasSavedGame: false,
     tableName: room ? fileName : (pendingInvite ? 'Einladung wartet' : null),
+    docId: room ? sessionDocId : '',
+    fileName: room ? fileName : '',
   }));
   api.ui.registerCommand('launchNew', () => {
     void (async () => {
-      if (!room && !pendingInvite) await hostSession('');
+      if (!room && !pendingInvite) await hostSession('', undefined, newDocId());
       await openEditorWindow();
     })();
     return { ok: true };
   });
   api.ui.registerCommand('openWindow', () => {
     void openEditorWindow();
+    return { ok: true };
+  });
+  // „Zuletzt bearbeitet" für die Dokumente-Seite.
+  api.ui.registerCommand('listRecent', () => loadRecent());
+  api.ui.registerCommand('openRecent', (args) => {
+    const id = args && args.id;
+    const entry = loadRecent().find((e) => e && e.id === id) || null;
+    void (async () => {
+      // Läuft bereits eine Sitzung, nur das Fenster zeigen (nicht überschreiben).
+      if (!room && entry) await hostSession(entry.html || '', entry.fileName, entry.id);
+      await openEditorWindow();
+    })();
+    return { ok: true };
+  });
+  api.ui.registerCommand('forgetRecent', (args) => {
+    const id = args && args.id;
+    if (id) api.storage?.set(RECENT_KEY, loadRecent().filter((e) => e && e.id !== id));
     return { ok: true };
   });
 

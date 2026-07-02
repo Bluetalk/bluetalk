@@ -25,8 +25,6 @@ let connectFourGameWindow = null;
 let chessGameWindow = null;
 /** Separates Fenster für das Tic-Tac-Toe-Plugin. */
 let ticTacToeGameWindow = null;
-/** Separates Fenster für das 3D-Autorennen-Plugin. */
-let racingGameWindow = null;
 /** Separates Fenster für den Live-Dokumente-Editor. */
 let docsEditorWindow = null;
 /** Cached game UI state — replayed when a game window finishes loading. */
@@ -884,7 +882,6 @@ function isAppInForeground() {
     || (connectFourGameWindow && !connectFourGameWindow.isDestroyed() && focused === connectFourGameWindow)
     || (chessGameWindow && !chessGameWindow.isDestroyed() && focused === chessGameWindow)
     || (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed() && focused === ticTacToeGameWindow)
-    || (racingGameWindow && !racingGameWindow.isDestroyed() && focused === racingGameWindow)
   );
 }
 
@@ -1354,14 +1351,6 @@ function isTicTacToeGameSender(event) {
   );
 }
 
-function isRacingGameSender(event) {
-  return Boolean(
-    racingGameWindow
-    && !racingGameWindow.isDestroyed()
-    && event.sender === racingGameWindow.webContents,
-  );
-}
-
 function isDocsEditorSender(event) {
   return Boolean(
     docsEditorWindow
@@ -1740,56 +1729,6 @@ function createTicTacToeGameWindow() {
   bindGameWindowStateReplay(ticTacToeGameWindow, 'tic-tac-toe', 'ticTacToe:state');
 
   return ticTacToeGameWindow;
-}
-
-function createRacingGameWindow() {
-  if (racingGameWindow && !racingGameWindow.isDestroyed()) {
-    try {
-      racingGameWindow.focus();
-    } catch {
-      /* ignore */
-    }
-    replayGameState('racing-3d', racingGameWindow, 'racing:state');
-    return racingGameWindow;
-  }
-
-  racingGameWindow = new BrowserWindow({
-    width: 1320,
-    height: 840,
-    minWidth: 900,
-    minHeight: 600,
-    frame: false,
-    transparent: false,
-    backgroundColor: '#05070f',
-    icon: createAppIcon(256),
-    webPreferences: gameWindowWebPreferences('racing-3d'),
-    show: false,
-  });
-  hardenWindow(racingGameWindow);
-
-  if (isDev) {
-    racingGameWindow.loadURL('http://localhost:5173/#/racing-game');
-  } else {
-    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
-    racingGameWindow.loadURL(`${pathToFileURL(indexHtml).href}#/racing-game`);
-  }
-
-  racingGameWindow.once('ready-to-show', () => {
-    try {
-      racingGameWindow?.show();
-    } catch {
-      /* ignore */
-    }
-  });
-
-  racingGameWindow.on('closed', () => {
-    racingGameWindow = null;
-  });
-
-  bindWindowMaximizeEvents(racingGameWindow, 'racing:windowMaximized');
-  bindGameWindowStateReplay(racingGameWindow, 'racing-3d', 'racing:state');
-
-  return racingGameWindow;
 }
 
 function createDocsEditorWindow() {
@@ -2255,70 +2194,6 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('racing:openGameWindow', async () => {
-    try {
-      await openGameWindowAndReplay(createRacingGameWindow, 'racing-3d', 'racing:state');
-      return { ok: true };
-    } catch (e) {
-      console.error('racing:openGameWindow error:', e);
-      return { ok: false, error: e?.message || 'open_failed' };
-    }
-  });
-
-  ipcMain.handle('racing:closeGameWindow', () => {
-    try {
-      if (racingGameWindow && !racingGameWindow.isDestroyed()) {
-        racingGameWindow.close();
-      }
-      return { ok: true };
-    } catch {
-      return { ok: false };
-    }
-  });
-
-  ipcMain.handle('racing:minimizeWindow', (event) => {
-    if (!isRacingGameSender(event)) return { ok: false };
-    try {
-      racingGameWindow?.minimize();
-      return { ok: true };
-    } catch {
-      return { ok: false };
-    }
-  });
-
-  ipcMain.handle('racing:maximizeWindow', (event) => {
-    if (!isRacingGameSender(event)) return { ok: false };
-    try {
-      if (racingGameWindow?.isMaximized()) racingGameWindow.unmaximize();
-      else racingGameWindow?.maximize();
-      return { ok: true };
-    } catch {
-      return { ok: false };
-    }
-  });
-
-  ipcMain.handle('racing:isWindowMaximized', (event) => {
-    if (!isRacingGameSender(event)) return false;
-    return racingGameWindow?.isMaximized() ?? false;
-  });
-
-  ipcMain.on('racing:pumpState', (event, payload) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (event.sender !== mainWindow.webContents) return;
-    rememberAndRelayGameState('racing-3d', racingGameWindow, 'racing:state', payload);
-  });
-
-  ipcMain.on('racing:fromChild', (event, payload) => {
-    if (!racingGameWindow || racingGameWindow.isDestroyed()) return;
-    if (event.sender !== racingGameWindow.webContents) return;
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    try {
-      mainWindow.webContents.send('racing:fromChild', payload);
-    } catch {
-      /* ignore */
-    }
-  });
-
   // ---------- Live-Dokumente-Editor (gleiches Muster wie die Spielfenster) ----------
 
   ipcMain.handle('docs:openGameWindow', async () => {
@@ -2380,6 +2255,18 @@ function setupIPC() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
       mainWindow.webContents.send('docs:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  // Fremd-Cursor/-Auswahl: Plugin (Hauptfenster) → Editor-Fenster.
+  ipcMain.on('docs:pumpPresence', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    if (!docsEditorWindow || docsEditorWindow.isDestroyed()) return;
+    try {
+      docsEditorWindow.webContents.send('docs:peerPresence', payload);
     } catch {
       /* ignore */
     }
@@ -2937,10 +2824,6 @@ app.on('before-quit', (event) => {
     if (ticTacToeGameWindow && !ticTacToeGameWindow.isDestroyed()) {
       ticTacToeGameWindow.destroy();
       ticTacToeGameWindow = null;
-    }
-    if (racingGameWindow && !racingGameWindow.isDestroyed()) {
-      racingGameWindow.destroy();
-      racingGameWindow = null;
     }
     if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
       docsEditorWindow.destroy();

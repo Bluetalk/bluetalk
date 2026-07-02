@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Brain,
   Crown,
   HelpCircle,
   LogOut,
   Maximize2,
   Minus,
   Play,
+  RotateCcw,
   Save,
   Settings,
   SquareStack,
@@ -26,6 +28,13 @@ const MARK_CLASSES = {
   O: 'ttt-mark-o',
   '△': 'ttt-mark-tri',
   '□': 'ttt-mark-sq',
+};
+
+const AI_DIFFICULTY_LABELS = {
+  easy: 'Leicht',
+  medium: 'Mittel',
+  hard: 'Schwer',
+  trained: 'Eigene KI (trainiert)',
 };
 
 function useTicTacToeState() {
@@ -282,6 +291,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
 
   const boardSize = Number(local.boardSize) || 3;
   const winOptions = [3, 4, 5].filter((n) => n <= boardSize);
+  const isTrainedAi = local.playMode === 'solo' && local.aiDifficulty === 'trained';
 
   if (!isHost) {
     return (
@@ -293,7 +303,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         {settings?.playMode === 'online' ? (
           <p><strong>Spieler:</strong> max. {settings?.maxPlayers}</p>
         ) : (
-          <p><strong>KI:</strong> {settings?.aiDifficulty === 'hard' ? 'Schwer' : settings?.aiDifficulty === 'easy' ? 'Leicht' : 'Mittel'}</p>
+          <p><strong>KI:</strong> {AI_DIFFICULTY_LABELS[settings?.aiDifficulty] || 'Mittel'}</p>
         )}
         <p><strong>Lobby:</strong> {settings?.lobbyAccess === 'public' ? 'Öffentlich' : 'Nur auf Einladung'}</p>
       </div>
@@ -324,6 +334,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         Feldgröße
         <select
           value={local.boardSize || 3}
+          disabled={isTrainedAi}
           onChange={(e) => {
             const nextSize = Number(e.target.value);
             setLocal({
@@ -342,6 +353,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         Gewinnbedingung
         <select
           value={Math.min(Number(local.winLength) || 3, boardSize)}
+          disabled={isTrainedAi}
           onChange={(e) => setLocal({ ...local, winLength: Number(e.target.value) })}
         >
           {winOptions.map((n) => (
@@ -361,13 +373,28 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
       ) : (
         <label>
           KI-Schwierigkeit
-          <select value={local.aiDifficulty || 'medium'} onChange={(e) => setLocal({ ...local, aiDifficulty: e.target.value })}>
+          <select
+            value={local.aiDifficulty || 'medium'}
+            onChange={(e) => {
+              const nextDiff = e.target.value;
+              setLocal(nextDiff === 'trained'
+                ? { ...local, aiDifficulty: nextDiff, boardSize: 3, winLength: 3 }
+                : { ...local, aiDifficulty: nextDiff });
+            }}
+          >
             <option value="easy">Leicht</option>
             <option value="medium">Mittel</option>
             <option value="hard">Schwer</option>
+            <option value="trained">Eigene KI (trainiert)</option>
           </select>
         </label>
       )}
+      {isTrainedAi ? (
+        <p className="ttt-settings-hint">
+          Die eigene KI spielt auf dem klassischen 3×3-Feld. Trainiere sie über den
+          <Brain size={13} /> KI-Training-Bereich, bevor du startest.
+        </p>
+      ) : null}
       {local.playMode === 'online' ? (
         <label>
           Lobby-Zugang
@@ -423,6 +450,98 @@ function PlayerManagement({ snapshot, isHost, selfId, onInvite, onKickPlayer }) 
   );
 }
 
+const TRAIN_PRESETS = [
+  { games: 500, label: 'Schnell', note: '500 Partien' },
+  { games: 2000, label: 'Solide', note: '2 000 Partien' },
+  { games: 5000, label: 'Stark', note: '5 000 Partien' },
+  { games: 12000, label: 'Meister', note: '12 000 Partien' },
+];
+
+function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained }) {
+  const pub = snapshot?.public;
+  const model = pub?.aiModel || {};
+  const inLobby = !pub?.phase || pub.phase === 'lobby' || pub.phase === 'finished';
+  const training = Boolean(model.training);
+  const [games, setGames] = useState(2000);
+  const usingTrained = pub?.settings?.aiDifficulty === 'trained';
+
+  if (!isHost) {
+    return <p className="ttt-panel-note">Nur der Host kann die KI trainieren.</p>;
+  }
+
+  return (
+    <div className="ttt-training">
+      <p className="ttt-training-intro">
+        Trainiere eine eigene Tic-Tac-Toe-KI. Sie lernt durch <strong>Selbstspiel</strong> —
+        je mehr Partien, desto stärker. Zusätzlich lernt sie aus jeder Partie, die du
+        gegen sie spielst. Wähle danach die Schwierigkeit <em>„Eigene KI (trainiert)"</em>.
+      </p>
+
+      <div className="ttt-training-stats">
+        <div className="ttt-training-stat">
+          <span className="ttt-training-stat-value">{model.games || 0}</span>
+          <span className="ttt-training-stat-label">Partien trainiert</span>
+        </div>
+        <div className="ttt-training-stat">
+          <span className="ttt-training-stat-value">{model.states || 0}</span>
+          <span className="ttt-training-stat-label">Stellungen gelernt</span>
+        </div>
+        <div className="ttt-training-stat">
+          <span className={`ttt-training-stat-value ${model.available ? 'ttt-training-ready' : 'ttt-training-empty'}`}>
+            {model.available ? 'Bereit' : 'Untrainiert'}
+          </span>
+          <span className="ttt-training-stat-label">Status</span>
+        </div>
+      </div>
+
+      {training ? (
+        <div className="ttt-training-progress">
+          <div className="ttt-training-bar">
+            <div className="ttt-training-bar-fill" style={{ width: `${Math.round((model.progress || 0) * 100)}%` }} />
+          </div>
+          <span>Training läuft… {Math.round((model.progress || 0) * 100)}%</span>
+        </div>
+      ) : (
+        <>
+          <p className="ttt-training-subhead">Trainingsumfang</p>
+          <div className="ttt-training-presets">
+            {TRAIN_PRESETS.map((preset) => (
+              <button
+                key={preset.games}
+                type="button"
+                className={`ttt-training-preset${games === preset.games ? ' active' : ''}`}
+                onClick={() => setGames(preset.games)}
+              >
+                <span className="ttt-training-preset-label">{preset.label}</span>
+                <span className="ttt-training-preset-note">{preset.note}</span>
+              </button>
+            ))}
+          </div>
+          {!inLobby ? (
+            <p className="ttt-panel-note">Training ist in der Lobby oder nach einer Partie möglich.</p>
+          ) : null}
+          <div className="ttt-training-actions">
+            <button type="button" className="ttt-btn-primary" onClick={() => onTrain(games)} disabled={!inLobby}>
+              <Brain size={16} /> {model.available ? 'Weiter trainieren' : 'Training starten'}
+            </button>
+            <button type="button" className="ttt-btn-ghost" onClick={onReset} disabled={!inLobby || !model.available}>
+              <RotateCcw size={14} /> Zurücksetzen
+            </button>
+          </div>
+          {model.available && !usingTrained ? (
+            <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onSelectTrained}>
+              Diese KI als Gegner auswählen
+            </button>
+          ) : null}
+          {usingTrained ? (
+            <p className="ttt-training-active-note"><Brain size={13} /> Deine trainierte KI ist als Gegner aktiv.</p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 function TicTacToeGuide() {
   return (
     <div className="ttt-guide">
@@ -432,6 +551,7 @@ function TicTacToeGuide() {
         <li><strong>Erweitert:</strong> 5×5 oder 7×7 mit 3–5 in einer Reihe — auch diagonal.</li>
         <li><strong>Online:</strong> 2–4 Spieler mit Symbolen X, O, △, □.</li>
         <li><strong>Solo:</strong> Du spielst gegen einen lokalen Algorithmus (Leicht/Mittel/Schwer).</li>
+        <li><strong>Eigene KI:</strong> Trainiere über das <Brain size={12} /> KI-Training eine lernende KI per Selbstspiel und tritt gegen sie an (3×3).</li>
       </ul>
     </div>
   );
@@ -468,6 +588,12 @@ export default function TicTacToeGamePage() {
   const leave = useCallback(() => { send({ type: 'leave' }); closeWindow(); }, [closeWindow, send]);
   const place = useCallback((row, col) => send({ type: 'action', action: { type: 'place', row, col } }), [send]);
   const rematch = useCallback(() => send({ type: 'action', action: { type: 'rematch' } }), [send]);
+  const trainAi = useCallback((games) => send({ type: 'train_ai', games }), [send]);
+  const resetAiModel = useCallback(() => send({ type: 'reset_ai_model' }), [send]);
+  const selectTrainedAi = useCallback(
+    () => send({ type: 'update_settings', settings: { ...(pub?.settings || {}), aiDifficulty: 'trained' } }),
+    [pub?.settings, send],
+  );
 
   if (!snapshot?.public) {
     return (
@@ -497,6 +623,7 @@ export default function TicTacToeGamePage() {
         </div>
         <div className="ttt-game-titlebar-actions">
           <button type="button" className="ttt-game-btn-icon" title="Hilfe" onClick={() => setPanel('help')}><HelpCircle size={16} /></button>
+          {isHost && isSolo ? <button type="button" className="ttt-game-btn-icon" title="KI-Training" onClick={() => setPanel('training')}><Brain size={16} /></button> : null}
           {isHost && !isSolo ? <button type="button" className="ttt-game-btn-icon" title="Spieler" onClick={() => setPanel('players')}><Users size={16} /></button> : null}
           <button type="button" className="ttt-game-btn-icon" title="Einstellungen" onClick={() => setPanel('settings')}><Settings size={16} /></button>
           {isHost ? <button type="button" className="ttt-game-btn-icon" title="Speichern" onClick={() => send({ type: 'save_game' })}><Save size={16} /></button> : null}
@@ -537,6 +664,17 @@ export default function TicTacToeGamePage() {
             selfId={selfId}
             onInvite={(peerId) => send({ type: 'invite', peerId })}
             onKickPlayer={(peerId) => send({ type: 'kick_player', peerId })}
+          />
+        </OverlayPanel>
+      ) : null}
+      {panel === 'training' && isSolo ? (
+        <OverlayPanel title="KI-Training" onClose={() => setPanel('')}>
+          <TrainingPanel
+            snapshot={snapshot}
+            isHost={isHost}
+            onTrain={trainAi}
+            onReset={resetAiModel}
+            onSelectTrained={selectTrainedAi}
           />
         </OverlayPanel>
       ) : null}

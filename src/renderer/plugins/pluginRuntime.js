@@ -610,7 +610,16 @@ export class PluginRuntime {
     return this.plugins
       .filter((plugin) => this._isGamePlugin(plugin))
       .map((plugin) => this._mapGameEntry(plugin))
+      .filter((entry) => !entry.tool) // Werkzeuge (z. B. Dokumente) gehören nicht unter „Spiele"
       .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+  }
+
+  /** Plugins, die sich als eigenständiges Werkzeug (game.tool) ausweisen. */
+  listTools() {
+    return this.plugins
+      .filter((plugin) => this._isGamePlugin(plugin))
+      .map((plugin) => this._mapGameEntry(plugin))
+      .filter((entry) => entry.tool);
   }
 
   _mapGameEntry(plugin) {
@@ -620,6 +629,7 @@ export class PluginRuntime {
     return {
       id: plugin.id,
       enabled: Boolean(plugin.enabled),
+      tool: Boolean(gameMeta.tool),
       name: gameMeta.title || plugin.manifest?.name || plugin.id,
       description: gameMeta.description || plugin.manifest?.description || '',
       tag: plugin.manifest?.tag || gameMeta.tag || null,

@@ -1314,6 +1314,19 @@ body:has(.poker-game-root) {
   animation-delay: var(--deal-delay, 0ms);
 }
 
+/* Verdeckte eigene Karten (Peek) dürfen beim Austeilen NICHT um die Y-Achse
+   drehen – sonst kehrt die rotateY(180°)-Drehung die Rückseite weg und die
+   (gespiegelte) Vorderseite blitzt kurz auf. Sie gleiten stattdessen herein;
+   die eigentliche Drehung passiert erst beim Hover (peek). */
+@keyframes pokerDealInPeek {
+  0%   { transform: translateY(-90px) scale(0.6); opacity: 0; }
+  60%  { transform: translateY(-6px) scale(1.04); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.poker-card-peek.poker-card-deal {
+  animation-name: pokerDealInPeek;
+}
+
 /* Winner-Banner glasig mit Gold-Trim */
 .poker-winner-banner {
   background: rgba(4, 12, 8, 0.82);

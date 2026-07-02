@@ -1,21 +1,40 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
   Download,
   FileText,
   FolderOpen,
+  Heading1,
+  Heading2,
+  Heading3,
+  Highlighter,
+  Italic,
+  List,
+  ListOrdered,
   LogOut,
   Maximize2,
   Minus,
+  Pilcrow,
+  Redo2,
+  RemoveFormatting,
   SquareStack,
+  Strikethrough,
+  Underline,
+  Undo2,
   UserPlus,
   Users,
   X,
 } from 'lucide-react';
-import { parseDocx, buildDocx } from '../../shared/docx-lite.js';
+import { parseDocxHtml, buildDocxFromHtml } from '../../shared/docx-lite.js';
 import './DocsEditorPage.css';
 
 const SEND_DEBOUNCE_MS = 250;
 const IN_FLIGHT_TIMEOUT_MS = 3000;
+const CURSOR_THROTTLE_MS = 80;
+const CURSOR_STALE_MS = 12000;
 
 /**
  * Kleinster zusammenhängender Unterschied zwischen zwei Strings
@@ -53,6 +72,154 @@ function countWords(text) {
   return trimmed.split(/\s+/).length;
 }
 
+// ---------- HTML-Sanitizer (kanonische Form für den Sync) ----------
+//
+// Rebuild statt In-place-Filter: parst Fremd-HTML in ein <template> und
+// serialisiert nur eine feste Whitelist neu. Das liefert (a) XSS-Sicherheit
+// für von Peers empfangenes HTML und (b) eine deterministische, idempotente
+// „kanonische" Form — beide Seiten diffen denselben String.
+
+const ALLOWED_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'ul', 'ol', 'li', 'strong', 'em', 'u', 's', 'span', 'a', 'br']);
+const TAG_ALIASES = { b: 'strong', i: 'em', strike: 's', del: 's', ins: 'u', div: 'p' };
+const BLOCK_ALIGN_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'li']);
+
+function escapeHtmlText(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function safeHref(value) {
+  const v = String(value || '').trim();
+  return /^(https?:|mailto:)/i.test(v) ? v.replace(/"/g, '%22') : '';
+}
+
+function safeStyle(el, tag) {
+  const parts = [];
+  const align = (el.style.textAlign || '').toLowerCase();
+  if (BLOCK_ALIGN_TAGS.has(tag) && ['center', 'right', 'justify'].includes(align)) {
+    parts.push(`text-align:${align}`);
+  }
+  if (tag === 'span') {
+    const color = el.style.color;
+    const bg = el.style.backgroundColor;
+    if (color) parts.push(`color:${color}`);
+    if (bg) parts.push(`background-color:${bg}`);
+  }
+  return parts.join(';');
+}
+
+function sanitizeChildren(parent) {
+  let out = '';
+  parent.childNodes.forEach((node) => {
+    out += sanitizeNode(node);
+  });
+  return out;
+}
+
+function sanitizeNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) return escapeHtmlText(node.nodeValue);
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const raw = node.tagName.toLowerCase();
+  const tag = TAG_ALIASES[raw] || raw;
+  if (tag === 'br') return '<br>';
+  if (!ALLOWED_TAGS.has(tag)) return sanitizeChildren(node); // unbekanntes Tag entpacken
+  const inner = sanitizeChildren(node);
+  let attrs = '';
+  const style = safeStyle(node, tag);
+  if (style) attrs += ` style="${style}"`;
+  if (tag === 'a') {
+    const href = safeHref(node.getAttribute('href'));
+    if (href) attrs += ` href="${href}"`;
+  }
+  return `<${tag}${attrs}>${inner}</${tag}>`;
+}
+
+function sanitizeHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html ?? '');
+  return sanitizeChildren(tpl.content);
+}
+
+function textToHtml(text) {
+  const lines = String(text ?? '').split('\n');
+  return lines.map((line) => (line ? `<p>${escapeHtmlText(line)}</p>` : '<p><br></p>')).join('') || '<p><br></p>';
+}
+
+// ---------- Caret ⇄ Textoffset (gerenderter Text) ----------
+
+function caretToIndex(root, node, offset) {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  try {
+    range.setEnd(node, offset);
+  } catch {
+    return root.textContent.length;
+  }
+  return range.cloneContents().textContent.length;
+}
+
+function indexToCaret(root, index) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let remaining = Math.max(0, index);
+  let node;
+  let last = null;
+  while ((node = walker.nextNode())) {
+    last = node;
+    const len = node.nodeValue.length;
+    if (remaining <= len) return { node, offset: remaining };
+    remaining -= len;
+  }
+  if (last) return { node: last, offset: last.nodeValue.length };
+  return { node: root, offset: 0 };
+}
+
+function captureCaret(root) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  return {
+    start: caretToIndex(root, range.startContainer, range.startOffset),
+    end: caretToIndex(root, range.endContainer, range.endOffset),
+  };
+}
+
+function restoreCaret(root, caret) {
+  if (!caret) return;
+  try {
+    const start = indexToCaret(root, caret.start);
+    const end = indexToCaret(root, caret.end);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {
+    /* Auswahl nicht wiederherstellbar — egal */
+  }
+}
+
+function rangeFromOffsets(root, start, end) {
+  try {
+    const s = indexToCaret(root, start);
+    const e = indexToCaret(root, end);
+    const range = document.createRange();
+    range.setStart(s.node, s.offset);
+    range.setEnd(e.node, e.offset);
+    return range;
+  } catch {
+    return null;
+  }
+}
+
+/** Stabile, gut unterscheidbare Farbe aus einer peerId. */
+function colorForPeer(peerId) {
+  let hash = 0;
+  const str = String(peerId || '');
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 72%, 45%)`;
+}
+
 function useDocsWindowMaximized() {
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
@@ -73,31 +240,148 @@ function useDocsWindowMaximized() {
   return isMaximized;
 }
 
+const EMPTY_FMT = { bold: false, italic: false, underline: false, strike: false, block: 'p', ul: false, ol: false, align: 'left' };
+
 export default function DocsEditorPage() {
   const isMaximized = useDocsWindowMaximized();
   const [chrome, setChrome] = useState(null);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [status, setStatus] = useState('');
   const [counts, setCounts] = useState({ words: 0, chars: 0 });
+  const [fmt, setFmt] = useState(EMPTY_FMT);
 
-  const textareaRef = useRef(null);
+  const editorRef = useRef(null);
+  const wrapRef = useRef(null);
+  const scrollRef = useRef(null);
+  const cursorLayerRef = useRef(null);
   const fileInputRef = useRef(null);
   const payloadRef = useRef(null);
-  const shadowRef = useRef({ text: '', revision: -1 });
+  const shadowRef = useRef({ html: '', revision: -1 });
   const inFlightRef = useRef({ active: false, at: 0 });
   const sendTimerRef = useRef(null);
   const chromeKeyRef = useRef('');
   const fileNameDraftRef = useRef(null);
+  const remoteCursorsRef = useRef(new Map());
+  const cursorSendRef = useRef({ last: 0, timer: null });
 
   const send = useCallback((payload) => {
     window.bluetalk?.docs?.sendAction?.(payload);
   }, []);
 
+  const readLocalHtml = useCallback(() => {
+    const ed = editorRef.current;
+    return ed ? sanitizeHtml(ed.innerHTML) : '';
+  }, []);
+
   const updateCounts = useCallback(() => {
-    const text = textareaRef.current?.value ?? '';
+    const text = editorRef.current?.textContent ?? '';
     setCounts((prev) => {
       const next = { words: countWords(text), chars: text.length };
       return prev.words === next.words && prev.chars === next.chars ? prev : next;
+    });
+  }, []);
+
+  // ---------- Fremd-Cursor rendern ----------
+
+  const renderRemoteCursors = useCallback(() => {
+    const layer = cursorLayerRef.current;
+    const ed = editorRef.current;
+    const wrap = wrapRef.current;
+    if (!layer || !ed || !wrap) return;
+    layer.textContent = '';
+    const wrapRect = wrap.getBoundingClientRect();
+    for (const info of remoteCursorsRef.current.values()) {
+      const caret = info.caret;
+      if (!caret) continue;
+      const range = rangeFromOffsets(ed, caret.start, caret.end);
+      if (!range) continue;
+      if (caret.end > caret.start) {
+        for (const r of range.getClientRects()) {
+          if (!r.width && !r.height) continue;
+          const sel = document.createElement('div');
+          sel.className = 'docs-remote-selection';
+          sel.style.left = `${r.left - wrapRect.left}px`;
+          sel.style.top = `${r.top - wrapRect.top}px`;
+          sel.style.width = `${r.width}px`;
+          sel.style.height = `${r.height}px`;
+          sel.style.backgroundColor = info.color;
+          layer.appendChild(sel);
+        }
+      }
+      const caretRange = range.cloneRange();
+      caretRange.collapse(false);
+      const cr = caretRange.getBoundingClientRect();
+      const dot = document.createElement('div');
+      dot.className = 'docs-remote-caret';
+      dot.style.left = `${cr.left - wrapRect.left}px`;
+      dot.style.top = `${cr.top - wrapRect.top}px`;
+      dot.style.height = `${cr.height || 18}px`;
+      dot.style.backgroundColor = info.color;
+      const label = document.createElement('span');
+      label.className = 'docs-remote-label';
+      label.textContent = info.name || 'Gast';
+      label.style.backgroundColor = info.color;
+      dot.appendChild(label);
+      layer.appendChild(dot);
+    }
+  }, []);
+
+  const setRemoteCursor = useCallback((payload) => {
+    if (!payload?.peerId) return;
+    const map = remoteCursorsRef.current;
+    if (payload.gone || !payload.caret) {
+      map.delete(payload.peerId);
+    } else {
+      map.set(payload.peerId, {
+        caret: payload.caret,
+        name: payload.name || 'Gast',
+        color: colorForPeer(payload.peerId),
+        at: Date.now(),
+      });
+    }
+    renderRemoteCursors();
+  }, [renderRemoteCursors]);
+
+  const broadcastCaret = useCallback(() => {
+    const ed = editorRef.current;
+    if (!ed || shadowRef.current.revision < 0) return; // nur in aktiver Sitzung
+    const state = cursorSendRef.current;
+    const now = Date.now();
+    const flush = () => {
+      state.last = Date.now();
+      state.timer = null;
+      const caret = captureCaret(editorRef.current);
+      send({ type: 'cursor', caret });
+    };
+    if (now - state.last >= CURSOR_THROTTLE_MS) {
+      flush();
+    } else if (!state.timer) {
+      state.timer = setTimeout(flush, CURSOR_THROTTLE_MS - (now - state.last));
+    }
+  }, [send]);
+
+  const refreshFormatState = useCallback(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !ed.contains(sel.anchorNode)) return;
+    let block = 'p';
+    try {
+      const raw = String(document.queryCommandValue('formatBlock') || '').toLowerCase();
+      if (['h1', 'h2', 'h3'].includes(raw)) block = raw;
+    } catch { /* ignore */ }
+    const q = (cmd) => {
+      try { return document.queryCommandState(cmd); } catch { return false; }
+    };
+    setFmt({
+      bold: q('bold'),
+      italic: q('italic'),
+      underline: q('underline'),
+      strike: q('strikeThrough'),
+      block,
+      ul: q('insertUnorderedList'),
+      ol: q('insertOrderedList'),
+      align: q('justifyCenter') ? 'center' : q('justifyRight') ? 'right' : q('justifyFull') ? 'justify' : 'left',
     });
   }, []);
 
@@ -105,28 +389,25 @@ export default function DocsEditorPage() {
 
   const sendTick = useCallback(() => {
     sendTimerRef.current = null;
-    const ta = textareaRef.current;
     const shadow = shadowRef.current;
-    if (!ta || shadow.revision < 0) return;
-    const local = ta.value;
-    if (local === shadow.text) return;
+    if (!editorRef.current || shadow.revision < 0) return;
+    const local = readLocalHtml();
+    if (local === shadow.html) return;
     const now = Date.now();
     if (inFlightRef.current.active && now - inFlightRef.current.at < IN_FLIGHT_TIMEOUT_MS) {
       sendTimerRef.current = setTimeout(sendTick, 200);
       return;
     }
-    const d = diffRegion(shadow.text, local);
+    const d = diffRegion(shadow.html, local);
     if (!d) return;
-    // Ein primitiver Op pro Runde; gemischte Änderungen (Ersetzen) werden als
-    // Delete + Insert über zwei Runden konvergiert.
+    // Ein primitiver Op pro Runde; Ersetzen konvergiert über Delete + Insert.
     let op;
     if (d.del === 0) op = { type: 'insert', pos: d.pos, text: d.ins };
-    else if (d.ins.length === 0) op = { type: 'delete', pos: d.pos, len: d.del };
     else op = { type: 'delete', pos: d.pos, len: d.del };
     inFlightRef.current = { active: true, at: now };
     send({ type: 'apply_op', op, baseRevision: shadow.revision });
     sendTimerRef.current = setTimeout(sendTick, 350);
-  }, [send]);
+  }, [readLocalHtml, send]);
 
   const scheduleSend = useCallback(() => {
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
@@ -134,12 +415,12 @@ export default function DocsEditorPage() {
   }, [sendTick]);
 
   const applyRemoteDoc = useCallback((docPayload) => {
-    const ta = textareaRef.current;
+    const ed = editorRef.current;
     if (!docPayload) {
-      shadowRef.current = { text: '', revision: -1 };
+      shadowRef.current = { html: '', revision: -1 };
       inFlightRef.current = { active: false, at: 0 };
-      if (ta && ta.value !== '') {
-        ta.value = '';
+      if (ed && ed.innerHTML !== '') {
+        ed.innerHTML = '';
         updateCounts();
       }
       return;
@@ -147,63 +428,60 @@ export default function DocsEditorPage() {
     const state = String(docPayload.state ?? '');
     const revision = Number(docPayload.revision) || 0;
     const shadow = shadowRef.current;
-    if (revision < shadow.revision) return; // veralteter Push
-    if (revision === shadow.revision && state === shadow.text) return;
+    if (revision < shadow.revision) return;
+    if (revision === shadow.revision && state === shadow.html) return;
 
-    const oldShadow = shadow.text;
-    shadowRef.current = { text: state, revision };
+    const oldShadow = shadow.html;
+    shadowRef.current = { html: state, revision };
     inFlightRef.current = { active: false, at: 0 };
-    if (!ta) return;
-    const local = ta.value;
+    if (!ed) return;
+
+    const local = readLocalHtml();
     if (local === state) {
       updateCounts();
       return;
     }
-
     if (local === oldShadow) {
       // Keine eigenen ungesendeten Änderungen: Remote-Stand übernehmen und
-      // den Cursor über die Änderungsregion hinweg stabil halten.
-      const d = diffRegion(oldShadow, state);
-      const selStart = ta.selectionStart;
-      const selEnd = ta.selectionEnd;
-      ta.value = state;
-      if (d) {
-        const delta = d.ins.length - d.del;
-        const adjust = (pos) => (pos >= d.pos + d.del ? pos + delta : Math.min(pos, d.pos + d.ins.length));
-        ta.selectionStart = adjust(selStart);
-        ta.selectionEnd = adjust(selEnd);
-      }
+      // Cursor über die gerenderte Textposition stabil halten.
+      const caret = captureCaret(ed);
+      ed.innerHTML = sanitizeHtml(state);
+      restoreCaret(ed, caret);
       updateCounts();
+      renderRemoteCursors();
       return;
     }
-
-    // Eigene Änderungen sind unterwegs/ungesendet: unsere Region in den
-    // Remote-Stand einmischen (positions-verschoben), bei Überlappung gewinnt
-    // lokal — die nächste Sende-Runde schiebt das Ergebnis zum Host.
-    const ours = diffRegion(oldShadow, local);
-    const theirs = diffRegion(oldShadow, state);
-    if (!ours) {
-      ta.value = state;
-      updateCounts();
-      return;
-    }
-    if (theirs) {
-      const oursEnd = ours.pos + ours.del;
-      const theirsEnd = theirs.pos + theirs.del;
-      if (oursEnd <= theirs.pos || theirsEnd <= ours.pos) {
-        let pos = ours.pos;
-        if (theirs.pos < ours.pos) pos += theirs.ins.length - theirs.del;
-        const merged = state.slice(0, pos) + ours.ins + state.slice(pos + ours.del);
-        ta.value = merged;
-        const cursor = pos + ours.ins.length;
-        ta.selectionStart = cursor;
-        ta.selectionEnd = cursor;
-        updateCounts();
-      }
-      // Überlappung: lokalen Stand behalten (Textfeld unverändert lassen).
-    }
+    // Eigene Änderungen unterwegs: lokal behalten, in der nächsten Runde senden.
     scheduleSend();
-  }, [scheduleSend, updateCounts]);
+  }, [readLocalHtml, renderRemoteCursors, scheduleSend, updateCounts]);
+
+  // ---------- Editor-Eingabe ----------
+
+  const onEditorInput = useCallback(() => {
+    scheduleSend();
+    updateCounts();
+    renderRemoteCursors();
+    broadcastCaret();
+  }, [broadcastCaret, renderRemoteCursors, scheduleSend, updateCounts]);
+
+  const exec = useCallback((command, value) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus();
+    // CSS-Styling für Farbe/Highlight/Ausrichtung (→ Inline-Style, den der
+    // Sanitizer behält); Fett/Kursiv/… bleiben echte Tags (styleWithCSS aus).
+    const wantCss = /^(foreColor|hiliteColor|backColor|justify)/.test(command);
+    try {
+      document.execCommand('styleWithCSS', false, wantCss);
+      document.execCommand(command, false, value);
+    } catch { /* ignore */ }
+    refreshFormatState();
+    onEditorInput();
+  }, [onEditorInput, refreshFormatState]);
+
+  const setBlock = useCallback((tag) => {
+    exec('formatBlock', tag === 'p' ? 'p' : tag.toUpperCase());
+  }, [exec]);
 
   // ---------- Zustand vom Controller im Hauptfenster ----------
 
@@ -240,20 +518,75 @@ export default function DocsEditorPage() {
     };
   }, [applyRemoteDoc]);
 
+  // Fremd-Cursor-Kanal (leichtgewichtig, kein React-Re-Render).
+  useEffect(() => {
+    const onPresence = window.bluetalk?.docs?.onPeerPresence;
+    if (!onPresence) return undefined;
+    return onPresence((payload) => setRemoteCursor(payload));
+  }, [setRemoteCursor]);
+
+  // Auswahländerungen: Toolbar-Status + eigenen Cursor senden.
+  useEffect(() => {
+    const handler = () => {
+      const ed = editorRef.current;
+      const sel = window.getSelection();
+      if (!ed || !sel || sel.rangeCount === 0 || !ed.contains(sel.anchorNode)) return;
+      refreshFormatState();
+      broadcastCaret();
+    };
+    document.addEventListener('selectionchange', handler);
+    return () => document.removeEventListener('selectionchange', handler);
+  }, [broadcastCaret, refreshFormatState]);
+
+  // Fremd-Cursor bei Scroll/Resize neu positionieren + Ablauf alter Cursor.
+  useEffect(() => {
+    const onResize = () => renderRemoteCursors();
+    window.addEventListener('resize', onResize);
+    const sweep = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      for (const [peerId, info] of remoteCursorsRef.current) {
+        if (now - info.at > CURSOR_STALE_MS) {
+          remoteCursorsRef.current.delete(peerId);
+          changed = true;
+        }
+      }
+      if (changed) renderRemoteCursors();
+    }, 4000);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      clearInterval(sweep);
+    };
+  }, [renderRemoteCursors]);
+
+  // Wenn der Editor (nach hasRoom) frisch gemountet ist, aktuellen Stand zeigen.
+  useEffect(() => {
+    if (!chrome?.hasRoom) {
+      remoteCursorsRef.current.clear();
+      return;
+    }
+    const ed = editorRef.current;
+    if (ed && shadowRef.current.revision >= 0 && readLocalHtml() !== shadowRef.current.html) {
+      ed.innerHTML = sanitizeHtml(shadowRef.current.html || '');
+      updateCounts();
+      renderRemoteCursors();
+    }
+  }, [chrome?.hasRoom, readLocalHtml, renderRemoteCursors, updateCounts]);
+
   // ---------- Datei-Import / -Export ----------
 
   const importFile = useCallback(async (file) => {
     if (!file) return;
     try {
-      let text;
+      let html;
       if (/\.docx$/i.test(file.name)) {
-        text = await parseDocx(await file.arrayBuffer());
+        html = sanitizeHtml(await parseDocxHtml(await file.arrayBuffer()));
       } else {
-        text = await file.text();
+        html = sanitizeHtml(textToHtml(await file.text()));
       }
       const fileName = file.name.replace(/\.(docx|txt|md)$/i, '');
-      send({ type: 'import_text', text, fileName });
-      setStatus(`„${file.name}“ geladen`);
+      send({ type: 'import_text', text: html, fileName });
+      setStatus(`„${file.name}" geladen`);
     } catch (err) {
       console.error('Import fehlgeschlagen:', err);
       setStatus('Import fehlgeschlagen — ist das eine gültige Word-/Textdatei?');
@@ -261,14 +594,15 @@ export default function DocsEditorPage() {
   }, [send]);
 
   const exportFile = useCallback(async (kind) => {
-    const text = textareaRef.current?.value ?? shadowRef.current.text ?? '';
+    const html = readLocalHtml() || shadowRef.current.html || '';
     const baseName = (chrome?.fileName || 'Dokument').replace(/[\\/:*?"<>|]/g, '_');
     let base64;
     let fileName;
     if (kind === 'docx') {
-      base64 = bytesToBase64(buildDocx(text));
+      base64 = bytesToBase64(buildDocxFromHtml(html));
       fileName = `${baseName}.docx`;
     } else {
+      const text = editorRef.current?.textContent ?? '';
       base64 = bytesToBase64(new TextEncoder().encode(text));
       fileName = `${baseName}.txt`;
     }
@@ -280,7 +614,7 @@ export default function DocsEditorPage() {
     } else {
       setStatus('Speichern nicht verfügbar.');
     }
-  }, [chrome?.fileName]);
+  }, [chrome?.fileName, readLocalHtml]);
 
   const closeWindow = useCallback(() => window.bluetalk?.docs?.closeGameWindow?.(), []);
   const leaveSession = useCallback(() => {
@@ -296,7 +630,7 @@ export default function DocsEditorPage() {
         <main className="docs-empty">
           <div className="docs-mark" aria-hidden>📝</div>
           <h1>Editor wird vorbereitet…</h1>
-          <p>Verbindung zum Dokumente-Plugin im Hauptfenster wird hergestellt.</p>
+          <p>Verbindung zum Dokumente-Dienst im Hauptfenster wird hergestellt.</p>
           <button type="button" className="docs-btn" onClick={() => send({ type: 'request_state' })}>Erneut versuchen</button>
         </main>
       </div>
@@ -310,7 +644,7 @@ export default function DocsEditorPage() {
     <div className="docs-root">
       <header className="docs-titlebar">
         <div className="docs-title">
-          <h1>📝 {hasRoom ? fileName : 'Live Dokumente'}</h1>
+          <h1>📝 {hasRoom ? fileName : 'Dokumente'}</h1>
           <div className="docs-titlebar-sub">
             {hasRoom
               ? `Live · ${participants.length} ${participants.length === 1 ? 'Person' : 'Personen'}${isHost ? ' · Du bist Host' : ''}`
@@ -383,17 +717,70 @@ export default function DocsEditorPage() {
             </div>
           </div>
 
-          <div className="docs-editor-wrap">
-            <textarea
-              ref={textareaRef}
-              className="docs-editor"
-              spellCheck={false}
-              placeholder="Schreib los — alle in der Sitzung sehen deine Änderungen live."
-              onInput={() => {
-                scheduleSend();
-                updateCounts();
-              }}
-            />
+          <div className="docs-format-bar" role="toolbar" aria-label="Formatierung" onMouseDown={(e) => e.preventDefault()}>
+            <div className="docs-fmt-group">
+              <button type="button" className={`docs-fmt-btn${fmt.bold ? ' is-active' : ''}`} title="Fett (Strg+B)" onClick={() => exec('bold')}><Bold size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.italic ? ' is-active' : ''}`} title="Kursiv (Strg+I)" onClick={() => exec('italic')}><Italic size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.underline ? ' is-active' : ''}`} title="Unterstrichen (Strg+U)" onClick={() => exec('underline')}><Underline size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.strike ? ' is-active' : ''}`} title="Durchgestrichen" onClick={() => exec('strikeThrough')}><Strikethrough size={16} /></button>
+            </div>
+            <div className="docs-fmt-sep" />
+            <div className="docs-fmt-group">
+              <button type="button" className={`docs-fmt-btn${fmt.block === 'p' && !fmt.ul && !fmt.ol ? ' is-active' : ''}`} title="Fließtext" onClick={() => setBlock('p')}><Pilcrow size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.block === 'h1' ? ' is-active' : ''}`} title="Überschrift 1" onClick={() => setBlock('h1')}><Heading1 size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.block === 'h2' ? ' is-active' : ''}`} title="Überschrift 2" onClick={() => setBlock('h2')}><Heading2 size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.block === 'h3' ? ' is-active' : ''}`} title="Überschrift 3" onClick={() => setBlock('h3')}><Heading3 size={16} /></button>
+            </div>
+            <div className="docs-fmt-sep" />
+            <div className="docs-fmt-group">
+              <button type="button" className={`docs-fmt-btn${fmt.ul ? ' is-active' : ''}`} title="Aufzählung" onClick={() => exec('insertUnorderedList')}><List size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.ol ? ' is-active' : ''}`} title="Nummerierte Liste" onClick={() => exec('insertOrderedList')}><ListOrdered size={16} /></button>
+            </div>
+            <div className="docs-fmt-sep" />
+            <div className="docs-fmt-group">
+              <button type="button" className={`docs-fmt-btn${fmt.align === 'left' ? ' is-active' : ''}`} title="Linksbündig" onClick={() => exec('justifyLeft')}><AlignLeft size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.align === 'center' ? ' is-active' : ''}`} title="Zentriert" onClick={() => exec('justifyCenter')}><AlignCenter size={16} /></button>
+              <button type="button" className={`docs-fmt-btn${fmt.align === 'right' ? ' is-active' : ''}`} title="Rechtsbündig" onClick={() => exec('justifyRight')}><AlignRight size={16} /></button>
+            </div>
+            <div className="docs-fmt-sep" />
+            <div className="docs-fmt-group">
+              <label className="docs-fmt-btn docs-fmt-color" title="Textfarbe">
+                <Bold size={15} style={{ opacity: 0 }} />
+                <span className="docs-fmt-color-glyph">A</span>
+                <input type="color" onChange={(e) => exec('foreColor', e.target.value)} defaultValue="#111827" />
+              </label>
+              <label className="docs-fmt-btn docs-fmt-color" title="Texthervorhebung">
+                <Highlighter size={16} />
+                <input type="color" onChange={(e) => exec('hiliteColor', e.target.value)} defaultValue="#fde68a" />
+              </label>
+            </div>
+            <div className="docs-fmt-sep" />
+            <div className="docs-fmt-group">
+              <button type="button" className="docs-fmt-btn" title="Formatierung entfernen" onClick={() => exec('removeFormat')}><RemoveFormatting size={16} /></button>
+              <button type="button" className="docs-fmt-btn" title="Rückgängig (Strg+Z)" onClick={() => exec('undo')}><Undo2 size={16} /></button>
+              <button type="button" className="docs-fmt-btn" title="Wiederholen (Strg+Y)" onClick={() => exec('redo')}><Redo2 size={16} /></button>
+            </div>
+          </div>
+
+          <div className="docs-editor-wrap" ref={wrapRef}>
+            <div className="docs-editor-scroll" ref={scrollRef} onScroll={renderRemoteCursors}>
+              <div
+                ref={editorRef}
+                className="docs-editor"
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Dokumentinhalt"
+                data-placeholder="Schreib los — alle in der Sitzung sehen deine Änderungen und Cursor live."
+                onInput={onEditorInput}
+                onKeyUp={broadcastCaret}
+                onMouseUp={broadcastCaret}
+                onBlur={() => send({ type: 'cursor', caret: null })}
+              />
+            </div>
+            <div className="docs-cursor-layer" ref={cursorLayerRef} aria-hidden />
             {invitePanelOpen ? (
               <aside className="docs-side">
                 <div className="docs-side-head">
@@ -403,7 +790,7 @@ export default function DocsEditorPage() {
                 <div className="docs-participants">
                   {participants.map((p) => (
                     <div key={p.peerId} className={`docs-participant${p.isSelf ? ' docs-participant--self' : ''}`}>
-                      <span className="docs-dot" />
+                      <span className="docs-dot" style={{ backgroundColor: p.isSelf ? undefined : colorForPeer(p.peerId) }} />
                       <b>{p.name}</b>
                       <span className="docs-meta">{p.isHost ? 'Host' : ''}{p.isSelf ? (p.isHost ? ' · Du' : 'Du') : ''}</span>
                     </div>
@@ -437,8 +824,8 @@ export default function DocsEditorPage() {
         <main className="docs-idle">
           <div className="docs-idle-card">
             <div className="docs-mark" aria-hidden>📝</div>
-            <h2>Live Dokumente</h2>
-            <p>Öffne eine Word-Datei oder starte ein leeres Dokument und lade Kontakte ein — alle schreiben gleichzeitig am selben Text.</p>
+            <h2>Dokumente</h2>
+            <p>Öffne eine Word-Datei oder starte ein leeres Dokument und lade Kontakte ein — alle schreiben gleichzeitig am selben Text, mit Formatierung und Live-Cursor.</p>
             {pendingInvite ? (
               <div className="docs-pending">
                 <b>{pendingInvite.fromName || 'Ein Kontakt'} lädt dich ein: {String(pendingInvite.name || '').replace(/^Dokument: /, '') || 'Dokument'}</b>

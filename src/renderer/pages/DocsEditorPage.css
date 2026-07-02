@@ -210,34 +210,173 @@
   flex-wrap: wrap;
 }
 
+/* ---------- Format-Leiste (Word-Formatierung) ---------- */
+
+.docs-format-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.72);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.docs-fmt-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.docs-fmt-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 6px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.docs-fmt-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.docs-fmt-btn:hover {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.docs-fmt-btn.is-active {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #7dd3fc;
+}
+
+.docs-fmt-color {
+  overflow: hidden;
+}
+
+.docs-fmt-color input[type='color'] {
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 100%;
+  height: 5px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.docs-fmt-color-glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+}
+
 .docs-editor-wrap {
   flex: 1;
   display: flex;
   min-height: 0;
   position: relative;
+  overflow: hidden;
+}
+
+.docs-editor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: #0e1424;
+  display: flex;
 }
 
 .docs-editor {
   flex: 1;
-  resize: none;
+  min-height: 100%;
+  height: max-content;
   border: none;
   outline: none;
-  background: #0e1424;
   color: #e8edf5;
   font-family: 'Segoe UI', Georgia, serif;
   font-size: 15.5px;
   line-height: 1.65;
   padding: 26px clamp(24px, 12vw, 140px);
-  min-height: 0;
+  caret-color: #38bdf8;
 }
 
-.docs-editor::placeholder {
+.docs-editor:empty::before,
+.docs-editor:has(> p:only-child:empty)::before {
+  content: attr(data-placeholder);
   color: #64748b;
+  pointer-events: none;
+}
+
+/* Word-artige Blockstile */
+.docs-editor h1 { font-size: 1.9em; font-weight: 800; margin: 0.7em 0 0.35em; color: #f1f5f9; }
+.docs-editor h2 { font-size: 1.5em; font-weight: 700; margin: 0.65em 0 0.3em; color: #e8edf5; }
+.docs-editor h3 { font-size: 1.22em; font-weight: 700; margin: 0.6em 0 0.3em; color: #dbe4ef; }
+.docs-editor p { margin: 0 0 0.55em; }
+.docs-editor ul,
+.docs-editor ol { margin: 0 0 0.6em; padding-left: 1.6em; }
+.docs-editor li { margin: 0.15em 0; }
+.docs-editor a { color: #7dd3fc; }
+
+/* ---------- Live-Cursor der Teilnehmer ---------- */
+
+.docs-cursor-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 3;
+}
+
+.docs-remote-selection {
+  position: absolute;
+  border-radius: 2px;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.docs-remote-caret {
+  position: absolute;
+  width: 2px;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.docs-remote-label {
+  position: absolute;
+  left: 0;
+  top: -1.35em;
+  transform: translateY(-1px);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: #0b0f19;
+  padding: 2px 5px;
+  border-radius: 5px 5px 5px 0;
+  white-space: nowrap;
 }
 
 /* ---------- Seitenleiste (Teilnehmer/Einladen) ---------- */
 
 .docs-side {
+  position: relative;
+  z-index: 5;
   width: 262px;
   flex: 0 0 auto;
   border-left: 1px solid rgba(148, 163, 184, 0.14);

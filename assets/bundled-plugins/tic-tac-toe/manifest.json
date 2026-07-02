@@ -1,8 +1,8 @@
 {
   "id": "tic-tac-toe",
   "name": "Tic-Tac-Toe",
-  "version": "1.0.2",
-  "description": "Tic-Tac-Toe solo gegen Algorithmus oder online mit bis zu 4 Spielern — konfigurierbares Spielfeld, Einladungen per Chat, separates Spielfenster.",
+  "version": "1.1.0",
+  "description": "Tic-Tac-Toe solo gegen Algorithmus (Leicht/Mittel/Schwer oder selbst trainierte KI) oder online mit bis zu 4 Spielern — konfigurierbares Spielfeld, Einladungen per Chat, separates Spielfenster.",
   "author": "BlueTalk",
   "main": "main.js",
   "ui": "ui.js",
@@ -11,7 +11,7 @@
   "game": {
     "mark": "✕",
     "title": "Tic-Tac-Toe",
-    "description": "Solo vs Algorithmus oder online (2–4 Spieler), Feld 3×3 bis 7×7.",
+    "description": "Solo vs Algorithmus oder selbst trainierte KI, oder online (2–4 Spieler), Feld 3×3 bis 7×7.",
     "labels": {
       "launchNew": "Neues Spiel",
       "openWindow": "Tic-Tac-Toe-Fenster öffnen"

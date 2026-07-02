@@ -6,7 +6,6 @@ const GAME_CONFIG = {
   'connect-four': { bridge: 'connectFour', channel: 'connect-four' },
   chess: { bridge: 'chess', channel: 'chess' },
   'tic-tac-toe': { bridge: 'ticTacToe', channel: 'ticTacToe' },
-  'racing-3d': { bridge: 'racing', channel: 'racing' },
   // Editor-Fenster darf zusätzlich Dateien speichern (docx-Export).
   'live-docs': { bridge: 'docs', channel: 'docs', allowSaveAs: true },
 };
@@ -39,6 +38,15 @@ if (config) {
   };
   if (config.allowSaveAs) {
     gameApi.saveAs = (payload) => ipcRenderer.invoke('file:saveAs', payload);
+  }
+  if (gameId === 'live-docs') {
+    // Fremd-Cursor/-Auswahl der Mit-Bearbeiter (leichtgewichtiger Kanal).
+    gameApi.onPeerPresence = (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on(`${channel}:peerPresence`, listener);
+      return () => ipcRenderer.removeListener(`${channel}:peerPresence`, listener);
+    };
   }
 
   contextBridge.exposeInMainWorld('bluetalk', {

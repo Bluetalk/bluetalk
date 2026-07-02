@@ -32,9 +32,14 @@
     next.maxPlayers = next.playMode === 'solo'
       ? 2
       : Math.min(4, Math.max(2, Math.round(Number(next.maxPlayers) || 2)));
-    next.aiDifficulty = ['easy', 'medium', 'hard'].includes(next.aiDifficulty)
+    next.aiDifficulty = ['easy', 'medium', 'hard', 'trained'].includes(next.aiDifficulty)
       ? next.aiDifficulty
       : 'medium';
+    // Die trainierbare KI arbeitet nur auf dem klassischen 3×3-Feld.
+    if (next.playMode === 'solo' && next.aiDifficulty === 'trained') {
+      next.boardSize = 3;
+      next.winLength = 3;
+    }
     next.lobbyAccess = next.lobbyAccess === 'public' ? 'public' : 'invite';
     return next;
   }
@@ -204,36 +209,57 @@
     return { score: bestScore, move: bestMove };
   }
 
+  // Suchtiefe je Schwierigkeit. „hard" spielt auf 3×3 perfekt, „medium" bewusst
+  // flacher, „easy" verzichtet ganz auf die Vorausberechnung.
   function aiSearchDepth(boardSize, difficulty) {
-    if (boardSize === 3 && difficulty === 'hard') return 9;
-    if (difficulty === 'easy') return 1;
-    if (difficulty === 'medium') return boardSize === 3 ? 4 : 2;
-    if (boardSize === 3) return 9;
-    if (boardSize === 5) return 3;
-    return 2;
+    if (difficulty === 'hard') {
+      if (boardSize === 3) return 9;
+      if (boardSize === 5) return 4;
+      return 3;
+    }
+    if (difficulty === 'medium') {
+      if (boardSize === 3) return 3;
+      return 2;
+    }
+    return 1;
   }
 
-  function chooseAiMove(board, winLength, aiDisc, humanDisc, difficulty) {
+  function randomCell(empties) {
+    return empties[Math.floor(Math.random() * empties.length)];
+  }
+
+  function chooseAiMove(board, winLength, aiDisc, humanDisc, difficulty, model = null) {
     const empties = listEmptyCells(board);
     if (!empties.length) return null;
 
-    if (difficulty === 'easy' && Math.random() < 0.3) {
-      return empties[Math.floor(Math.random() * empties.length)];
+    // Trainierte KI: gelerntes Modell befragen, sonst auf „medium" zurückfallen.
+    let level = difficulty;
+    if (level === 'trained') {
+      const learned = chooseTrainedMove(board, winLength, aiDisc, humanDisc, model);
+      if (learned) return learned;
+      level = 'medium';
     }
 
+    // Leicht: absichtlich schwach — viel Zufall, verpasst öfter Sieg und Konter.
+    if (level === 'easy') {
+      const winMove = findWinningMove(board, winLength, aiDisc);
+      if (winMove && Math.random() < 0.7) return winMove;
+      if (Math.random() < 0.5) return randomCell(empties);
+      const blockMove = findWinningMove(board, winLength, humanDisc);
+      if (blockMove && Math.random() < 0.5) return blockMove;
+      const center = Math.floor(board.length / 2);
+      if (board[center][center] === 0 && Math.random() < 0.5) return { row: center, col: center };
+      return randomCell(empties);
+    }
+
+    // Mittel & Schwer: Sieg und Konter immer erkennen, dann Suche.
     const winMove = findWinningMove(board, winLength, aiDisc);
     if (winMove) return winMove;
 
     const blockMove = findWinningMove(board, winLength, humanDisc);
     if (blockMove) return blockMove;
 
-    if (difficulty === 'easy') {
-      const center = Math.floor(board.length / 2);
-      if (board[center][center] === 0) return { row: center, col: center };
-      return empties[Math.floor(Math.random() * empties.length)];
-    }
-
-    const depth = aiSearchDepth(board.length, difficulty);
+    const depth = aiSearchDepth(board.length, level);
     const result = minimax(
       board,
       winLength,
@@ -245,11 +271,149 @@
       Infinity,
       depth
     );
-    if (result?.move) return result.move;
+    if (result?.move) {
+      // Mittel spielt nicht perfekt: gelegentlich ein zufälliger Zug für Varianz.
+      if (level === 'medium' && Math.random() < 0.15) return randomCell(empties);
+      return result.move;
+    }
 
     const center = Math.floor(board.length / 2);
     if (board[center][center] === 0) return { row: center, col: center };
     return empties[0];
+  }
+
+  // ----- Trainierbare KI (Selbstlern-Modell für klassisches 3×3) -----------
+  // Das Modell speichert Zustandswerte V[key] aus Sicht des Spielers am Zug
+  // (eigene Steine = '2', gegnerische = '1', leer = '0'). Gelernt wird per
+  // Monte-Carlo-Rückführung des Partieergebnisses (+1 Sieg, −1 Niederlage,
+  // 0 Remis). Die Zugwahl erfolgt negamax-artig: mein Wert eines Zuges ist der
+  // negierte Wert der Folgestellung aus Gegnersicht.
+  const TRAIN_MAX_GAMES = 20000;
+
+  function emptyModel() {
+    return { version: 1, V: {}, games: 0, wins: 0, losses: 0, draws: 0, updatedAt: 0 };
+  }
+
+  function isTrainableBoard(board, winLength) {
+    return board.length === 3 && Number(winLength) === 3;
+  }
+
+  function modelKey(board, moverDisc, oppDisc) {
+    let s = '';
+    for (let r = 0; r < board.length; r += 1) {
+      for (let c = 0; c < board[r].length; c += 1) {
+        const v = board[r][c];
+        s += v === moverDisc ? '2' : v === oppDisc ? '1' : '0';
+      }
+    }
+    return s;
+  }
+
+  function chooseTrainedMove(board, winLength, aiDisc, humanDisc, model, epsilon = 0) {
+    if (!model || !model.V) return null;
+    if (!isTrainableBoard(board, winLength)) return null;
+    const empties = listEmptyCells(board);
+    if (!empties.length) return null;
+
+    // Einen sofortigen Sieg nimmt die KI immer mit.
+    const winMove = findWinningMove(board, winLength, aiDisc);
+    if (winMove) return winMove;
+
+    if (epsilon > 0 && Math.random() < epsilon) return randomCell(empties);
+
+    let best = null;
+    let bestScore = -Infinity;
+    let known = false;
+    for (const cell of empties) {
+      const next = applyMove(board, cell.row, cell.col, aiDisc);
+      if (!next) continue;
+      let score;
+      if (checkWin(next, winLength, cell)) {
+        score = 1;
+      } else if (isBoardFull(next)) {
+        score = 0;
+      } else {
+        // Danach ist der Gegner am Zug — Wert aus dessen Sicht, negiert.
+        const v = model.V[modelKey(next, humanDisc, aiDisc)];
+        if (typeof v === 'number') known = true;
+        score = -(typeof v === 'number' ? v : 0);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = cell;
+      }
+    }
+    // Kennt das Modell die Stellung überhaupt nicht, überlassen wir dem
+    // Aufrufer die Heuristik statt blind das erste Feld zu nehmen.
+    if (!known) return null;
+    return best;
+  }
+
+  function trainingFallbackMove(board, winLength, moverDisc, oppDisc) {
+    const winMove = findWinningMove(board, winLength, moverDisc);
+    if (winMove) return winMove;
+    const blockMove = findWinningMove(board, winLength, oppDisc);
+    if (blockMove && Math.random() < 0.7) return blockMove;
+    return randomCell(listEmptyCells(board));
+  }
+
+  // Trainiert das Modell per Selbstspiel. Läuft rein synchron; der Aufrufer
+  // stückelt größere Läufe in Häppchen, damit die UI reagierbar bleibt.
+  function trainSelfPlay(model, games, opts = {}) {
+    const m = model && model.V ? model : emptyModel();
+    const alpha = typeof opts.alpha === 'number' ? opts.alpha : 0.1;
+    const epsilon = typeof opts.epsilon === 'number' ? opts.epsilon : 0.25;
+    const rounds = Math.max(0, Math.round(Number(games) || 0));
+    const P1 = 1;
+    const P2 = 2;
+    for (let g = 0; g < rounds; g += 1) {
+      let board = createEmptyBoard(3);
+      let mover = P1;
+      const visited = [];
+      let winnerDisc = null;
+      for (let ply = 0; ply < 9; ply += 1) {
+        const opp = mover === P1 ? P2 : P1;
+        // Zustand vor dem Zug aus Sicht des Ziehenden merken.
+        visited.push({ key: modelKey(board, mover, opp), disc: mover });
+        const move = chooseTrainedMove(board, 3, mover, opp, m, epsilon)
+          || trainingFallbackMove(board, 3, mover, opp);
+        const next = applyMove(board, move.row, move.col, mover);
+        if (!next) break;
+        board = next;
+        if (checkWin(board, 3, move)) {
+          winnerDisc = mover;
+          break;
+        }
+        if (isBoardFull(board)) break;
+        mover = opp;
+      }
+      for (const step of visited) {
+        const z = winnerDisc == null ? 0 : (step.disc === winnerDisc ? 1 : -1);
+        const cur = typeof m.V[step.key] === 'number' ? m.V[step.key] : 0;
+        m.V[step.key] = cur + alpha * (z - cur);
+      }
+      m.games += 1;
+      if (winnerDisc == null) m.draws += 1;
+      else if (winnerDisc === P1) m.wins += 1;
+      else m.losses += 1;
+    }
+    m.updatedAt = 0;
+    return m;
+  }
+
+  // Rückführung einer real gespielten Partie (Mensch gegen trainierte KI).
+  // history: [{ key, disc }] in Zugreihenfolge, winnerDisc = Siegerscheibe|null.
+  function learnFromGame(model, history, winnerDisc, alpha = 0.15) {
+    if (!model || !model.V || !Array.isArray(history) || !history.length) return model;
+    for (const step of history) {
+      if (!step || typeof step.key !== 'string') continue;
+      const z = winnerDisc == null ? 0 : (step.disc === winnerDisc ? 1 : -1);
+      const cur = typeof model.V[step.key] === 'number' ? model.V[step.key] : 0;
+      model.V[step.key] = cur + alpha * (z - cur);
+    }
+    model.games += 1;
+    if (winnerDisc == null) model.draws += 1;
+    return model;
   }
 
   function isContactBlocked(peerId) {
@@ -292,6 +456,43 @@
     let message = String(restoredGame?.message || '');
     let savedAt = Number(restoredGame?.savedAt) || 0;
     const invitedPeers = new Set(Array.isArray(restoredGame?.invitedPeers) ? restoredGame.invitedPeers : []);
+
+    // Trainierbare KI: gelerntes Modell + Trainings-/Lernzustand.
+    let aiModel = null;
+    let moveHistory = [];
+    let training = false;
+    let trainingTarget = 0;
+    let trainingDone = 0;
+    let trainingTimer = null;
+
+    function ensureModel() {
+      if (!aiModel || !aiModel.V) {
+        const stored = api.storage.get('savedTicTacToeModel', null);
+        aiModel = stored && stored.V ? stored : emptyModel();
+      }
+      return aiModel;
+    }
+
+    function saveModel() {
+      if (!aiModel) return;
+      aiModel.updatedAt = Date.now();
+      api.storage.set('savedTicTacToeModel', aiModel);
+    }
+
+    function aiModelSummary() {
+      const m = aiModel || api.storage.get('savedTicTacToeModel', null);
+      const states = m && m.V ? Object.keys(m.V).length : 0;
+      return {
+        available: states > 0,
+        games: m?.games || 0,
+        states,
+        wins: m?.wins || 0,
+        losses: m?.losses || 0,
+        draws: m?.draws || 0,
+        training,
+        progress: trainingTarget > 0 ? Math.min(1, trainingDone / trainingTarget) : 0,
+      };
+    }
 
     for (const row of restoredPlayers) {
       if (!row?.peerId || players.some((p) => p.peerId === row.peerId)) continue;
@@ -359,6 +560,7 @@
         message,
         settings: { ...cfg },
         playerMarks: PLAYER_MARKS,
+        aiModel: cfg.playMode === 'solo' ? aiModelSummary() : null,
         players: players.map((p) => ({
           peerId: p.peerId,
           name: p.name,
@@ -480,6 +682,7 @@
         return false;
       }
       resetBoard();
+      moveHistory = [];
       toActIdx = 0;
       winnerPeerId = null;
       winnerDisc = null;
@@ -495,6 +698,7 @@
     function rematch() {
       if (phase !== 'finished') return false;
       resetBoard();
+      moveHistory = [];
       toActIdx = 0;
       winnerPeerId = null;
       winnerDisc = null;
@@ -512,12 +716,22 @@
       toActIdx = (toActIdx + 1) % players.length;
     }
 
+    function absorbGameIntoModel(resultDisc) {
+      if (cfg.playMode !== 'solo' || cfg.aiDifficulty !== 'trained') return;
+      if (!moveHistory.length) return;
+      ensureModel();
+      learnFromGame(aiModel, moveHistory, resultDisc);
+      moveHistory = [];
+      saveModel();
+    }
+
     function finishWithWin(peerId, disc, cells, label) {
       winnerPeerId = peerId;
       winnerDisc = disc;
       winCells = cells;
       phase = 'finished';
       message = label;
+      absorbGameIntoModel(disc);
       checkpoint('win');
       pushState();
     }
@@ -528,6 +742,7 @@
       winCells = null;
       phase = 'finished';
       message = 'Unentschieden — das Feld ist voll.';
+      absorbGameIntoModel(null);
       checkpoint('draw');
       pushState();
     }
@@ -538,6 +753,14 @@
       const player = players[idx];
       if (player.isAi && peerId !== AI_PEER_ID) return false;
       if (peerId === AI_PEER_ID && player.peerId !== AI_PEER_ID) return false;
+
+      // Trainierte Solo-KI lernt aus der echten Partie: Zustand vor dem Zug
+      // aus Sicht des Ziehenden merken.
+      if (cfg.playMode === 'solo' && cfg.aiDifficulty === 'trained' && isTrainableBoard(board, cfg.winLength)) {
+        ensureModel();
+        const other = players.find((p) => p.disc !== player.disc);
+        if (other) moveHistory.push({ key: modelKey(board, player.disc, other.disc), disc: player.disc });
+      }
 
       const nextBoard = applyMove(board, row, col, player.disc);
       if (!nextBoard) return false;
@@ -571,16 +794,77 @@
       if (!actor?.isAi) return;
       const human = players.find((p) => !p.isAi);
       if (!human) return;
+      if (cfg.aiDifficulty === 'trained') ensureModel();
       queueMicrotask(() => {
         const move = chooseAiMove(
           board,
           cfg.winLength,
           actor.disc,
           human.disc,
-          cfg.aiDifficulty
+          cfg.aiDifficulty,
+          cfg.aiDifficulty === 'trained' ? aiModel : null
         );
         if (move) place(AI_PEER_ID, move.row, move.col);
       });
+    }
+
+    function trainingEpsilon() {
+      if (trainingTarget <= 0) return 0.25;
+      const frac = trainingDone / trainingTarget;
+      return Math.max(0.08, 0.35 - 0.27 * frac);
+    }
+
+    function runTrainingChunk() {
+      trainingTimer = null;
+      if (!training) return;
+      const CHUNK = 400;
+      const batch = Math.min(CHUNK, trainingTarget - trainingDone);
+      trainSelfPlay(aiModel, batch, { epsilon: trainingEpsilon() });
+      trainingDone += batch;
+      if (trainingDone >= trainingTarget) {
+        training = false;
+        saveModel();
+        message = `KI-Training abgeschlossen — ${aiModel.games} Partien gespielt, ${Object.keys(aiModel.V).length} Stellungen gelernt.`;
+        checkpoint('train_done');
+        pushState();
+        return;
+      }
+      saveModel();
+      pushState();
+      trainingTimer = api.timer.setTimeout(runTrainingChunk, 0);
+    }
+
+    function trainAi(gamesRequested) {
+      if (cfg.playMode !== 'solo') {
+        message = 'KI-Training ist nur im Solo-Modus möglich.';
+        pushState();
+        return false;
+      }
+      if (phase === 'playing') {
+        message = 'KI-Training nur in der Lobby oder nach der Partie möglich.';
+        pushState();
+        return false;
+      }
+      if (training) return false;
+      const games = Math.max(1, Math.min(TRAIN_MAX_GAMES, Math.round(Number(gamesRequested) || 0)));
+      ensureModel();
+      training = true;
+      trainingTarget = games;
+      trainingDone = 0;
+      message = `KI-Training läuft (${games} Partien Selbstspiel)…`;
+      pushState();
+      trainingTimer = api.timer.setTimeout(runTrainingChunk, 0);
+      return true;
+    }
+
+    function resetAiModel() {
+      if (training) return false;
+      aiModel = emptyModel();
+      moveHistory = [];
+      saveModel();
+      message = 'KI-Modell wurde zurückgesetzt.';
+      pushState();
+      return true;
     }
 
     function applyAction(peerId, action) {
@@ -702,13 +986,21 @@
       },
       startGame,
       rematch,
+      trainAi,
+      resetAiModel,
       onWire,
       removePlayer,
       kickPlayer,
       publicState,
       pushState,
       applyAction: (pid, a) => applyAction(pid, a),
-      destroy() {},
+      destroy() {
+        training = false;
+        if (trainingTimer != null) {
+          api.timer.clearTimeout(trainingTimer);
+          trainingTimer = null;
+        }
+      },
     };
   }
 
@@ -725,6 +1017,11 @@
     sanitizeSettings,
     settingsSummary,
     createHost,
+    emptyModel,
+    modelKey,
+    chooseTrainedMove,
+    trainSelfPlay,
+    learnFromGame,
   });
 
   let host = null;
@@ -1041,6 +1338,10 @@
         hostRef?.saveNow();
       } else if (payload.type === 'kick_player' && payload.peerId) {
         hostRef?.kickPlayer(payload.peerId);
+      } else if (payload.type === 'train_ai') {
+        hostRef?.trainAi(payload.games);
+      } else if (payload.type === 'reset_ai_model') {
+        hostRef?.resetAiModel();
       }
     });
   }
