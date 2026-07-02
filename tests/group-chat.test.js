@@ -5,7 +5,7 @@ const { pathToFileURL } = require('node:url');
 
 const groupChatUrl = pathToFileURL(path.join(__dirname, '..', 'src', 'shared', 'group-chat.js')).href;
 
-test('group chat helpers', async () => {
+test('group chat helpers', async (t) => {
   const {
     GROUP_MESSAGE_KIND,
     applyGroupEvent,
@@ -33,7 +33,7 @@ test('group chat helpers', async () => {
     });
   }
 
-  test('createGroupInviteEvent and applyGroupEvent add invited member', () => {
+  await t.test('createGroupInviteEvent and applyGroupEvent add invited member', () => {
     const group = fixture();
     const event = createGroupInviteEvent({
       groupId: group.id,
@@ -45,7 +45,7 @@ test('group chat helpers', async () => {
     assert.equal(getGroupMember(applied.group, 'bt-carol')?.state, 'invited');
   });
 
-  test('createGroupAcceptEvent activates invited member', () => {
+  await t.test('createGroupAcceptEvent activates invited member', () => {
     let group = fixture();
     const invite = createGroupInviteEvent({
       groupId: group.id,
@@ -62,7 +62,7 @@ test('group chat helpers', async () => {
     assert.equal(getGroupMember(applied.group, 'bt-carol')?.state, 'active');
   });
 
-  test('createGroupUpdateEvent renames group for admin', () => {
+  await t.test('createGroupUpdateEvent renames group for admin', () => {
     const group = fixture();
     const event = createGroupUpdateEvent({
       groupId: group.id,
@@ -74,7 +74,7 @@ test('group chat helpers', async () => {
     assert.equal(applied.group.name, 'Neu');
   });
 
-  test('validateIncomingGroupMessage rejects foreign sender', () => {
+  await t.test('validateIncomingGroupMessage rejects foreign sender', () => {
     const group = fixture();
     const message = {
       kind: GROUP_MESSAGE_KIND,
@@ -87,13 +87,13 @@ test('group chat helpers', async () => {
     assert.equal(result.ok, false);
   });
 
-  test('buildTargetedGroupRoute returns peer ids except sender', () => {
+  await t.test('buildTargetedGroupRoute returns peer ids except sender', () => {
     const group = fixture();
     const route = buildTargetedGroupRoute(group, 'bt-admin');
     assert.deepEqual(route.sort(), ['bt-alice', 'bt-bob'].sort());
   });
 
-  test('deriveGroupDeliveryStatus summarizes member receipts', () => {
+  await t.test('deriveGroupDeliveryStatus summarizes member receipts', () => {
     const group = fixture();
     const status = deriveGroupDeliveryStatus(group, {
       'bt-alice': 'delivered',
@@ -103,14 +103,14 @@ test('group chat helpers', async () => {
     assert.equal(status.pendingCount, 1);
   });
 
-  test('rememberGroupEventId deduplicates', () => {
+  await t.test('rememberGroupEventId deduplicates', () => {
     const first = rememberGroupEventId([], 'evt-1');
     assert.equal(first.duplicate, false);
     const second = rememberGroupEventId(first.eventIds, 'evt-1');
     assert.equal(second.duplicate, true);
   });
 
-  test('createChatRef encodes group id', () => {
+  await t.test('createChatRef encodes group id', () => {
     assert.equal(createChatRef('group:abc'), 'group:abc');
   });
 });

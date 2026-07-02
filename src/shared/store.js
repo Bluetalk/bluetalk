@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+
+// Electron is only needed to resolve the default userData path. Load it
+// lazily so the store can run in plain Node (tests) with an explicit baseDir.
+function getDefaultUserDataPath() {
+  const { app } = require('electron');
+  return app.getPath('userData');
+}
 
 const FORBIDDEN_PATH_PARTS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -13,7 +19,7 @@ function splitSafeKey(key) {
 
 class Store {
   constructor(opts) {
-    const userDataPath = opts.baseDir || app.getPath('userData');
+    const userDataPath = opts.baseDir || getDefaultUserDataPath();
     this.path = path.join(userDataPath, opts.configName + '.json');
     this.data = this._load();
     this._dirty = false;

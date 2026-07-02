@@ -18,7 +18,7 @@ import * as THREE from 'three';
 
 const SEG = 15;          // progress-Einheiten pro Bandsegment
 const AHEAD = 56;        // sichtbare Segmente vor dem Auto
-const BEHIND = 6;        // Segmente hinter dem Auto
+const BEHIND = 10;       // Segmente hinter dem Auto (genug, damit Verfolger nicht poppen)
 const N = AHEAD + BEHIND;
 const ROAD_HALF = 9;     // Welt-Halbbreite der Straße bei track.width = 1
 const SHOULDER = 4.4;    // Grasrand reicht bis ROAD_HALF * SHOULDER
@@ -135,7 +135,11 @@ export class RaceScene {
     this._fc2 = new THREE.Vector3();
     this._fc3 = new THREE.Vector3();
     this._fc4 = new THREE.Vector3();
+    this._carPos = new THREE.Vector3();
+    this._selfWorld = new THREE.Vector3();
     this._tmpCol = new THREE.Color();
+    this._lastColorKey = null;
+    this._fov = 66;
     this._selfTangent = new THREE.Vector3();
     this._selfUp = new THREE.Vector3();
     this._selfFrame = { tangent: this._selfTangent, up: this._selfUp };
@@ -195,6 +199,24 @@ export class RaceScene {
     const g = new THREE.PlaneGeometry(ROAD_HALF * 2, SEG * 0.9);
     const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
     return m;
+  }
+
+  // Gibt alle GPU-Ressourcen eines Objektbaums frei (Geometrien, Materialien,
+  // Texturen). Sets deduplizieren geteilte Ressourcen (z.B. das Rad-Geo ×4).
+  _disposeObject(root) {
+    const geos = new Set();
+    const mats = new Set();
+    root.traverse((o) => {
+      if (o.geometry) geos.add(o.geometry);
+      if (o.material) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => mats.add(m));
+      }
+    });
+    for (const g of geos) g.dispose?.();
+    for (const m of mats) {
+      m.map?.dispose?.();
+      m.dispose?.();
+    }
   }
 
   _makeCarMesh(color) {
@@ -276,6 +298,7 @@ export class RaceScene {
 
     this._buildProps(track);
     this._camReady = false;
+    this._lastColorKey = null;
   }
 
   _buildProps(track) {
@@ -384,17 +407,37 @@ export class RaceScene {
     const cA = this._fc1; const cB = this._fc2; const pA = this._fc3; const pB = this._fc4;
     const tmp = this._tmpCol;
 
+    // Farben hängen nur vom Segment-Raster ab (Streifen/Boost-Tint), nicht von
+    // der Sub-Segment-Position — Upload nur, wenn das Fenster ein Segment
+    // weitergerollt ist, statt 60×/s.
+    const colorKey = Math.floor(this.baseS / SEG);
+    const writeColors = colorKey !== this._lastColorKey;
+    this._lastColorKey = colorKey;
+
     let o = 0; // Vertex-Offset
     for (let i = 0; i < N; i++) {
       const fa = frames[i];
       const fb = frames[i + 1];
-      const alt = Math.floor(wrap(fa.s, len) / SEG) % 2;
-      const boost = this._nearList(track.boosts, fa.s, len, 45);
+      if (writeColors) {
+        const alt = Math.floor(wrap(fa.s, len) / SEG) % 2;
+        const boost = this._nearList(track.boosts, fa.s, len, 45);
+        let co = o;
+        for (let band = 0; band < BANDS; band++) {
+          const isGrass = band === 0 || band === BANDS - 1;
+          const isKerb = band === 1 || band === BANDS - 2;
+          if (isGrass) tmp.copy(alt ? this._colGroundA : this._colGroundB);
+          else if (isKerb) tmp.copy(alt ? this._colKerbA : this._colKerbB);
+          else { tmp.copy(alt ? this._colRoadA : this._colRoadB); if (boost) tmp.lerp(this._colBoost, 0.5); }
+          for (let v = 0; v < 6; v++) {
+            const k = (co + v) * 3;
+            col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b;
+          }
+          co += 6;
+        }
+      }
       for (let band = 0; band < BANDS; band++) {
         const bL = BOUNDS[band];
         const bR = BOUNDS[band + 1];
-        const isGrass = band === 0 || band === BANDS - 1;
-        const isKerb = band === 1 || band === BANDS - 2;
 
         // vier Eckpunkte (Grasrand koplanar, GRASS_DROP = 0)
         cA.copy(fa.center).addScaledVector(fa.right, bL * hw);
@@ -402,29 +445,24 @@ export class RaceScene {
         pA.copy(fb.center).addScaledVector(fb.right, bL * hw);
         pB.copy(fb.center).addScaledVector(fb.right, bR * hw);
 
-        if (isGrass) tmp.copy(alt ? this._colGroundA : this._colGroundB);
-        else if (isKerb) tmp.copy(alt ? this._colKerbA : this._colKerbB);
-        else { tmp.copy(alt ? this._colRoadA : this._colRoadB); if (boost) tmp.lerp(this._colBoost, 0.5); }
-
         // 2 Dreiecke: (cA,cB,pB) (cA,pB,pA) — Normalen aus den Frame-Up-Vektoren
-        this._vert(pos, col, nor, o++, cA, fa.up, tmp);
-        this._vert(pos, col, nor, o++, cB, fa.up, tmp);
-        this._vert(pos, col, nor, o++, pB, fb.up, tmp);
-        this._vert(pos, col, nor, o++, cA, fa.up, tmp);
-        this._vert(pos, col, nor, o++, pB, fb.up, tmp);
-        this._vert(pos, col, nor, o++, pA, fb.up, tmp);
+        this._vert(pos, nor, o++, cA, fa.up);
+        this._vert(pos, nor, o++, cB, fa.up);
+        this._vert(pos, nor, o++, pB, fb.up);
+        this._vert(pos, nor, o++, cA, fa.up);
+        this._vert(pos, nor, o++, pB, fb.up);
+        this._vert(pos, nor, o++, pA, fb.up);
       }
     }
     this.roadGeo.attributes.position.needsUpdate = true;
-    this.roadGeo.attributes.color.needsUpdate = true;
     this.roadGeo.attributes.normal.needsUpdate = true;
+    if (writeColors) this.roadGeo.attributes.color.needsUpdate = true;
   }
 
-  _vert(pos, col, nor, o, p, n, color) {
+  _vert(pos, nor, o, p, n) {
     const k = o * 3;
     pos[k] = p.x; pos[k + 1] = p.y; pos[k + 2] = p.z;
     nor[k] = n.x; nor[k + 1] = n.y; nor[k + 2] = n.z;
-    col[k] = color.r; col[k + 1] = color.g; col[k + 2] = color.b;
   }
 
   // Interpoliertes Frame an absoluter Strecken-Position (oder null ausserhalb)
@@ -460,7 +498,7 @@ export class RaceScene {
     return 0;
   }
 
-  update({ track, sim, selfId, input, raceState, t }) {
+  update({ track, sim, selfId, input, raceState, t, dtMs = 16.7 }) {
     if (!track) return;
     if (typeof document !== 'undefined' && document.hidden) return;
     if (track.id !== this.trackId) this.setTrack(track);
@@ -495,7 +533,7 @@ export class RaceScene {
 
       const isSelf = p.peerId === selfId;
       const lift = CAR_LIFT + this._jumpLift(track, contS, p.speed || 0);
-      const worldPos = fr.center.clone()
+      const worldPos = this._carPos.copy(fr.center)
         .addScaledVector(fr.right, (p.x || 0) * this.halfWidth)
         .addScaledVector(fr.up, lift);
       car.position.copy(worldPos);
@@ -523,9 +561,9 @@ export class RaceScene {
       car.scale.setScalar(crashed ? 0.94 + 0.06 * Math.abs(Math.sin(t / 60)) : 1);
 
       if (isSelf) {
-        selfWorld = worldPos;
-        // fr zeigt auf das wiederverwendete tmpFrame — Vektoren kopieren,
+        // worldPos zeigt auf das wiederverwendete _carPos — Vektoren kopieren,
         // sonst überschreibt das nächste Auto die Kamera-Basis.
+        selfWorld = this._selfWorld.copy(worldPos);
         this._selfTangent.copy(fr.tangent);
         this._selfUp.copy(fr.up);
         selfFrame = this._selfFrame;
@@ -533,11 +571,17 @@ export class RaceScene {
       }
     }
     for (const [id, car] of this.cars) {
-      if (!seen.has(id)) { this.scene.remove(car); this.cars.delete(id); this._prevX.delete(id); }
+      if (!seen.has(id)) {
+        this.scene.remove(car);
+        this._disposeObject(car);
+        this.cars.delete(id);
+        this._prevX.delete(id);
+      }
     }
 
     this._placeDecor(track, selfContS, t);
-    this._updateCamera(selfWorld, selfFrame, selfSpeed, jumped);
+    const boosting = Boolean(input?.boost && (self?.boostFuel || 0) > 0);
+    this._updateCamera(selfWorld, selfFrame, selfSpeed, jumped, dtMs, boosting);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -603,6 +647,8 @@ export class RaceScene {
       if (!fr || pi >= this.pads.length) continue;
       const pad = this.pads[pi++];
       pad.visible = true;
+      // Sichtbare Breite an die Hitbox der Physik angleichen (|x| < 0.42).
+      pad.scale.x = (0.84 * this.halfWidth) / 6;
       pad.position.copy(fr.center).addScaledVector(fr.up, 0.2);
       this._m.makeBasis(fr.right, fr.up, this._v.copy(fr.tangent).negate());
       pad.quaternion.setFromRotationMatrix(this._m);
@@ -626,7 +672,7 @@ export class RaceScene {
     }
   }
 
-  _updateCamera(selfWorld, selfFrame, speed, snap) {
+  _updateCamera(selfWorld, selfFrame, speed, snap, dtMs = 16.7, boosting = false) {
     if (!selfWorld || !selfFrame) return;
     const back = 15 + speed * 0.06;
     const height = 6.2 + speed * 0.015;
@@ -636,13 +682,22 @@ export class RaceScene {
     const look = this._v2.copy(selfWorld)
       .addScaledVector(selfFrame.tangent, 26)
       .addScaledVector(selfFrame.up, 2.5);
-    const a = snap || !this._camReady ? 1 : 0.16;
-    this.camPos.lerp(targetPos, a);
-    this.camLook.lerp(look, snap || !this._camReady ? 1 : 0.2);
+    // Framerate-unabhängige Glättung: 1 - exp(-k*dt) entspricht ~0.16/0.2 bei 60 Hz.
+    const dt = Math.min(0.1, dtMs / 1000);
+    const hard = snap || !this._camReady;
+    this.camPos.lerp(targetPos, hard ? 1 : 1 - Math.exp(-10.5 * dt));
+    this.camLook.lerp(look, hard ? 1 : 1 - Math.exp(-13.4 * dt));
     this._camReady = true;
     this.camera.position.copy(this.camPos);
     this.camera.up.copy(selfFrame.up);
     this.camera.lookAt(this.camLook);
+    // Geschwindigkeitsgefühl: FOV weitet sich bei hohem Tempo/Boost leicht.
+    const targetFov = 66 + Math.max(0, speed - 78) * 0.16 + (boosting ? 3 : 0);
+    this._fov += (targetFov - this._fov) * (hard ? 1 : 1 - Math.exp(-6 * dt));
+    if (Math.abs(this._fov - this.camera.fov) > 0.05) {
+      this.camera.fov = this._fov;
+      this.camera.updateProjectionMatrix();
+    }
     // Himmel + Sonne folgen der Kamera (statischer Horizont)
     this.sky.position.copy(this.camPos);
     this.sun.position.set(selfWorld.x - 120, selfWorld.y + 240, selfWorld.z + 60);
@@ -663,13 +718,9 @@ export class RaceScene {
 
   dispose() {
     try {
-      this.scene.traverse((o) => {
-        if (o.geometry) o.geometry.dispose?.();
-        if (o.material) {
-          if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose?.());
-          else o.material.dispose?.();
-        }
-      });
+      // _disposeObject dedupliziert geteilte Ressourcen und gibt auch
+      // Texturen frei (z.B. die CanvasTexture der Start-/Ziellinie).
+      this._disposeObject(this.scene);
       this.renderer.dispose();
     } catch { /* ignore */ }
   }

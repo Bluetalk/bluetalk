@@ -419,6 +419,7 @@ function SidePanel({ snapshot, send, onLeave, onClose }) {
   if (!raceState || !track) return null;
   const inLobby = raceState.phase === 'lobby';
   const totalLen = track.length * track.laps;
+  const botCount = players.filter((p) => p.isBot).length;
 
   return (
     <aside className="race-side">
@@ -451,6 +452,24 @@ function SidePanel({ snapshot, send, onLeave, onClose }) {
           </span>
         </div>
       )}
+
+      {isHost && inLobby ? (
+        <>
+          <h3>Bots</h3>
+          <div className="race-bot-row">
+            {[0, 1, 2, 3].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`race-btn${botCount === n ? ' race-btn--primary' : ''}`}
+                onClick={() => send({ type: 'set_bots', count: n })}
+              >
+                {n === 0 ? 'Keine' : n}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
 
       <div className="race-actions">
         {isHost ? (
@@ -571,14 +590,16 @@ export default function RacingGamePage() {
   const lapRef = useRef(null);
   const lapTimeRef = useRef(null);
   const centerRef = useRef(null);
-  const keysRef = useRef({ throttle: 0, brake: 0, steer: 0, boost: 0 });
+  const keysRef = useRef({ throttle: 0, brake: 0, steer: 0, boost: 0, left: 0, right: 0 });
   const inputRef = useRef({ throttle: 0, brake: 0, steer: 0, boost: 0 });
   const lastInputSentRef = useRef(0);
-  const lastInputJsonRef = useRef('');
+  const lastInputSnapshotRef = useRef(null);
   const simRef = useRef(new Map());
   const audioRef = useRef(null);
-  const sfxRef = useRef({ lastCount: 0, wasRacing: false, crashedUntil: 0 });
+  const sfxRef = useRef({ lastCount: 0, wasRacing: false, crashedUntil: 0, lastLapMs: 0 });
   const lastMinimapRef = useRef(0);
+  const lastRankRef = useRef(0);
+  const lapFlashRef = useRef({ text: '', until: 0 });
 
   const hasRace = Boolean(uiSnapshot?.state);
   const showStage = Boolean(uiSnapshot);
@@ -643,8 +664,11 @@ export default function RacingGamePage() {
       let handled = false;
       if (['ArrowUp', 'w', 'W'].includes(e.key)) { keys.throttle = on ? 1 : 0; handled = true; }
       if (['ArrowDown', 's', 'S'].includes(e.key)) { keys.brake = on ? 1 : 0; handled = true; }
-      if (['ArrowLeft', 'a', 'A'].includes(e.key)) { keys.steer = on ? -1 : (keys.steer < 0 ? 0 : keys.steer); handled = true; }
-      if (['ArrowRight', 'd', 'D'].includes(e.key)) { keys.steer = on ? 1 : (keys.steer > 0 ? 0 : keys.steer); handled = true; }
+      // Links/Rechts getrennt merken: beim Loslassen einer Taste bleibt die
+      // Gegenrichtung aktiv (sonst stand das Auto nach Links+Rechts-Tippen still).
+      if (['ArrowLeft', 'a', 'A'].includes(e.key)) { keys.left = on ? 1 : 0; handled = true; }
+      if (['ArrowRight', 'd', 'D'].includes(e.key)) { keys.right = on ? 1 : 0; handled = true; }
+      if (handled) keys.steer = (keys.right || 0) - (keys.left || 0);
       if (e.code === 'Space') { keys.boost = on ? 1 : 0; handled = true; }
       if (handled) e.preventDefault();
     };
@@ -688,9 +712,14 @@ export default function RacingGamePage() {
     };
 
     const sendInput = (input, t) => {
-      const json = JSON.stringify(input);
-      if (json !== lastInputJsonRef.current || t - lastInputSentRef.current > 120) {
-        lastInputJsonRef.current = json;
+      const prev = lastInputSnapshotRef.current;
+      const changed = !prev
+        || prev.throttle !== input.throttle
+        || prev.brake !== input.brake
+        || prev.steer !== input.steer
+        || prev.boost !== input.boost;
+      if (changed || t - lastInputSentRef.current > 120) {
+        lastInputSnapshotRef.current = input;
         lastInputSentRef.current = t;
         send({ type: 'input', input });
       }
@@ -716,12 +745,12 @@ export default function RacingGamePage() {
       // die Tastatur — dann ließ sich gar nicht fahren.
       const pad = readGamepad();
       const keys = keysRef.current;
-      const input = pad ? {
-        throttle: pad.throttle || keys.throttle,
-        brake: pad.brake || keys.brake,
-        steer: pad.steer || keys.steer,
-        boost: pad.boost || keys.boost,
-      } : { ...keys };
+      const input = {
+        throttle: (pad ? pad.throttle : 0) || keys.throttle,
+        brake: (pad ? pad.brake : 0) || keys.brake,
+        steer: (pad ? pad.steer : 0) || keys.steer,
+        boost: (pad ? pad.boost : 0) || keys.boost,
+      };
       inputRef.current = input;
       if (raceState) sendInput(input, t);
 
@@ -735,6 +764,14 @@ export default function RacingGamePage() {
         const sim = simRef.current;
         const seen = new Set();
         const netAge = clamp((t - (payload.at || t)) / 1000, 0, 0.35);
+        // Framerate-unabhängige Glättungsfaktoren (entsprechen den alten
+        // Konstanten 0.10/0.08/0.15/0.22 bei 60 Hz).
+        const dtS = Math.min(0.1, dtMs / 1000);
+        const sm = (k) => 1 - Math.exp(-k * dtS);
+        const smErrSelf = sm(6.3);
+        const smLerpSelf = sm(5);
+        const smFuel = sm(9.7);
+        const smRemote = sm(15);
         for (const player of Object.values(raceState.players || {})) {
           seen.add(player.peerId);
           let rp = sim.get(player.peerId);
@@ -754,19 +791,19 @@ export default function RacingGamePage() {
               predictCar(rp, input, track, dtMs);
               const rpDist = (rp.lap - 1) * track.length + rp.progress;
               const err = authDist - rpDist;
-              const corrected = Math.abs(err) > 140 ? authDist : rpDist + err * 0.10;
+              const corrected = Math.abs(err) > 140 ? authDist : rpDist + err * smErrSelf;
               rp.lap = Math.max(1, Math.floor(corrected / track.length) + 1);
               rp.progress = ((corrected % track.length) + track.length) % track.length;
-              rp.x += (player.x - rp.x) * 0.08;
-              rp.speed += (player.speed - rp.speed) * 0.08;
-              rp.boostFuel += (player.boostFuel - rp.boostFuel) * 0.15;
+              rp.x += (player.x - rp.x) * smLerpSelf;
+              rp.speed += (player.speed - rp.speed) * smLerpSelf;
+              rp.boostFuel += (player.boostFuel - rp.boostFuel) * smFuel;
             } else {
               const rpDist = (rp.lap - 1) * track.length + rp.progress + rp.speed * (dtMs / 1000);
               const err = authDist - rpDist;
-              const corrected = Math.abs(err) > 160 ? authDist : rpDist + err * 0.22;
+              const corrected = Math.abs(err) > 160 ? authDist : rpDist + err * smRemote;
               rp.lap = Math.max(1, Math.floor(corrected / track.length) + 1);
               rp.progress = ((corrected % track.length) + track.length) % track.length;
-              rp.x += (player.x - rp.x) * 0.22;
+              rp.x += (player.x - rp.x) * smRemote;
               rp.speed = player.speed;
               rp.boostFuel = player.boostFuel;
             }
@@ -779,7 +816,7 @@ export default function RacingGamePage() {
         }
 
         try {
-          scene.update({ track, sim, selfId, input, raceState, t });
+          scene.update({ track, sim, selfId, input, raceState, t, dtMs });
         } catch (err) {
           console.error('RaceScene update error:', err);
         }
@@ -788,14 +825,17 @@ export default function RacingGamePage() {
         const self = sim.get(selfId) || null;
         if (speedRef.current) speedRef.current.textContent = Math.round((self?.speed || 0) * 3.6);
         if (boostRef.current) boostRef.current.style.width = `${clamp(self?.boostFuel ?? 100, 0, 100)}%`;
-        const ranked = [...sim.values()].sort((a, b) => {
-          if (a.finished && b.finished) return a.finishMs - b.finishMs;
-          if (a.finished) return -1;
-          if (b.finished) return 1;
-          return ((b.lap - 1) * track.length + b.progress) - ((a.lap - 1) * track.length + a.progress);
-        });
-        const myRank = ranked.findIndex((p) => p.peerId === selfId);
-        if (posRef.current) {
+        // Platzierung ändert sich selten — 5 Hz reichen und sparen das
+        // Array+Sort pro Frame.
+        if (posRef.current && t - lastRankRef.current > 200) {
+          lastRankRef.current = t;
+          const ranked = [...sim.values()].sort((a, b) => {
+            if (a.finished && b.finished) return a.finishMs - b.finishMs;
+            if (a.finished) return -1;
+            if (b.finished) return 1;
+            return ((b.lap - 1) * track.length + b.progress) - ((a.lap - 1) * track.length + a.progress);
+          });
+          const myRank = ranked.findIndex((p) => p.peerId === selfId);
           posRef.current.textContent = raceState.phase === 'racing' || raceState.phase === 'finished'
             ? (myRank >= 0 ? `P${myRank + 1}/${ranked.length}` : '—')
             : '🏁';
@@ -816,12 +856,24 @@ export default function RacingGamePage() {
           }
         }
 
-        // --- Zentrale Einblendung (Countdown / GO / Ziel) ---
+        // --- Rundenzeit-Flash (neue Runde beendet) ---
+        const lapFlash = lapFlashRef.current;
+        if (raceState.phase === 'racing' && self?.lastLapMs > 0 && self.lastLapMs !== sfxRef.current.lastLapMs) {
+          sfxRef.current.lastLapMs = self.lastLapMs;
+          const isBest = self.bestLapMs > 0 && self.lastLapMs <= self.bestLapMs;
+          lapFlash.text = `${isBest ? '★ ' : ''}Runde ${formatLap(self.lastLapMs)}`;
+          lapFlash.until = t + 1800;
+          audioRef.current?.beep(isBest ? 1180 : 880, 0.14, 0.22);
+        }
+
+        // --- Zentrale Einblendung (Countdown / GO / Runde / Ziel) ---
         if (raceState.phase === 'countdown') {
           const num = Math.max(1, Math.ceil((raceState.countdownEndsAt - t) / 1000));
           setCenter(String(num), 'race-center--count');
         } else if (raceState.phase === 'racing' && raceState.startedAt && t - raceState.startedAt < 1100) {
           setCenter('GO!', 'race-center--go');
+        } else if (raceState.phase === 'racing' && t < lapFlash.until) {
+          setCenter(lapFlash.text, 'race-center--lap');
         } else if (raceState.phase === 'finished') {
           setCenter('🏁 Rennen beendet', 'race-center--done');
         } else {
