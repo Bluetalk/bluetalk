@@ -1109,9 +1109,10 @@
     }
     if (hostRef) {
       myLegalMoves = hostRef.getLegalMovesForPeer(chessSelfPeerId);
-    } else {
-      myLegalMoves = [];
     }
+    // Beim Client (Mitspieler) NICHT zurücksetzen: myLegalMoves stammt aus dem
+    // letzten 'state'-Wire des Hosts. Ein Reset auf [] würde alle legalen Züge
+    // verwerfen, sodass der Gast keine Figur ziehen könnte.
     const seated = new Set((pub.players || []).map((p) => p.peerId));
     const connected = new Map((api.peers() || []).map((p) => [p.id, p]));
     const inviteCandidates = (api.contacts() || [])
