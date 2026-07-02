@@ -165,6 +165,18 @@
   color: #f8fafc;
 }
 
+.race-center--lap {
+  font-size: 40px;
+  color: #fbbf24;
+  text-shadow: 0 0 30px rgba(251, 191, 36, 0.6);
+}
+
+.race-bot-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 /* ---------- HUD ---------- */
 
 .race-hud-pos {

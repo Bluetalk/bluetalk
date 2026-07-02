@@ -3,7 +3,13 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const vm = require('vm');
-const { app, Notification } = require('electron');
+// Electron is loaded lazily so the host can run in plain Node (tests) when a
+// pluginsDir is passed explicitly and notifications are unavailable.
+let electron = null;
+function getElectron() {
+  if (!electron) electron = require('electron');
+  return electron;
+}
 
 const MAX_PLUGIN_FILES = 250;
 const MAX_PLUGIN_BYTES = 25 * 1024 * 1024;
@@ -143,7 +149,7 @@ class PluginHost extends EventEmitter {
     this.store = store;
     this.mainWindowRef = mainWindowRef;
     this.isAppInForegroundRef = isAppInForegroundRef;
-    this.pluginsDir = pluginsDir || path.join(app.getPath('userData'), 'plugins');
+    this.pluginsDir = pluginsDir || path.join(getElectron().app.getPath('userData'), 'plugins');
     /** @type {Map<string, { manifest: any, dir: string, enabled: boolean, module?: any, api?: any, context?: any, commands: Map<string, Function>, disposers: Set<Function>, timers: Map<any, string>, ui?: string, lastError?: string }>} */
     this.plugins = new Map();
     this._peerListeners = [];
@@ -526,6 +532,7 @@ class PluginHost extends EventEmitter {
           }
           const win = this.mainWindowRef?.();
           try {
+            const { Notification } = getElectron();
             if (process.platform === 'win32' && Notification.isSupported()) {
               const n = new Notification({
                 title: payload.title || manifest.name || 'BlueTalk plugin',

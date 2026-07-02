@@ -1,12 +1,17 @@
 {
   "id": "racing-3d",
   "name": "3D Live Autorennen",
-  "version": "3.0.1",
-  "description": "Echtes 3D-Rennen (Three.js) im Trackmania-Stil — 5 Strecken mit Höhen, Steilkurven & Sprüngen, Direkteinstieg ins freie Fahren, Multiplayer, Minimap, Rundenzeiten, Gamepad und Sound.",
+  "version": "3.1.0",
+  "description": "Echtes 3D-Rennen (Three.js) im Trackmania-Stil — 5 Strecken mit Höhen, Steilkurven & Sprüngen, Direkteinstieg ins freie Fahren, Multiplayer, Bot-Gegner, Minimap, Rundenzeiten, Gamepad und Sound.",
   "author": "BlueTalk",
   "main": "main.js",
   "ui": "ui.js",
-  "permissions": ["peer:send", "peer:broadcast", "contacts:read", "tabs:register"],
+  "permissions": [
+    "peer:send",
+    "peer:broadcast",
+    "contacts:read",
+    "tabs:register"
+  ],
   "autoEnable": true,
   "game": {
     "mark": "🏎️",

@@ -173,7 +173,9 @@ export class PluginRuntime {
 
         if (plugin.enabled && plugin.hasUi) {
           const isGame = this._isGamePlugin(plugin);
+          const uiChanged = Boolean(activeRec) && existing?.ui !== plugin.ui;
           const needsActivation = !activeRec
+            || uiChanged
             || (isGame && !activeRec.commands.has('launcherState'));
           if (needsActivation) {
             if (activeRec) {
@@ -184,10 +186,6 @@ export class PluginRuntime {
           }
         } else if (!plugin.enabled && activeRec) {
           this._deactivate(plugin.id, { emit: false });
-          tabsDirty = true;
-        } else if (plugin.enabled && plugin.hasUi && activeRec && existing?.ui !== plugin.ui) {
-          this._deactivate(plugin.id, { emit: false });
-          this._activate(plugin);
           tabsDirty = true;
         }
       }
@@ -562,9 +560,11 @@ export class PluginRuntime {
       invokePluginCommand: (pluginId, commandId, args) =>
         this.invokePluginCommand(pluginId, commandId, args),
 
-      // React helpers (available for plugins that want JSX at runtime)
-      React: undefined,
-      ReactDOM: undefined,
+      // React helpers (available for plugins that want JSX at runtime).
+      // Injected via injectReact() — App calls it before boot(), so the stashed
+      // values are already set here; injectReact also patches active records.
+      React: this._React,
+      ReactDOM: this._ReactDOM,
     };
 
     const realtimeManager = createRealtimeManager({

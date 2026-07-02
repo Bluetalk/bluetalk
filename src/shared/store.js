@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+
+// Electron is only needed to resolve the default userData path. Load it
+// lazily so the store can run in plain Node (tests) with an explicit baseDir.
+function getDefaultUserDataPath() {
+  const { app } = require('electron');
+  return app.getPath('userData');
+}
 
 const FORBIDDEN_PATH_PARTS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -13,11 +19,14 @@ function splitSafeKey(key) {
 
 class Store {
   constructor(opts) {
-    const userDataPath = opts.baseDir || app.getPath('userData');
+    const userDataPath = opts.baseDir || getDefaultUserDataPath();
     this.path = path.join(userDataPath, opts.configName + '.json');
     this.data = this._load();
     this._dirty = false;
     this._writePromise = null;
+    // Writes serialize the whole store — a short coalescing window turns
+    // bursts (e.g. many incoming messages) into a single disk write.
+    this._debounceMs = Number.isFinite(opts.debounceMs) ? opts.debounceMs : 200;
   }
 
   _load() {
@@ -33,7 +42,10 @@ class Store {
     this._dirty = true;
     if (this._writePromise) return;
 
-    this._writePromise = this._flushLoop().finally(() => {
+    this._writePromise = (async () => {
+      if (this._debounceMs > 0) await new Promise((r) => setTimeout(r, this._debounceMs));
+      await this._flushLoop();
+    })().finally(() => {
       this._writePromise = null;
       if (this._dirty) {
         this._scheduleSave();

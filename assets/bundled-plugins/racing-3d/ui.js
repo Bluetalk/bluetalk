@@ -45,7 +45,17 @@
   const now = () => Date.now();
   const getTrackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
   const getTrack = () => getTrackById(state?.trackId);
-  const publicState = () => (state ? { ...state, players: { ...state.players }, results: [...(state.results || [])] } : null);
+  // Öffentlicher Zustand ohne interne Felder: `inputs` der Spieler sind nur
+  // für die Host-Simulation relevant und würden sonst bei jedem Broadcast
+  // (15×/s) an alle Clients mitgeschickt.
+  const publicPlayer = ({ inputs, lastInputAt, ...pub }) => pub;
+  const publicState = () => (state
+    ? {
+      ...state,
+      players: Object.fromEntries(Object.entries(state.players).map(([id, p]) => [id, publicPlayer(p)])),
+      results: [...(state.results || [])],
+    }
+    : null);
   const me = async () => api.peer.info?.().catch(() => null);
   const peerName = (peerId) => {
     const contact = api.contacts().find((c) => c.id === peerId);
@@ -134,6 +144,47 @@
       addSystem(`${state.players[peerId].name} ist beigetreten.`);
     }
     return state.players[peerId];
+  }
+
+  // ---------- Bots (nur Host) ----------
+
+  const BOT_NAMES = ['Blitz 🤖', 'Turbo 🤖', 'Nova 🤖', 'Rakete 🤖'];
+
+  function setBotCount(count) {
+    if (!room?.isHost || !state || state.phase !== 'lobby') return;
+    const target = clamp(Math.floor(count) || 0, 0, BOT_NAMES.length);
+    const bots = Object.values(state.players).filter((p) => p.isBot);
+    for (const bot of bots.slice(target)) delete state.players[bot.peerId];
+    for (let i = bots.length; i < target; i++) {
+      const id = `bot-${i + 1}`;
+      if (state.players[id]) continue;
+      if (Object.keys(state.players).length >= MAX_PLAYERS) break;
+      const bot = ensurePlayer(id, BOT_NAMES[i]);
+      bot.isBot = true;
+      // Leichte Streuung, damit Bots unterschiedlich stark fahren.
+      bot.skill = 0.82 + (i * 0.07);
+    }
+    sync(true);
+  }
+
+  // Einfache Fahr-KI: hält die Ideallinie, bremst vor engen Kurven, weicht
+  // Hütchen aus und boostet auf Geraden.
+  function botInput(bot, track) {
+    const ahead = trackCurve(track, bot.progress + 60 + bot.speed * 0.6);
+    const sharp = Math.abs(trackCurve(track, bot.progress + 110 + bot.speed));
+    let targetX = clamp(-ahead * 0.35, -0.55, 0.55);
+    if (nearAny(track, track.hazards, bot.progress + 70, 90)) {
+      // Hütchen stehen bei ±0.28 — außen vorbeizielen.
+      targetX = targetX >= 0 ? 0.55 : -0.55;
+    } else if (nearAny(track, track.boosts, bot.progress + 60, 80)) {
+      targetX = clamp(targetX, -0.35, 0.35); // Pad mittig mitnehmen
+    }
+    const curvePush = trackCurve(track, bot.progress) * (0.10 + bot.speed / 620);
+    const steerGain = 0.8 + bot.speed / 90;
+    const steer = clamp(((targetX - bot.x) * 2.6 + curvePush) / steerGain, -1, 1);
+    const brake = sharp > 0.78 * bot.skill && bot.speed > 62 * bot.skill ? 1 : 0;
+    const boost = !brake && bot.boostFuel > 55 && Math.abs(ahead) < 0.35 ? 1 : 0;
+    return { throttle: brake ? 0 : 1, brake, steer, boost };
   }
 
   function sync(force = false) {
@@ -229,10 +280,10 @@
   async function hostRace(trackId) {
     if (room) return false;
     await refreshSelf();
+    if (room) return false; // Raum entstand während des awaits (z.B. Beitritt)
     const hostId = selfPeerId || `local_${uid()}`;
     setState(createState(hostId, getTrackById(trackId).id));
     ensurePlayer(hostId, selfName || 'Host');
-    if (room) return false;
     room = api.realtime.createRoom({ roomId: state.roomId, name: '3D Autorennen', access: 'public', maxPeers: MAX_PLAYERS });
     if (!room) {
       state = null;
@@ -287,21 +338,46 @@
         return;
       }
       if (room.isHost && payload.type === 'join') {
-        if (Object.keys(state.players).length >= MAX_PLAYERS) return;
+        if (Object.keys(state.players).length >= MAX_PLAYERS) {
+          // Menschen haben Vorrang: notfalls macht ein Bot Platz.
+          const bot = Object.values(state.players).find((p) => p.isBot);
+          if (!bot) return;
+          delete state.players[bot.peerId];
+        }
         ensurePlayer(from || payload.peerId, payload.name);
         sync(true);
       }
       if (room.isHost && payload.type === 'input' && state?.players?.[from]) {
         state.players[from].inputs = payload.input || {};
         state.players[from].connected = true;
+        state.players[from].lastInputAt = now();
       }
     });
+    try {
+      room.on?.('peer-left', ({ peerId }) => {
+        if (!room?.isHost || !state?.players?.[peerId]) return;
+        const name = state.players[peerId].name;
+        if (state.phase === 'racing') {
+          // Im Rennen: als getrennt markieren, damit das Rennen nicht auf
+          // den Verschwundenen wartet (DNF statt Endlos-Hänger).
+          state.players[peerId].connected = false;
+          addSystem(`${name} hat die Verbindung verloren.`);
+        } else {
+          delete state.players[peerId];
+          addSystem(`${name} hat das Rennen verlassen.`);
+        }
+        sync(true);
+      });
+    } catch {
+      /* Raum ohne peer-left-Event */
+    }
     try {
       room.on?.('closed', () => {
         if (!room) return;
         api.notify.toast?.({ title: '3D Autorennen', message: 'Der Raum wurde geschlossen.' });
         room = null;
         state = null;
+        localInput = { throttle: 0, brake: 0, steer: 0, boost: 0 };
         stopLoop();
         pushToChild();
       });
@@ -346,7 +422,15 @@
     const dt = Math.min(80, dtMs) / 1000;
     for (const player of Object.values(state.players)) {
       if (racing && player.finished) continue;
-      const input = player.peerId === room.selfPeerId ? localInput : (player.inputs || {});
+      // Clients ohne Input-Signal (Absturz/Netzausfall) als getrennt markieren,
+      // damit das Rennen nicht ewig auf sie wartet.
+      if (racing && !player.isBot && player.peerId !== room.selfPeerId
+        && t - (player.lastInputAt || state.startedAt) > 8000) {
+        player.connected = false;
+      }
+      const input = player.isBot
+        ? botInput(player, track)
+        : (player.peerId === room.selfPeerId ? localInput : (player.inputs || {}));
       const offroad = Math.abs(player.x) > track.width;
       const curve = trackCurve(track, player.progress);
       const targetMax = (offroad ? 38 : 88) + (input.boost && player.boostFuel > 0 ? 34 : 0);
@@ -363,7 +447,9 @@
         player.speed = clamp(player.speed + 42 * dt, 0, 130);
         player.boostFuel = clamp(player.boostFuel + 28 * dt, 0, 100);
       }
-      if (nearAny(track, track.hazards, player.progress, 42) && Math.abs(player.x) < .32 && t > player.crashedUntil) {
+      // Hütchen stehen visuell bei ±0.28 — Treffer nur in deren Nähe, die
+      // Mitte zwischen den Hütchen ist (wie sichtbar) frei befahrbar.
+      if (nearAny(track, track.hazards, player.progress, 42) && Math.abs(Math.abs(player.x) - 0.28) < 0.16 && t > player.crashedUntil) {
         player.speed *= .42;
         player.crashedUntil = t + 900;
         if (racing) player.penaltyMs += 900;
@@ -391,8 +477,13 @@
       }
     }
     if (racing) {
-      const allFinished = Object.values(state.players).length > 0 && Object.values(state.players).every((p) => p.finished);
-      if (allFinished) {
+      // Nur verbundene Fahrer zählen — Getrennte (DNF) blockieren das Ende nicht.
+      const active = Object.values(state.players).filter((p) => p.connected !== false);
+      const allFinished = active.length > 0 && active.every((p) => p.finished);
+      // Sicherheitsnetz: 90 s nach dem ersten Zieleinlauf wird abgerechnet.
+      const firstFinish = Math.min(...Object.values(state.players).filter((p) => p.finished).map((p) => state.startedAt + p.finishMs));
+      const timedOut = Number.isFinite(firstFinish) && t - firstFinish > 90000;
+      if (allFinished || timedOut) {
         state.phase = 'finished';
         state.finishedAt = t;
         addSystem('Rennen beendet.');
@@ -423,6 +514,9 @@
         break;
       case 'select_track':
         if (room?.isHost && state?.phase === 'lobby') resetLobby(payload.trackId);
+        break;
+      case 'set_bots':
+        setBotCount(payload.count);
         break;
       case 'start':
         startCountdown();

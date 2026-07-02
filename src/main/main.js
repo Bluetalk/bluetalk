@@ -27,6 +27,8 @@ let chessGameWindow = null;
 let ticTacToeGameWindow = null;
 /** Separates Fenster für das 3D-Autorennen-Plugin. */
 let racingGameWindow = null;
+/** Separates Fenster für den Live-Dokumente-Editor. */
+let docsEditorWindow = null;
 /** Cached game UI state — replayed when a game window finishes loading. */
 const gameStateCache = new Map();
 
@@ -197,6 +199,16 @@ function deleteStoredChatMessage(peerId, messageId) {
   list.splice(idx, 1);
   setStoredChatMessages(peerId, list);
   return true;
+}
+
+// Meta für einen einzelnen Chat — vermeidet den Vollscan über alle Chats
+// (getChatMessageMeta) im heißen Pfad von messages:append.
+function getChatPeerMeta(peerId) {
+  const messages = getStoredChatMessages(peerId);
+  return {
+    count: messages.length,
+    lastMessage: messages.length ? toMessageSummary(messages[messages.length - 1]) : null,
+  };
 }
 
 function getChatMessageMeta() {
@@ -716,14 +728,22 @@ function restartApiServerIfPortChanged() {
   });
 }
 
-function handleSettingsMutation() {
-  configureAutoUpdater();
-  scheduleAutoUpdateChecks();
-  applyLaunchAtLoginSetting();
-  restartApiServerIfPortChanged();
-  void pluginHost?.syncDebugOnlyPlugins?.();
+// key: der geänderte Store-Key (z.B. 'settings.theme'). Ohne Key (oder bei
+// einem kompletten 'settings'-Write) laufen alle Seiteneffekte; sonst nur die,
+// deren Einstellungen betroffen sind — Theme-/Layout-Änderungen lösen dann
+// z.B. keinen Kontakt-Reconnect-Sweep mehr aus.
+function handleSettingsMutation(key) {
+  const k = typeof key === 'string' ? key : '';
+  const affects = (...names) => !k || k === 'settings' || names.some((n) => k === `settings.${n}`);
+  if (affects('autoUpdateEnabled', 'autoDownloadUpdates')) {
+    configureAutoUpdater();
+    scheduleAutoUpdateChecks();
+  }
+  if (affects('launchAtLogin')) applyLaunchAtLoginSetting();
+  if (affects('apiPort')) restartApiServerIfPortChanged();
+  if (affects('debugMode')) void pluginHost?.syncDebugOnlyPlugins?.();
   // Only reconnect if peer server is fully started
-  if (peerServer?.port > 0) {
+  if (affects('peerPort', 'peerPorts', 'displayName', 'bio', 'profilePicture') && peerServer?.port > 0) {
     peerServer.reconnectContactsFromStore();
   }
 }
@@ -1342,6 +1362,14 @@ function isRacingGameSender(event) {
   );
 }
 
+function isDocsEditorSender(event) {
+  return Boolean(
+    docsEditorWindow
+    && !docsEditorWindow.isDestroyed()
+    && event.sender === docsEditorWindow.webContents,
+  );
+}
+
 function isTrustedRendererUrl(value) {
   try {
     const url = new URL(value);
@@ -1762,6 +1790,56 @@ function createRacingGameWindow() {
   bindGameWindowStateReplay(racingGameWindow, 'racing-3d', 'racing:state');
 
   return racingGameWindow;
+}
+
+function createDocsEditorWindow() {
+  if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+    try {
+      docsEditorWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    replayGameState('live-docs', docsEditorWindow, 'docs:state');
+    return docsEditorWindow;
+  }
+
+  docsEditorWindow = new BrowserWindow({
+    width: 1060,
+    height: 760,
+    minWidth: 640,
+    minHeight: 480,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0b0f19',
+    icon: createAppIcon(256),
+    webPreferences: gameWindowWebPreferences('live-docs'),
+    show: false,
+  });
+  hardenWindow(docsEditorWindow);
+
+  if (isDev) {
+    docsEditorWindow.loadURL('http://localhost:5173/#/docs-editor');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    docsEditorWindow.loadURL(`${pathToFileURL(indexHtml).href}#/docs-editor`);
+  }
+
+  docsEditorWindow.once('ready-to-show', () => {
+    try {
+      docsEditorWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  docsEditorWindow.on('closed', () => {
+    docsEditorWindow = null;
+  });
+
+  bindWindowMaximizeEvents(docsEditorWindow, 'docs:windowMaximized');
+  bindGameWindowStateReplay(docsEditorWindow, 'live-docs', 'docs:state');
+
+  return docsEditorWindow;
 }
 
 function createTray() {
@@ -2241,18 +2319,84 @@ function setupIPC() {
     }
   });
 
+  // ---------- Live-Dokumente-Editor (gleiches Muster wie die Spielfenster) ----------
+
+  ipcMain.handle('docs:openGameWindow', async () => {
+    try {
+      await openGameWindowAndReplay(createDocsEditorWindow, 'live-docs', 'docs:state');
+      return { ok: true };
+    } catch (e) {
+      console.error('docs:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('docs:closeGameWindow', () => {
+    try {
+      if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+        docsEditorWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:minimizeWindow', (event) => {
+    if (!isDocsEditorSender(event)) return { ok: false };
+    try {
+      docsEditorWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:maximizeWindow', (event) => {
+    if (!isDocsEditorSender(event)) return { ok: false };
+    try {
+      if (docsEditorWindow?.isMaximized()) docsEditorWindow.unmaximize();
+      else docsEditorWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:isWindowMaximized', (event) => {
+    if (!isDocsEditorSender(event)) return false;
+    return docsEditorWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('docs:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    rememberAndRelayGameState('live-docs', docsEditorWindow, 'docs:state', payload);
+  });
+
+  ipcMain.on('docs:fromChild', (event, payload) => {
+    if (!docsEditorWindow || docsEditorWindow.isDestroyed()) return;
+    if (event.sender !== docsEditorWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('docs:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
   ipcMain.handle('store:get', (_, key, defaultVal) => store.get(key, defaultVal));
   ipcMain.handle('store:set', (_, key, value) => {
     store.set(key, value);
     if (key === 'settings' || key.startsWith('settings.')) {
-      handleSettingsMutation();
+      handleSettingsMutation(key);
     }
     return true;
   });
   ipcMain.handle('store:delete', (_, key) => {
     store.delete(key);
     if (key === 'settings' || key.startsWith('settings.')) {
-      handleSettingsMutation();
+      handleSettingsMutation(key);
     }
     return true;
   });
@@ -2261,8 +2405,7 @@ function setupIPC() {
   ipcMain.handle('messages:getBatch', (_, peerId, options = {}) => getChatMessageBatch(peerId, options));
   ipcMain.handle('messages:append', (_, peerId, message) => {
     const result = appendStoredChatMessage(peerId, message);
-    const meta = getChatMessageMeta()[peerId] || { count: 0, lastMessage: null };
-    return { ...meta, appended: result.appended };
+    return { ...getChatPeerMeta(peerId), appended: result.appended };
   });
   ipcMain.handle('messages:patch', (_, peerId, messageId, patch) =>
     patchStoredChatMessage(peerId, messageId, patch)
@@ -2680,7 +2823,9 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(() => {
     store = new Store({ configName: 'bluetalk-config' });
     peerServer = new PeerServer(store);
-    apiServer = new APIServer(peerServer, store);
+    apiServer = new APIServer(peerServer, store, {
+      onSettingsChanged: (key) => handleSettingsMutation(key),
+    });
 
     configureSessionSecurity();
     createWindow();
@@ -2750,11 +2895,27 @@ if (!gotSingleInstanceLock) {
   });
 }
 
-app.on('before-quit', () => {
+let quitStoreFlushStarted = false;
+app.on('before-quit', (event) => {
   isQuitting = true;
+  // Ausstehende (debouncte) Store-Writes vor dem Beenden zu Ende schreiben,
+  // sonst kann die letzte Nachricht/Einstellung verloren gehen.
+  if (!quitStoreFlushStarted && store?._writePromise) {
+    quitStoreFlushStarted = true;
+    event.preventDefault();
+    Promise.race([
+      store.waitForWrites(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]).finally(() => app.quit());
+    return;
+  }
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
+  }
+  if (incomingNotifBatch.timer) {
+    clearTimeout(incomingNotifBatch.timer);
+    incomingNotifBatch.timer = null;
   }
   try {
     if (pokerGameWindow && !pokerGameWindow.isDestroyed()) {
@@ -2780,6 +2941,10 @@ app.on('before-quit', () => {
     if (racingGameWindow && !racingGameWindow.isDestroyed()) {
       racingGameWindow.destroy();
       racingGameWindow = null;
+    }
+    if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+      docsEditorWindow.destroy();
+      docsEditorWindow = null;
     }
   } catch {
     /* ignore */

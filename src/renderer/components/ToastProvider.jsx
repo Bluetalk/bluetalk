@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle, Info, X, XCircle } from 'lucide-react';
 
 const ToastContext = createContext(null);
@@ -15,8 +15,15 @@ function toastId() {
 
 export function ToastProvider({ children, solidBottomRight = false }) {
   const [toasts, setToasts] = useState([]);
+  /** Auto-Dismiss-Timer pro Toast-ID, damit sie aufgeräumt werden können. */
+  const timersRef = useRef(new Map());
 
   const dismissToast = useCallback((id) => {
+    const timer = timersRef.current.get(id);
+    if (timer != null) {
+      window.clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -34,12 +41,20 @@ export function ToastProvider({ children, solidBottomRight = false }) {
       setToasts((prev) => [...prev, { id, title, message, variant }]);
 
       if (duration > 0) {
-        window.setTimeout(() => dismissToast(id), duration);
+        const existing = timersRef.current.get(id);
+        if (existing != null) window.clearTimeout(existing);
+        timersRef.current.set(id, window.setTimeout(() => dismissToast(id), duration));
       }
       return id;
     },
     [dismissToast]
   );
+
+  // Offene Timer beim Unmount des Providers aufräumen.
+  useEffect(() => () => {
+    timersRef.current.forEach((timer) => window.clearTimeout(timer));
+    timersRef.current.clear();
+  }, []);
 
   const value = useMemo(() => ({ toast, dismissToast }), [toast, dismissToast]);
 
@@ -72,7 +87,8 @@ export function ToastProvider({ children, solidBottomRight = false }) {
             ? {
                 zIndex: 10 + i,
                 transform: `translateY(${-depth * SOLID_BR_STACK_OFFSET_PX}px) scale(${scale})`,
-                pointerEvents: i === toasts.length - 1 ? 'auto' : 'none',
+                // Auch verdeckte Karten bleiben klickbar (Dismiss-Button erreichbar).
+                pointerEvents: 'auto',
               }
             : undefined;
           return (
