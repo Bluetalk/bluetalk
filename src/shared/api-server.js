@@ -13,11 +13,14 @@ const API_BIND_HOST = '127.0.0.1';
  *  - Subscribing to events via SSE (Server-Sent Events)
  */
 class APIServer {
-  constructor(peerServer, store) {
+  constructor(peerServer, store, options = {}) {
     this.peerServer = peerServer;
     this.store = store;
     this.server = null;
     this.sseClients = new Set();
+    // Callback des Main-Prozesses, damit REST-Settings-Writes dieselben
+    // Seiteneffekte auslösen wie Änderungen über die UI (Port-Rebind etc.).
+    this.onSettingsChanged = typeof options.onSettingsChanged === 'function' ? options.onSettingsChanged : null;
     this.token = store.get('apiToken', '') || store.get('settings.apiToken', '') || crypto.randomBytes(32).toString('hex');
     if (!store.get('apiToken', '')) store.set('apiToken', this.token);
     store.delete?.('settings.apiToken');
@@ -237,10 +240,33 @@ class APIServer {
 
         if (path === '/api/settings' && req.method === 'PUT') {
           const body = await this._readBody(req);
+          // Nur die auch per GET exponierten Einstellungen sind schreibbar,
+          // mit Typprüfung — sonst könnten beliebige settings.*-Schlüssel
+          // mit beliebigen Typen überschrieben werden.
+          const validators = {
+            displayName: (v) => typeof v === 'string' && v.length <= 80,
+            peerPort: (v) => Number.isInteger(v) && v >= 0 && v <= 65535,
+            peerPorts: (v) => Array.isArray(v) && v.every((p) => Number.isInteger(p) && p >= 0 && p <= 65535),
+            apiPort: (v) => Number.isInteger(v) && v >= 0 && v <= 65535,
+            autoUpdateEnabled: (v) => typeof v === 'boolean',
+            autoDownloadUpdates: (v) => typeof v === 'boolean',
+            minimizeToTray: (v) => typeof v === 'boolean',
+            theme: (v) => v === 'dark' || v === 'light',
+          };
+          const rejected = [];
+          const applied = [];
           for (const [key, value] of Object.entries(body)) {
+            if (!validators[key] || !validators[key](value)) {
+              rejected.push(key);
+              continue;
+            }
             this.store.set(`settings.${key}`, value);
+            applied.push(key);
+            try {
+              this.onSettingsChanged?.(`settings.${key}`);
+            } catch { /* ignore */ }
           }
-          return this._json(res, 200, { ok: true });
+          return this._json(res, 200, { ok: rejected.length === 0, applied, rejected });
         }
 
         // -- 404 --

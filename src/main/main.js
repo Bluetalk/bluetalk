@@ -199,6 +199,16 @@ function deleteStoredChatMessage(peerId, messageId) {
   return true;
 }
 
+// Meta für einen einzelnen Chat — vermeidet den Vollscan über alle Chats
+// (getChatMessageMeta) im heißen Pfad von messages:append.
+function getChatPeerMeta(peerId) {
+  const messages = getStoredChatMessages(peerId);
+  return {
+    count: messages.length,
+    lastMessage: messages.length ? toMessageSummary(messages[messages.length - 1]) : null,
+  };
+}
+
 function getChatMessageMeta() {
   const storedMessages = getStoredMessages();
   const meta = {};
@@ -716,14 +726,22 @@ function restartApiServerIfPortChanged() {
   });
 }
 
-function handleSettingsMutation() {
-  configureAutoUpdater();
-  scheduleAutoUpdateChecks();
-  applyLaunchAtLoginSetting();
-  restartApiServerIfPortChanged();
-  void pluginHost?.syncDebugOnlyPlugins?.();
+// key: der geänderte Store-Key (z.B. 'settings.theme'). Ohne Key (oder bei
+// einem kompletten 'settings'-Write) laufen alle Seiteneffekte; sonst nur die,
+// deren Einstellungen betroffen sind — Theme-/Layout-Änderungen lösen dann
+// z.B. keinen Kontakt-Reconnect-Sweep mehr aus.
+function handleSettingsMutation(key) {
+  const k = typeof key === 'string' ? key : '';
+  const affects = (...names) => !k || k === 'settings' || names.some((n) => k === `settings.${n}`);
+  if (affects('autoUpdateEnabled', 'autoDownloadUpdates')) {
+    configureAutoUpdater();
+    scheduleAutoUpdateChecks();
+  }
+  if (affects('launchAtLogin')) applyLaunchAtLoginSetting();
+  if (affects('apiPort')) restartApiServerIfPortChanged();
+  if (affects('debugMode')) void pluginHost?.syncDebugOnlyPlugins?.();
   // Only reconnect if peer server is fully started
-  if (peerServer?.port > 0) {
+  if (affects('peerPort', 'peerPorts', 'displayName', 'bio', 'profilePicture') && peerServer?.port > 0) {
     peerServer.reconnectContactsFromStore();
   }
 }
@@ -2245,14 +2263,14 @@ function setupIPC() {
   ipcMain.handle('store:set', (_, key, value) => {
     store.set(key, value);
     if (key === 'settings' || key.startsWith('settings.')) {
-      handleSettingsMutation();
+      handleSettingsMutation(key);
     }
     return true;
   });
   ipcMain.handle('store:delete', (_, key) => {
     store.delete(key);
     if (key === 'settings' || key.startsWith('settings.')) {
-      handleSettingsMutation();
+      handleSettingsMutation(key);
     }
     return true;
   });
@@ -2261,8 +2279,7 @@ function setupIPC() {
   ipcMain.handle('messages:getBatch', (_, peerId, options = {}) => getChatMessageBatch(peerId, options));
   ipcMain.handle('messages:append', (_, peerId, message) => {
     const result = appendStoredChatMessage(peerId, message);
-    const meta = getChatMessageMeta()[peerId] || { count: 0, lastMessage: null };
-    return { ...meta, appended: result.appended };
+    return { ...getChatPeerMeta(peerId), appended: result.appended };
   });
   ipcMain.handle('messages:patch', (_, peerId, messageId, patch) =>
     patchStoredChatMessage(peerId, messageId, patch)
@@ -2680,7 +2697,9 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(() => {
     store = new Store({ configName: 'bluetalk-config' });
     peerServer = new PeerServer(store);
-    apiServer = new APIServer(peerServer, store);
+    apiServer = new APIServer(peerServer, store, {
+      onSettingsChanged: (key) => handleSettingsMutation(key),
+    });
 
     configureSessionSecurity();
     createWindow();
@@ -2750,11 +2769,27 @@ if (!gotSingleInstanceLock) {
   });
 }
 
-app.on('before-quit', () => {
+let quitStoreFlushStarted = false;
+app.on('before-quit', (event) => {
   isQuitting = true;
+  // Ausstehende (debouncte) Store-Writes vor dem Beenden zu Ende schreiben,
+  // sonst kann die letzte Nachricht/Einstellung verloren gehen.
+  if (!quitStoreFlushStarted && store?._writePromise) {
+    quitStoreFlushStarted = true;
+    event.preventDefault();
+    Promise.race([
+      store.waitForWrites(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]).finally(() => app.quit());
+    return;
+  }
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
+  }
+  if (incomingNotifBatch.timer) {
+    clearTimeout(incomingNotifBatch.timer);
+    incomingNotifBatch.timer = null;
   }
   try {
     if (pokerGameWindow && !pokerGameWindow.isDestroyed()) {

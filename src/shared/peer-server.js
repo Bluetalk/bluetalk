@@ -1164,6 +1164,7 @@ class PeerServer extends EventEmitter {
   _heartbeatTick() {
     if (this._stopped) return;
     const now = Date.now();
+    this._pruneDiscoveredPeers(now);
     for (const peerId of [...this.peers.keys()]) {
       const peer = this._getActivePeer(peerId);
       if (!peer) continue;
@@ -1175,6 +1176,24 @@ class PeerServer extends EventEmitter {
       }
       peer.lastPingSentAt = now;
       this._wsSend(peer.socket, JSON.stringify({ type: 'ping', ts: now }));
+    }
+  }
+
+  // discoveredPeers wuchs sonst unbegrenzt (churniges LAN oder geflutete
+  // Discovery-Pakete): Einträge verfallen nach Inaktivität, verbundene Peers
+  // bleiben erhalten, und eine harte Obergrenze verdrängt die ältesten.
+  _pruneDiscoveredPeers(now = Date.now(), maxAgeMs = 10 * 60 * 1000, maxEntries = 512) {
+    for (const [peerId, info] of this.discoveredPeers) {
+      if (this.peers.has(peerId)) continue;
+      if (now - (info?.lastSeenAt || 0) > maxAgeMs) this.discoveredPeers.delete(peerId);
+    }
+    if (this.discoveredPeers.size > maxEntries) {
+      const evictable = [...this.discoveredPeers.entries()]
+        .filter(([peerId]) => !this.peers.has(peerId))
+        .sort((a, b) => (a[1]?.lastSeenAt || 0) - (b[1]?.lastSeenAt || 0));
+      for (const [peerId] of evictable.slice(0, this.discoveredPeers.size - maxEntries)) {
+        this.discoveredPeers.delete(peerId);
+      }
     }
   }
 
