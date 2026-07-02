@@ -17,6 +17,7 @@
       winLength: 3,
       maxPlayers: 2,
       aiDifficulty: 'medium',
+      aiAutoplay: false,
       lobbyAccess: 'invite',
     };
   }
@@ -39,6 +40,16 @@
     if (next.playMode === 'solo' && next.aiDifficulty === 'trained') {
       next.boardSize = 3;
       next.winLength = 3;
+    }
+    // Online-Autopilot: die trainierte KI übernimmt online den Host-Platz und
+    // tritt gegen einen verbundenen Kontakt an. Nur als klassisches 2-Spieler-
+    // 3×3, damit das gelernte Modell passt.
+    next.aiAutoplay = next.aiAutoplay === true;
+    if (next.playMode === 'solo') next.aiAutoplay = false;
+    if (next.playMode === 'online' && next.aiAutoplay) {
+      next.boardSize = 3;
+      next.winLength = 3;
+      next.maxPlayers = 2;
     }
     next.lobbyAccess = next.lobbyAccess === 'public' ? 'public' : 'invite';
     return next;
@@ -479,6 +490,16 @@
       api.storage.set('savedTicTacToeModel', aiModel);
     }
 
+    // Eine „Lernpartie" ist ein 2-Spieler-3×3-Spiel, in dem die trainierte KI
+    // beteiligt ist — solo als Gegner oder online als Autopilot des Hosts.
+    function isLearningGame() {
+      if (cfg.boardSize !== 3 || cfg.winLength !== 3) return false;
+      if (players.length !== 2) return false;
+      if (cfg.playMode === 'solo') return cfg.aiDifficulty === 'trained';
+      if (cfg.playMode === 'online') return cfg.aiAutoplay === true;
+      return false;
+    }
+
     function aiModelSummary() {
       const m = aiModel || api.storage.get('savedTicTacToeModel', null);
       const states = m && m.V ? Object.keys(m.V).length : 0;
@@ -560,16 +581,22 @@
         message,
         settings: { ...cfg },
         playerMarks: PLAYER_MARKS,
-        aiModel: cfg.playMode === 'solo' ? aiModelSummary() : null,
-        players: players.map((p) => ({
-          peerId: p.peerId,
-          name: p.name,
-          seat: p.seat,
-          disc: p.disc,
-          mark: PLAYER_MARKS[(p.disc || 1) - 1] || '?',
-          isAi: p.isAi === true,
-          connected: p.connected !== false,
-        })),
+        aiModel: aiModelSummary(),
+        players: players.map((p) => {
+          const botControlled = cfg.playMode === 'online'
+            && cfg.aiAutoplay === true
+            && p.peerId === selfId;
+          return {
+            peerId: p.peerId,
+            name: p.name,
+            seat: p.seat,
+            disc: p.disc,
+            mark: PLAYER_MARKS[(p.disc || 1) - 1] || '?',
+            isAi: p.isAi === true,
+            botControlled,
+            connected: p.connected !== false,
+          };
+        }),
       };
     }
 
@@ -717,7 +744,7 @@
     }
 
     function absorbGameIntoModel(resultDisc) {
-      if (cfg.playMode !== 'solo' || cfg.aiDifficulty !== 'trained') return;
+      if (!isLearningGame()) return;
       if (!moveHistory.length) return;
       ensureModel();
       learnFromGame(aiModel, moveHistory, resultDisc);
@@ -754,9 +781,9 @@
       if (player.isAi && peerId !== AI_PEER_ID) return false;
       if (peerId === AI_PEER_ID && player.peerId !== AI_PEER_ID) return false;
 
-      // Trainierte Solo-KI lernt aus der echten Partie: Zustand vor dem Zug
-      // aus Sicht des Ziehenden merken.
-      if (cfg.playMode === 'solo' && cfg.aiDifficulty === 'trained' && isTrainableBoard(board, cfg.winLength)) {
+      // Trainierte KI lernt aus der echten Partie (solo oder Online-Autopilot):
+      // Zustand vor dem Zug aus Sicht des Ziehenden merken.
+      if (isLearningGame()) {
         ensureModel();
         const other = players.find((p) => p.disc !== player.disc);
         if (other) moveHistory.push({ key: modelKey(board, player.disc, other.disc), disc: player.disc });
@@ -789,22 +816,37 @@
     }
 
     function maybeAiMove() {
-      if (cfg.playMode !== 'solo' || phase !== 'playing') return;
+      if (phase !== 'playing') return;
       const actor = players[toActIdx];
-      if (!actor?.isAi) return;
-      const human = players.find((p) => !p.isAi);
-      if (!human) return;
-      if (cfg.aiDifficulty === 'trained') ensureModel();
+      if (!actor) return;
+
+      // Solo: der KI-Sitzplatz zieht. Online: die trainierte KI übernimmt als
+      // Autopilot den Host-Platz und spielt gegen den verbundenen Gegner.
+      const soloAi = cfg.playMode === 'solo' && actor.isAi;
+      const onlineAutopilot = cfg.playMode === 'online'
+        && cfg.aiAutoplay === true
+        && actor.peerId === selfId
+        && isTrainableBoard(board, cfg.winLength)
+        && players.length === 2;
+      if (!soloAi && !onlineAutopilot) return;
+
+      const opponent = players.find((p) => p.disc !== actor.disc);
+      if (!opponent) return;
+
+      const difficulty = onlineAutopilot ? 'trained' : cfg.aiDifficulty;
+      if (difficulty === 'trained') ensureModel();
+      const moverPeerId = soloAi ? AI_PEER_ID : actor.peerId;
+
       queueMicrotask(() => {
         const move = chooseAiMove(
           board,
           cfg.winLength,
           actor.disc,
-          human.disc,
-          cfg.aiDifficulty,
-          cfg.aiDifficulty === 'trained' ? aiModel : null
+          opponent.disc,
+          difficulty,
+          difficulty === 'trained' ? aiModel : null
         );
-        if (move) place(AI_PEER_ID, move.row, move.col);
+        if (move) place(moverPeerId, move.row, move.col);
       });
     }
 
@@ -835,11 +877,6 @@
     }
 
     function trainAi(gamesRequested) {
-      if (cfg.playMode !== 'solo') {
-        message = 'KI-Training ist nur im Solo-Modus möglich.';
-        pushState();
-        return false;
-      }
       if (phase === 'playing') {
         message = 'KI-Training nur in der Lobby oder nach der Partie möglich.';
         pushState();

@@ -99,13 +99,17 @@ function useTicTacToeWindowMaximized() {
 function PlayerAvatar({ player, isActive, isHost, self = false }) {
   const initials = player?.name?.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '?';
   const mark = player?.mark || '?';
+  const isBot = player?.isAi || player?.botControlled;
   return (
     <div className={`ttt-player-avatar${isActive ? ' active' : ''}${player?.connected === false ? ' disconnected' : ''}${self ? ' self' : ''}`}>
       <div className={`ttt-avatar-circle ${MARK_CLASSES[mark] || ''}`}>
         <span className="ttt-avatar-mark">{mark}</span>
         {isHost ? <Crown size={11} className="ttt-host-icon" aria-label="Host" /> : null}
+        {isBot ? <Brain size={11} className="ttt-bot-icon" aria-label="KI" /> : null}
       </div>
-      <div className="ttt-avatar-name">{player?.name || 'Spieler'}{self ? ' (du)' : ''}</div>
+      <div className="ttt-avatar-name">
+        {player?.name || 'Spieler'}{self ? ' (du)' : ''}{player?.botControlled ? ' · KI' : ''}
+      </div>
     </div>
   );
 }
@@ -292,6 +296,8 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
   const boardSize = Number(local.boardSize) || 3;
   const winOptions = [3, 4, 5].filter((n) => n <= boardSize);
   const isTrainedAi = local.playMode === 'solo' && local.aiDifficulty === 'trained';
+  const isAutopilot = local.playMode === 'online' && local.aiAutoplay === true;
+  const boardLocked = isTrainedAi || isAutopilot;
 
   if (!isHost) {
     return (
@@ -301,7 +307,10 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         <p><strong>Feld:</strong> {settings?.boardSize}×{settings?.boardSize}</p>
         <p><strong>Gewinn:</strong> {settings?.winLength} in einer Reihe</p>
         {settings?.playMode === 'online' ? (
-          <p><strong>Spieler:</strong> max. {settings?.maxPlayers}</p>
+          <>
+            <p><strong>Spieler:</strong> max. {settings?.maxPlayers}</p>
+            {settings?.aiAutoplay ? <p><strong>KI-Autopilot:</strong> aktiv (Host-Züge)</p> : null}
+          </>
         ) : (
           <p><strong>KI:</strong> {AI_DIFFICULTY_LABELS[settings?.aiDifficulty] || 'Mittel'}</p>
         )}
@@ -334,7 +343,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         Feldgröße
         <select
           value={local.boardSize || 3}
-          disabled={isTrainedAi}
+          disabled={boardLocked}
           onChange={(e) => {
             const nextSize = Number(e.target.value);
             setLocal({
@@ -353,7 +362,7 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         Gewinnbedingung
         <select
           value={Math.min(Number(local.winLength) || 3, boardSize)}
-          disabled={isTrainedAi}
+          disabled={boardLocked}
           onChange={(e) => setLocal({ ...local, winLength: Number(e.target.value) })}
         >
           {winOptions.map((n) => (
@@ -364,7 +373,11 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
       {local.playMode === 'online' ? (
         <label>
           Max. Spieler
-          <select value={local.maxPlayers || 2} onChange={(e) => setLocal({ ...local, maxPlayers: Number(e.target.value) })}>
+          <select
+            value={isAutopilot ? 2 : (local.maxPlayers || 2)}
+            disabled={isAutopilot}
+            onChange={(e) => setLocal({ ...local, maxPlayers: Number(e.target.value) })}
+          >
             <option value={2}>2</option>
             <option value={3}>3</option>
             <option value={4}>4</option>
@@ -396,13 +409,34 @@ function SettingsPanel({ settings, isHost, onUpdate }) {
         </p>
       ) : null}
       {local.playMode === 'online' ? (
-        <label>
-          Lobby-Zugang
-          <select value={local.lobbyAccess || 'invite'} onChange={(e) => setLocal({ ...local, lobbyAccess: e.target.value })}>
-            <option value="invite">Nur auf Einladung</option>
-            <option value="public">Öffentlich (Presence-Beitritt)</option>
-          </select>
-        </label>
+        <>
+          <label className="ttt-settings-check">
+            <input
+              type="checkbox"
+              checked={isAutopilot}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setLocal(on
+                  ? { ...local, aiAutoplay: true, boardSize: 3, winLength: 3, maxPlayers: 2 }
+                  : { ...local, aiAutoplay: false });
+              }}
+            />
+            <span>Meine trainierte KI spielt für mich (Autopilot)</span>
+          </label>
+          {isAutopilot ? (
+            <p className="ttt-settings-hint">
+              <Brain size={13} /> Die KI übernimmt deine Züge (3×3, 2 Spieler). Lade einen
+              Kontakt ein — er spielt dann gegen deine trainierte KI, die weiter dazulernt.
+            </p>
+          ) : null}
+          <label>
+            Lobby-Zugang
+            <select value={local.lobbyAccess || 'invite'} onChange={(e) => setLocal({ ...local, lobbyAccess: e.target.value })}>
+              <option value="invite">Nur auf Einladung</option>
+              <option value="public">Öffentlich (Presence-Beitritt)</option>
+            </select>
+          </label>
+        </>
       ) : null}
       <button type="submit" className="ttt-btn-primary">Speichern</button>
     </form>
@@ -457,13 +491,16 @@ const TRAIN_PRESETS = [
   { games: 12000, label: 'Meister', note: '12 000 Partien' },
 ];
 
-function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained }) {
+function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained, onPlayOnline }) {
   const pub = snapshot?.public;
   const model = pub?.aiModel || {};
+  const settings = pub?.settings || {};
   const inLobby = !pub?.phase || pub.phase === 'lobby' || pub.phase === 'finished';
   const training = Boolean(model.training);
   const [games, setGames] = useState(2000);
-  const usingTrained = pub?.settings?.aiDifficulty === 'trained';
+  const isSolo = settings.playMode !== 'online';
+  const usingTrained = isSolo && settings.aiDifficulty === 'trained';
+  const onlineAutopilot = settings.playMode === 'online' && settings.aiAutoplay === true;
 
   if (!isHost) {
     return <p className="ttt-panel-note">Nur der Host kann die KI trainieren.</p>;
@@ -472,9 +509,10 @@ function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained }) 
   return (
     <div className="ttt-training">
       <p className="ttt-training-intro">
-        Trainiere eine eigene Tic-Tac-Toe-KI. Sie lernt durch <strong>Selbstspiel</strong> —
-        je mehr Partien, desto stärker. Zusätzlich lernt sie aus jeder Partie, die du
-        gegen sie spielst. Wähle danach die Schwierigkeit <em>„Eigene KI (trainiert)"</em>.
+        Trainiere eine eigene Tic-Tac-Toe-KI. Sie lernt aus <strong>jeder Partie</strong>,
+        die du gegen sie spielst — und optional zusätzlich durch Selbstspiel. Danach
+        kannst du sie im Solo-Modus als Gegner wählen oder sie <strong>online gegen
+        andere</strong> antreten lassen; auch dort lernt sie weiter.
       </p>
 
       <div className="ttt-training-stats">
@@ -528,13 +566,28 @@ function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained }) 
               <RotateCcw size={14} /> Zurücksetzen
             </button>
           </div>
-          {model.available && !usingTrained ? (
-            <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onSelectTrained}>
-              Diese KI als Gegner auswählen
-            </button>
-          ) : null}
-          {usingTrained ? (
-            <p className="ttt-training-active-note"><Brain size={13} /> Deine trainierte KI ist als Gegner aktiv.</p>
+          {model.available ? (
+            <div className="ttt-training-deploy">
+              <p className="ttt-training-subhead">Einsetzen</p>
+              {isSolo && !usingTrained ? (
+                <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onSelectTrained}>
+                  <Brain size={14} /> Solo als Gegner auswählen
+                </button>
+              ) : null}
+              {usingTrained ? (
+                <p className="ttt-training-active-note"><Brain size={13} /> Deine trainierte KI ist als Solo-Gegner aktiv.</p>
+              ) : null}
+              {!onlineAutopilot ? (
+                <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onPlayOnline}>
+                  <Brain size={14} /> Online gegen andere spielen lassen
+                </button>
+              ) : (
+                <p className="ttt-training-active-note">
+                  <Brain size={13} /> Autopilot aktiv: Deine KI spielt online für dich. Lade
+                  einen Kontakt ein — er tritt direkt gegen deine KI an.
+                </p>
+              )}
+            </div>
           ) : null}
         </>
       )}
@@ -551,7 +604,7 @@ function TicTacToeGuide() {
         <li><strong>Erweitert:</strong> 5×5 oder 7×7 mit 3–5 in einer Reihe — auch diagonal.</li>
         <li><strong>Online:</strong> 2–4 Spieler mit Symbolen X, O, △, □.</li>
         <li><strong>Solo:</strong> Du spielst gegen einen lokalen Algorithmus (Leicht/Mittel/Schwer).</li>
-        <li><strong>Eigene KI:</strong> Trainiere über das <Brain size={12} /> KI-Training eine lernende KI per Selbstspiel und tritt gegen sie an (3×3).</li>
+        <li><strong>Eigene KI:</strong> Über das <Brain size={12} /> KI-Training trainierst du eine lernende KI — sie lernt aus jeder Partie gegen dich (3×3). Danach kannst du sie solo als Gegner wählen oder online für dich gegen andere antreten lassen.</li>
       </ul>
     </div>
   );
@@ -594,6 +647,20 @@ export default function TicTacToeGamePage() {
     () => send({ type: 'update_settings', settings: { ...(pub?.settings || {}), aiDifficulty: 'trained' } }),
     [pub?.settings, send],
   );
+  const enableOnlineAi = useCallback(
+    () => send({
+      type: 'update_settings',
+      settings: {
+        ...(pub?.settings || {}),
+        playMode: 'online',
+        aiAutoplay: true,
+        boardSize: 3,
+        winLength: 3,
+        maxPlayers: 2,
+      },
+    }),
+    [pub?.settings, send],
+  );
 
   if (!snapshot?.public) {
     return (
@@ -623,7 +690,7 @@ export default function TicTacToeGamePage() {
         </div>
         <div className="ttt-game-titlebar-actions">
           <button type="button" className="ttt-game-btn-icon" title="Hilfe" onClick={() => setPanel('help')}><HelpCircle size={16} /></button>
-          {isHost && isSolo ? <button type="button" className="ttt-game-btn-icon" title="KI-Training" onClick={() => setPanel('training')}><Brain size={16} /></button> : null}
+          {isHost ? <button type="button" className="ttt-game-btn-icon" title="KI-Training" onClick={() => setPanel('training')}><Brain size={16} /></button> : null}
           {isHost && !isSolo ? <button type="button" className="ttt-game-btn-icon" title="Spieler" onClick={() => setPanel('players')}><Users size={16} /></button> : null}
           <button type="button" className="ttt-game-btn-icon" title="Einstellungen" onClick={() => setPanel('settings')}><Settings size={16} /></button>
           {isHost ? <button type="button" className="ttt-game-btn-icon" title="Speichern" onClick={() => send({ type: 'save_game' })}><Save size={16} /></button> : null}
@@ -667,7 +734,7 @@ export default function TicTacToeGamePage() {
           />
         </OverlayPanel>
       ) : null}
-      {panel === 'training' && isSolo ? (
+      {panel === 'training' ? (
         <OverlayPanel title="KI-Training" onClose={() => setPanel('')}>
           <TrainingPanel
             snapshot={snapshot}
@@ -675,6 +742,7 @@ export default function TicTacToeGamePage() {
             onTrain={trainAi}
             onReset={resetAiModel}
             onSelectTrained={selectTrainedAi}
+            onPlayOnline={enableOnlineAi}
           />
         </OverlayPanel>
       ) : null}

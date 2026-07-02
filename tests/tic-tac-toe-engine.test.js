@@ -211,6 +211,65 @@ test('learnFromGame updates values from a played game', () => {
   assert.ok(model.V[history[0].key] > 0, 'winner move state valued positively');
 });
 
+test('sanitizeSettings normalises the online AI autopilot', () => {
+  const { hooks } = loadTicTacToeEngine();
+  const s = hooks.sanitizeSettings({
+    playMode: 'online',
+    aiAutoplay: true,
+    boardSize: 7,
+    winLength: 5,
+    maxPlayers: 4,
+  });
+  assert.equal(s.aiAutoplay, true);
+  assert.equal(s.boardSize, 3);
+  assert.equal(s.winLength, 3);
+  assert.equal(s.maxPlayers, 2);
+
+  const solo = hooks.sanitizeSettings({ playMode: 'solo', aiAutoplay: true });
+  assert.equal(solo.aiAutoplay, false);
+});
+
+test('online autopilot plays the host seat and learns from the game', async () => {
+  const { hooks, storage } = loadTicTacToeEngine();
+  const host = hooks.createHost(
+    { playMode: 'online', boardSize: 3, winLength: 3, maxPlayers: 2, lobbyAccess: 'public', aiAutoplay: true },
+    () => {},
+    { id: 'host', name: 'Host' }
+  );
+  host.bootstrapHost();
+  host.onWire('guest', { wire: 'join', gameId: host.gameId, name: 'Guest' });
+  assert.ok(host.startGame());
+
+  // The host seat is flagged as bot-controlled in the public state.
+  const started = host.publicState();
+  const hostPlayer = started.players.find((p) => p.peerId === 'host');
+  assert.equal(hostPlayer.botControlled, true);
+
+  // The autopilot moves on the host's turn without any manual host action.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const afterAi = host.publicState();
+  const filled = afterAi.board.flat().filter((c) => c !== 0).length;
+  assert.ok(filled >= 1, 'autopilot should have placed the opening move');
+
+  // Play the guest to a full game so the model absorbs it.
+  for (let step = 0; step < 12 && host.publicState().phase === 'playing'; step += 1) {
+    const pub = host.publicState();
+    if (pub.toAct !== 'guest') {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      continue;
+    }
+    const empty = [];
+    pub.board.forEach((row, r) => row.forEach((cell, c) => { if (cell === 0) empty.push({ r, c }); }));
+    host.applyAction('guest', { type: 'place', row: empty[0].r, col: empty[0].c });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.equal(host.publicState().phase, 'finished');
+  const model = storage.get('savedTicTacToeModel');
+  assert.ok(model, 'a trained model should be persisted after the game');
+  assert.ok(model.games >= 1, 'the online game should have been absorbed into the model');
+});
+
 test('solo host exposes an AI model summary', () => {
   const { hooks } = loadTicTacToeEngine();
   const host = hooks.createHost(

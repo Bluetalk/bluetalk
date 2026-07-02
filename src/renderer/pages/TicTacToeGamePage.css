@@ -949,3 +949,44 @@ body:has(.ttt-game-root) {
   background: linear-gradient(90deg, var(--ttt-x), var(--ttt-o));
   transition: width 0.3s ease;
 }
+
+.ttt-settings-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ttt-settings-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ttt-x);
+  cursor: pointer;
+}
+
+.ttt-settings-check span {
+  font-size: 13px;
+  color: var(--ttt-ink);
+}
+
+.ttt-bot-icon {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  color: var(--ttt-tri);
+  background: rgba(6, 12, 20, 0.9);
+  border-radius: 50%;
+  padding: 1px;
+}
+
+.ttt-training-deploy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--ttt-line);
+}
+
+.ttt-training-deploy .ttt-training-select {
+  align-self: flex-start;
+}
