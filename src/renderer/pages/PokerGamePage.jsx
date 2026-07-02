@@ -97,11 +97,12 @@ function usePokerState() {
   };
 }
 
-function Card3D({ label, hidden = false, animate = false, compact = false, peekOnHover = false }) {
+function Card3D({ label, hidden = false, animate = false, compact = false, peekOnHover = false, dealIndex = 0 }) {
   const normalized = String(label || '');
   const suit = hidden ? '' : normalized.slice(-1);
   const rank = hidden ? '' : normalized.slice(0, -1);
   const red = RED_SUITS.has(suit);
+  const dealStyle = animate ? { '--deal-delay': `${dealIndex * 140}ms` } : undefined;
   const faceContent = (
     <>
       <div className="poker-card-corner poker-card-tl"><strong>{rank}</strong><span>{suit}</span></div>
@@ -114,6 +115,7 @@ function Card3D({ label, hidden = false, animate = false, compact = false, peekO
     return (
       <div
         className={`poker-card-3d poker-card-peek${animate ? ' poker-card-deal' : ''}${red ? ' poker-card-red' : ''}`}
+        style={dealStyle}
         role="img"
         tabIndex={0}
         aria-label={`Verdeckte Karte – ${rank} ${suit} (Hover zum Ansehen)`}
@@ -133,6 +135,7 @@ function Card3D({ label, hidden = false, animate = false, compact = false, peekO
   return (
     <div
       className={`poker-card-3d${animate ? ' poker-card-deal' : ''}${hidden ? ' poker-card-back' : ''}${compact ? ' poker-card-compact' : ''}${red ? ' poker-card-red' : ''}`}
+      style={dealStyle}
       role="img"
       aria-label={hidden ? 'Verdeckte Karte' : `${rank} ${suit}`}
     >
@@ -155,10 +158,10 @@ function PokerChip({ value, small = false }) {
   );
 }
 
-function PlayerAvatar({ player, isDealer, isActive, isHost, self = false, revealedCards = [] }) {
+function PlayerAvatar({ player, isDealer, isActive, isHost, self = false, winner = false, revealedCards = [] }) {
   const initials = player?.name?.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '?';
   return (
-    <div className={`poker-player-avatar${isActive ? ' active' : ''}${player?.folded ? ' folded' : ''}${player?.allIn ? ' allin' : ''}${player?.connected === false ? ' disconnected' : ''}${self ? ' self' : ''}`}>
+    <div className={`poker-player-avatar${isActive ? ' active' : ''}${player?.folded ? ' folded' : ''}${player?.allIn ? ' allin' : ''}${player?.connected === false ? ' disconnected' : ''}${self ? ' self' : ''}${winner ? ' winner' : ''}`}>
       <div className="poker-avatar-circle">
         <span>{initials}</span>
         {isDealer ? <span className="poker-dealer-badge">D</span> : null}
@@ -301,6 +304,25 @@ function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
   );
 }
 
+const PHASE_STEPS = ['preflop', 'flop', 'turn', 'river', 'showdown'];
+
+function PhaseStepper({ phase }) {
+  const effective = phase === 'between' ? 'showdown' : phase;
+  const activeIndex = PHASE_STEPS.indexOf(effective);
+  return (
+    <div className="poker-phase-steps" role="status" aria-label={`Phase: ${PHASE_LABELS[phase] || phase}`}>
+      {PHASE_STEPS.map((step, index) => (
+        <span
+          key={step}
+          className={`poker-phase-step${index === activeIndex ? ' current' : ''}${activeIndex > -1 && index < activeIndex ? ' done' : ''}`}
+        >
+          {PHASE_LABELS[step]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function GameTable({ snapshot, selfId, onAction }) {
   const pub = snapshot?.public;
   const players = pub?.players || [];
@@ -329,28 +351,39 @@ function GameTable({ snapshot, selfId, onAction }) {
   }, [players, pub?.settings?.maxPlayers, selfId, selfPlayer?.seat]);
 
   const revealed = useMemo(() => new Map((pub?.showdownCards || []).map((row) => [row.peerId, row.cards || []])), [pub?.showdownCards]);
-  const renderPlayer = (player) => <PlayerAvatar key={player.peerId} player={player} isDealer={pub?.dealerSeat === player.seat} isActive={pub?.toAct === player.peerId} isHost={player.peerId === pub?.hostPeerId} revealedCards={revealed.get(player.peerId)} />;
+  const winnerIds = useMemo(() => new Set((pub?.winners || []).map((winner) => winner.peerId)), [pub?.winners]);
+  const showWinners = isBetween && winnerIds.size > 0;
+  const activePlayer = players.find((player) => player.peerId === pub?.toAct);
+  const renderPlayer = (player) => <PlayerAvatar key={player.peerId} player={player} isDealer={pub?.dealerSeat === player.seat} isActive={pub?.toAct === player.peerId} isHost={player.peerId === pub?.hostPeerId} winner={showWinners && winnerIds.has(player.peerId)} revealedCards={revealed.get(player.peerId)} />;
   const top = positionedPlayers.filter((player) => player.position === 'top');
   const left = positionedPlayers.filter((player) => player.position === 'left');
   const right = positionedPlayers.filter((player) => player.position === 'right');
 
   return (
     <div className="poker-table-container">
+      <PhaseStepper phase={phase} />
       <div className="poker-player-top">{top.map(renderPlayer)}</div>
       <div className="poker-table-middle">
         <div className="poker-players-left">{left.map(renderPlayer)}</div>
         <div className="poker-table-center"><div className="poker-felt">
-          <div className="poker-pot-area">{pub?.pot > 0 ? <div className="poker-pot"><PokerChip value={pub.pot} /><span className="poker-pot-amount">Pot {formatChips(pub.pot)}</span></div> : null}</div>
-          <div className="poker-board">{board.length ? board.map((card) => <Card3D key={card} label={card} animate />) : <div className="poker-board-placeholder">Gemeinschaftskarten</div>}</div>
+          <div className="poker-felt-sheen" aria-hidden />
+          <div className="poker-pot-area">{pub?.pot > 0 ? <div className="poker-pot"><PokerChip value={pub.pot} /><div className="poker-pot-text"><span className="poker-pot-label">Pot</span><span className="poker-pot-amount">{formatChips(pub.pot)}</span></div></div> : null}</div>
+          <div className="poker-board">{board.length ? board.map((card, index) => <Card3D key={card} label={card} animate dealIndex={index} />) : <div className="poker-board-placeholder">Gemeinschaftskarten</div>}</div>
           {isBetween && pub?.winners?.length ? <div className="poker-winner-banner">{pub.winners.map((winner) => { const player = players.find((item) => item.peerId === winner.peerId); return <div key={winner.peerId} className="poker-winner"><Crown size={16} /><span>{winner.peerId === selfId ? 'Du' : player?.name || 'Spieler'} gewinnst {formatChips(winner.amount)}</span><span className="poker-winner-hand">{HAND_LABELS[winner.hand] || winner.hand}</span></div>; })}</div> : null}
         </div></div>
         <div className="poker-players-right">{right.map(renderPlayer)}</div>
       </div>
       <div className="poker-player-self">
-        <PlayerAvatar player={selfPlayer || { name: 'Du', chips: 0 }} isDealer={pub?.dealerSeat === selfPlayer?.seat} isActive={canAct} isHost={selfId === pub?.hostPeerId} self />
-        <div className="poker-hole-cards">{snapshot?.myHole?.length ? snapshot.myHole.map((card) => <Card3D key={card} label={cardLabelFromRaw(card)} animate peekOnHover />) : <><Card3D hidden /><Card3D hidden /></>}</div>
+        <PlayerAvatar player={selfPlayer || { name: 'Du', chips: 0 }} isDealer={pub?.dealerSeat === selfPlayer?.seat} isActive={canAct} isHost={selfId === pub?.hostPeerId} winner={showWinners && winnerIds.has(selfId)} self />
+        <div className="poker-hole-cards">{snapshot?.myHole?.length ? snapshot.myHole.map((card, index) => <Card3D key={card} label={cardLabelFromRaw(card)} animate dealIndex={index} peekOnHover />) : <><Card3D hidden /><Card3D hidden /></>}</div>
+        {!canAct && !isBetween && activePlayer ? (
+          <div className="poker-turn-indicator" role="status">
+            <span className="poker-turn-dot" aria-hidden />
+            <span>{activePlayer.peerId === selfId ? 'Du bist am Zug…' : `${activePlayer.name || 'Spieler'} ist am Zug…`}</span>
+          </div>
+        ) : null}
         {canAct ? <div className="poker-action-bar">
-          <div className="poker-action-info"><strong>Du bist am Zug</strong>{toCall > 0 ? <span className="poker-tocall">Zu zahlen: {formatChips(toCall)}</span> : <span>Du kannst checken.</span>}</div>
+          <div className="poker-action-info"><strong className="poker-your-turn">Du bist dran</strong>{toCall > 0 ? <span className="poker-tocall">Zu zahlen: {formatChips(toCall)}</span> : <span>Du kannst checken.</span>}</div>
           {bounds.canRaise ? <div className="poker-raise-picker"><label htmlFor="poker-raise-value">Erhöhen auf</label><input id="poker-raise-value" type="number" min={minRaiseTo} max={maxRaiseTo} value={raiseTo} onChange={(event) => setRaiseTo(Math.max(minRaiseTo, Math.min(maxRaiseTo, Number(event.target.value) || minRaiseTo)))} /><input type="range" aria-label="Raise-Betrag" min={minRaiseTo} max={maxRaiseTo} step={Math.max(1, pub?.settings?.smallBlind || 1)} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /></div> : null}
           <div className="poker-actions">
             <button type="button" className="poker-act-fold" onClick={() => onAction({ type: 'fold' })}>Fold</button>

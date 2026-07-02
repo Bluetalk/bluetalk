@@ -113,6 +113,11 @@ function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
 
   return (
     <div className="ttt-lobby">
+      <div className="ttt-lobby-emblem" aria-hidden>
+        <span className="ttt-emblem-mark ttt-emblem-x">✕</span>
+        <span className="ttt-emblem-vs">vs</span>
+        <span className="ttt-emblem-mark ttt-emblem-o">◯</span>
+      </div>
       <div className="ttt-lobby-header">
         <h2>{settings.tableName || 'Tic-Tac-Toe'}</h2>
         <div className="ttt-lobby-meta">
@@ -175,6 +180,8 @@ function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
   const finished = pub?.phase === 'finished';
   const winner = players.find((p) => p.peerId === pub?.winnerPeerId);
   const actor = players.find((p) => p.peerId === pub?.toAct);
+  const myMark = players.find((p) => p.peerId === selfId)?.mark || '';
+  const turnMark = canAct ? myMark : (actor?.mark || '');
 
   return (
     <div className="ttt-table-container">
@@ -215,7 +222,13 @@ function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
                 onClick={() => handleCellClick(rowIdx, colIdx)}
                 aria-label={cell ? `Feld ${mark}` : `Leeres Feld ${rowIdx + 1}, ${colIdx + 1}`}
               >
-                {mark ? <span className={`ttt-cell-mark ${MARK_CLASSES[mark] || ''}`}>{mark}</span> : null}
+                {mark ? (
+                  <span className={`ttt-cell-mark ${MARK_CLASSES[mark] || ''}`}>{mark}</span>
+                ) : (
+                  playable && myMark ? (
+                    <span className={`ttt-cell-ghost ${MARK_CLASSES[myMark] || ''}`} aria-hidden>{myMark}</span>
+                  ) : null
+                )}
               </button>
             );
           })
@@ -228,14 +241,19 @@ function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
       </div>
 
       {finished ? (
-        <div className="ttt-finished-banner">
-          {winner ? (
-            winner.peerId === selfId
-              ? 'Du hast gewonnen!'
-              : `${winner.name} hat gewonnen.`
-          ) : (
-            'Unentschieden — das Feld ist voll.'
-          )}
+        <div className={`ttt-finished-banner${winner ? ` ttt-finished-${MARK_CLASSES[winner.mark] || 'draw'}` : ' ttt-finished-draw'}`}>
+          <div className="ttt-finished-headline">
+            {winner ? (
+              <>
+                <span className={`ttt-finished-mark ${MARK_CLASSES[winner.mark] || ''}`} aria-hidden>{winner.mark}</span>
+                <span>
+                  {winner.peerId === selfId ? 'Du hast gewonnen!' : `${winner.name} hat gewonnen.`}
+                </span>
+              </>
+            ) : (
+              <span>Unentschieden — das Feld ist voll.</span>
+            )}
+          </div>
           {isHost ? (
             <button type="button" className="ttt-btn-primary ttt-rematch-btn" onClick={onRematch}>
               <Play size={16} /> Revanche
@@ -247,8 +265,11 @@ function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
       ) : null}
 
       {!finished && pub?.phase === 'playing' ? (
-        <div className="ttt-turn-banner">
-          {canAct ? 'Du bist am Zug.' : `${actor?.name || 'Ein Spieler'} ist am Zug.`}
+        <div className={`ttt-turn-banner${canAct ? ' own-turn' : ''}`}>
+          {turnMark ? (
+            <span className={`ttt-turn-mark ${MARK_CLASSES[turnMark] || ''}`} aria-hidden>{turnMark}</span>
+          ) : null}
+          <span>{canAct ? 'Du bist am Zug' : `${actor?.name || 'Ein Spieler'} ist am Zug`}</span>
         </div>
       ) : null}
     </div>
@@ -452,7 +473,10 @@ export default function TicTacToeGamePage() {
     return (
       <div className="ttt-game-root">
         <main className="ttt-empty-state">
-          <div className="ttt-launch-mark">✕</div>
+          <div className="ttt-launch-mark" aria-hidden>
+            <span className="ttt-emblem-x">✕</span>
+            <span className="ttt-emblem-o">◯</span>
+          </div>
           <h1>Tic-Tac-Toe wird vorbereitet…</h1>
           <p>Starte oder öffne ein Spiel über den Spiele-Bereich im Hauptfenster.</p>
           <button type="button" className="ttt-btn-ghost" onClick={() => send({ type: 'request_state' })}>Erneut laden</button>

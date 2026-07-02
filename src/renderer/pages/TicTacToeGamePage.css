@@ -1,4 +1,4 @@
-/* BlueTalk Tic-Tac-Toe */
+/* BlueTalk Tic-Tac-Toe — "BlueTalk Arcade": Neon-Minimalismus (Cyan X / Magenta O) */
 
 html:has(.ttt-game-root),
 body:has(.ttt-game-root) {
@@ -8,15 +8,24 @@ body:has(.ttt-game-root) {
 }
 
 .ttt-game-root {
+  --ttt-x: #22d3ee;
+  --ttt-o: #e879f9;
+  --ttt-tri: #4ade80;
+  --ttt-sq: #fbbf24;
+  --ttt-ink: #e8f4f8;
+  --ttt-muted: rgba(190, 214, 224, 0.55);
+  --ttt-glass: rgba(10, 16, 26, 0.55);
+  --ttt-line: rgba(255, 255, 255, 0.08);
   height: 100dvh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 100%, rgba(59, 130, 246, 0.12), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(168, 85, 247, 0.08), transparent 50%),
-    linear-gradient(165deg, #050810 0%, #0c1428 45%, #080f1a 100%);
-  color: #e8eef6;
+    radial-gradient(ellipse 70% 55% at 50% 108%, rgba(34, 211, 238, 0.10), transparent 60%),
+    radial-gradient(ellipse 55% 40% at 85% -5%, rgba(232, 121, 249, 0.08), transparent 55%),
+    radial-gradient(ellipse 120% 90% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%),
+    linear-gradient(170deg, #05070c 0%, #090d18 50%, #04060a 100%);
+  color: var(--ttt-ink);
   font-family: 'Segoe UI', system-ui, sans-serif;
   overflow: hidden;
   position: relative;
@@ -26,9 +35,12 @@ body:has(.ttt-game-root) {
   pointer-events: none;
   position: fixed;
   inset: 0;
-  opacity: 0.03;
+  opacity: 0.04;
+  z-index: 1;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
+
+/* ---------- Titelleiste ---------- */
 
 .ttt-game-titlebar {
   flex-shrink: 0;
@@ -36,21 +48,24 @@ body:has(.ttt-game-root) {
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(12, 20, 40, 0.95), rgba(6, 10, 20, 0.88));
+  border-bottom: 1px solid var(--ttt-line);
+  background: rgba(7, 11, 18, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   -webkit-app-region: drag;
   z-index: 100;
 }
 
 .ttt-title h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+  background: linear-gradient(90deg, var(--ttt-x), var(--ttt-o));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -58,7 +73,9 @@ body:has(.ttt-game-root) {
 
 .ttt-game-titlebar-sub {
   font-size: 10px;
-  color: rgba(200, 210, 225, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ttt-muted);
 }
 
 .ttt-game-titlebar-actions {
@@ -70,21 +87,24 @@ body:has(.ttt-game-root) {
 .ttt-game-btn-icon {
   width: 32px;
   height: 28px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
-  color: #e8eef6;
+  border-radius: 8px;
+  border: 1px solid var(--ttt-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ttt-ink);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
 
 .ttt-game-btn-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(34, 211, 238, 0.1);
+  border-color: rgba(34, 211, 238, 0.35);
   transform: translateY(-1px);
 }
+
+/* ---------- Hauptbereich ---------- */
 
 .ttt-game-main {
   flex: 1;
@@ -94,6 +114,8 @@ body:has(.ttt-game-root) {
   justify-content: center;
   padding: 16px;
   overflow: auto;
+  position: relative;
+  z-index: 2;
 }
 
 .ttt-empty-state {
@@ -102,59 +124,131 @@ body:has(.ttt-game-root) {
 }
 
 .ttt-launch-mark {
-  font-size: 48px;
+  font-size: 52px;
+  font-weight: 800;
   margin-bottom: 16px;
-  color: #93c5fd;
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  line-height: 1;
 }
+
+/* ---------- Buttons ---------- */
 
 .ttt-btn-primary,
 .ttt-btn-ghost {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 18px;
-  border-radius: 8px;
+  padding: 11px 22px;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   border: none;
-  transition: all 0.15s;
+  transition: transform 0.15s, opacity 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .ttt-btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
-  color: #fff;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.9), rgba(232, 121, 249, 0.85));
+  color: #04060a;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 18px rgba(34, 211, 238, 0.35),
+    0 0 32px rgba(232, 121, 249, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .ttt-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
   transform: translateY(-1px);
 }
 
+.ttt-btn-primary:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
 .ttt-btn-primary:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .ttt-btn-ghost {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e8eef6;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ttt-ink);
+  border: 1px solid var(--ttt-line);
 }
 
 .ttt-btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
+/* ---------- Lobby ---------- */
+
 .ttt-lobby {
-  max-width: 520px;
+  max-width: 540px;
   width: 100%;
   text-align: center;
+  padding: 28px 26px 26px;
+  border-radius: 16px;
+  background: var(--ttt-glass);
+  border: 1px solid var(--ttt-line);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.ttt-lobby-emblem {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 14px;
+  line-height: 1;
+  user-select: none;
+}
+
+.ttt-emblem-mark {
+  font-size: 58px;
+  font-weight: 800;
+}
+
+.ttt-emblem-x,
+.ttt-launch-mark .ttt-emblem-x {
+  color: var(--ttt-x);
+  text-shadow:
+    0 0 10px rgba(34, 211, 238, 0.85),
+    0 0 34px rgba(34, 211, 238, 0.4);
+  animation: ttt-emblem-float 4.5s ease-in-out infinite;
+}
+
+.ttt-emblem-o,
+.ttt-launch-mark .ttt-emblem-o {
+  color: var(--ttt-o);
+  text-shadow:
+    0 0 10px rgba(232, 121, 249, 0.85),
+    0 0 34px rgba(232, 121, 249, 0.4);
+  animation: ttt-emblem-float 4.5s ease-in-out 2.25s infinite;
+}
+
+.ttt-emblem-vs {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--ttt-muted);
+}
+
+@keyframes ttt-emblem-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
 }
 
 .ttt-lobby-header h2 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 22px;
+  letter-spacing: 0.02em;
 }
 
 .ttt-lobby-meta {
@@ -162,9 +256,12 @@ body:has(.ttt-game-root) {
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  font-size: 13px;
-  color: rgba(200, 210, 225, 0.65);
-  margin-bottom: 24px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ttt-muted);
+  margin-bottom: 26px;
 }
 
 .ttt-lobby-meta span {
@@ -177,26 +274,31 @@ body:has(.ttt-game-root) {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 20px;
-  margin-bottom: 32px;
+  gap: 16px;
+  margin-bottom: 28px;
 }
 
 .ttt-lobby-seat {
-  min-width: 100px;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.15);
+  min-width: 112px;
+  padding: 16px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.015);
+  transition: border-color 0.2s, background 0.2s;
 }
 
 .ttt-lobby-seat.occupied {
   border-style: solid;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.25);
+  border-color: var(--ttt-line);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .ttt-lobby-empty {
-  color: rgba(200, 210, 225, 0.4);
-  font-size: 13px;
+  color: rgba(190, 214, 224, 0.35);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .ttt-lobby-actions {
@@ -206,41 +308,69 @@ body:has(.ttt-game-root) {
   gap: 12px;
 }
 
+/* ---------- Spieler-Avatare ---------- */
+
 .ttt-player-avatar {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  opacity: 0.75;
-  transition: opacity 0.2s;
+  opacity: 0.65;
+  transition: opacity 0.2s, transform 0.2s;
 }
 
 .ttt-player-avatar.active {
   opacity: 1;
+  transform: translateY(-2px);
 }
 
 .ttt-player-avatar.disconnected {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 .ttt-avatar-circle {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: 800;
+  font-size: 20px;
   position: relative;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--ttt-line);
+  background: rgba(0, 0, 0, 0.45);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.ttt-mark-x { color: #60a5fa; }
-.ttt-mark-o { color: #f472b6; }
-.ttt-mark-tri { color: #4ade80; }
-.ttt-mark-sq { color: #fbbf24; }
+.ttt-player-avatar.active .ttt-avatar-circle {
+  border-color: currentColor;
+}
+
+.ttt-player-avatar.active .ttt-avatar-circle.ttt-mark-x {
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.4), inset 0 0 10px rgba(34, 211, 238, 0.12);
+}
+
+.ttt-player-avatar.active .ttt-avatar-circle.ttt-mark-o {
+  box-shadow: 0 0 14px rgba(232, 121, 249, 0.4), inset 0 0 10px rgba(232, 121, 249, 0.12);
+}
+
+.ttt-player-avatar.active .ttt-avatar-circle.ttt-mark-tri {
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.4), inset 0 0 10px rgba(74, 222, 128, 0.12);
+}
+
+.ttt-player-avatar.active .ttt-avatar-circle.ttt-mark-sq {
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.4), inset 0 0 10px rgba(251, 191, 36, 0.12);
+}
+
+.ttt-mark-x { color: var(--ttt-x); }
+.ttt-mark-o { color: var(--ttt-o); }
+.ttt-mark-tri { color: var(--ttt-tri); }
+.ttt-mark-sq { color: var(--ttt-sq); }
+
+.ttt-avatar-mark {
+  text-shadow: 0 0 8px currentColor;
+}
 
 .ttt-host-icon {
   position: absolute;
@@ -251,11 +381,19 @@ body:has(.ttt-game-root) {
 
 .ttt-avatar-name {
   font-size: 12px;
-  max-width: 100px;
+  max-width: 104px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: rgba(232, 244, 248, 0.85);
 }
+
+.ttt-player-avatar.self .ttt-avatar-name {
+  color: var(--ttt-ink);
+  font-weight: 600;
+}
+
+/* ---------- Spielfeld ---------- */
 
 .ttt-table-container {
   display: flex;
@@ -270,113 +408,258 @@ body:has(.ttt-game-root) {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 20px;
+  gap: 22px;
   min-height: 72px;
 }
 
 .ttt-board {
   display: grid;
-  gap: 4px;
-  padding: 10px;
+  gap: 3px;
+  padding: 3px;
   width: 100%;
-  max-width: min(85vw, 560px);
+  max-width: min(85vw, 540px);
   aspect-ratio: 1;
-  background: rgba(15, 23, 42, 0.85);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(232, 121, 249, 0.22));
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 0 24px rgba(34, 211, 238, 0.08),
+    0 0 48px rgba(232, 121, 249, 0.06),
+    0 18px 48px rgba(0, 0, 0, 0.5);
 }
 
 .ttt-cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  background: #070b12;
+  border: none;
+  border-radius: 10px;
   cursor: default;
   padding: 0;
   min-height: 0;
-  transition: background 0.15s, box-shadow 0.15s;
+  position: relative;
+  transition: background 0.15s;
 }
 
 .ttt-cell.playable {
   cursor: pointer;
-  background: rgba(59, 130, 246, 0.12);
 }
 
 .ttt-cell.playable:hover {
-  background: rgba(59, 130, 246, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.4);
-}
-
-.ttt-cell-win {
-  background: rgba(34, 197, 94, 0.2);
-  box-shadow: inset 0 0 0 2px rgba(74, 222, 128, 0.5);
+  background: #0b1220;
 }
 
 .ttt-cell-mark {
-  font-size: clamp(16px, 4vw, 32px);
+  font-size: clamp(18px, 5vw, 40px);
   font-weight: 800;
   line-height: 1;
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 26px currentColor;
+  animation: ttt-mark-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
+
+@keyframes ttt-mark-in {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Geister-Vorschau beim Hover (nur wenn am Zug) */
+
+.ttt-cell-ghost {
+  font-size: clamp(18px, 5vw, 40px);
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+
+.ttt-cell.playable:hover .ttt-cell-ghost,
+.ttt-cell.playable:focus-visible .ttt-cell-ghost {
+  opacity: 0.35;
+  transform: scale(1);
+}
+
+.ttt-cell.playable:focus-visible {
+  outline: 1px solid rgba(34, 211, 238, 0.5);
+  outline-offset: -1px;
+}
+
+/* Gewinnzellen: kräftiger Glow-Puls */
+
+.ttt-cell-win {
+  background: #0a1220;
+}
+
+.ttt-cell-win::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.65),
+    inset 0 0 18px rgba(255, 255, 255, 0.25),
+    0 0 18px rgba(255, 255, 255, 0.3);
+  animation: ttt-win-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.ttt-cell-win .ttt-cell-mark {
+  animation: ttt-win-mark 1.1s ease-in-out infinite;
+}
+
+@keyframes ttt-win-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes ttt-win-mark {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* ---------- Statuszeile & Banner ---------- */
 
 .ttt-game-info {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  font-size: 13px;
-  color: rgba(200, 210, 225, 0.7);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ttt-muted);
 }
 
 .ttt-phase {
-  font-weight: 600;
-  color: #93c5fd;
+  font-weight: 700;
+  color: rgba(165, 243, 252, 0.8);
 }
 
 .ttt-message {
   font-style: italic;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .ttt-turn-banner {
-  padding: 10px 20px;
-  border-radius: 8px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-radius: 12px;
+  background: var(--ttt-glass);
+  border: 1px solid var(--ttt-line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--ttt-muted);
   font-size: 14px;
   font-weight: 600;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.ttt-turn-banner.own-turn {
+  color: var(--ttt-ink);
+  border-color: rgba(34, 211, 238, 0.4);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.15);
+  animation: ttt-turn-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes ttt-turn-breathe {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(-1px); opacity: 0.92; }
+}
+
+.ttt-turn-mark {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 0 8px currentColor, 0 0 20px currentColor;
 }
 
 .ttt-finished-banner {
   text-align: center;
-  padding: 16px 24px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 18px 28px;
+  border-radius: 14px;
+  background: var(--ttt-glass);
+  border: 1px solid var(--ttt-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  animation: ttt-mark-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ttt-finished-banner.ttt-finished-ttt-mark-x {
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 28px rgba(34, 211, 238, 0.2);
+}
+
+.ttt-finished-banner.ttt-finished-ttt-mark-o {
+  border-color: rgba(232, 121, 249, 0.45);
+  box-shadow: 0 0 28px rgba(232, 121, 249, 0.2);
+}
+
+.ttt-finished-banner.ttt-finished-ttt-mark-tri {
+  border-color: rgba(74, 222, 128, 0.45);
+  box-shadow: 0 0 28px rgba(74, 222, 128, 0.2);
+}
+
+.ttt-finished-banner.ttt-finished-ttt-mark-sq {
+  border-color: rgba(251, 191, 36, 0.45);
+  box-shadow: 0 0 28px rgba(251, 191, 36, 0.2);
+}
+
+.ttt-finished-headline {
+  display: inline-flex;
+  align-items: center;
   gap: 12px;
-  font-size: 16px;
-  font-weight: 600;
+}
+
+.ttt-finished-mark {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor, 0 0 28px currentColor;
 }
 
 .ttt-rematch-btn {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .ttt-panel-note {
   font-size: 13px;
-  color: rgba(200, 210, 225, 0.55);
+  color: var(--ttt-muted);
   margin: 0;
 }
+
+/* ---------- Overlays / Panels ---------- */
 
 .ttt-panel-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(2, 4, 8, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -385,15 +668,24 @@ body:has(.ttt-game-root) {
 }
 
 .ttt-side-panel {
-  background: #0f172a;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  background: rgba(11, 17, 27, 0.92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--ttt-line);
+  border-radius: 16px;
   max-width: 420px;
   width: 100%;
   max-height: 80vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  animation: ttt-panel-in 0.22s ease-out both;
+}
+
+@keyframes ttt-panel-in {
+  from { transform: translateY(8px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
 .ttt-side-panel header {
@@ -401,12 +693,14 @@ body:has(.ttt-game-root) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--ttt-line);
 }
 
 .ttt-side-panel header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 .ttt-side-panel-content {
@@ -425,10 +719,16 @@ body:has(.ttt-game-root) {
 .ttt-settings-form input,
 .ttt-settings-form select {
   padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(0, 0, 0, 0.3);
-  color: #e8eef6;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--ttt-ink);
+}
+
+.ttt-settings-form input:focus,
+.ttt-settings-form select:focus {
+  outline: none;
+  border-color: rgba(34, 211, 238, 0.5);
 }
 
 .ttt-settings-readonly p {
@@ -437,10 +737,10 @@ body:has(.ttt-game-root) {
 }
 
 .ttt-panel-subheading {
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgba(200, 210, 225, 0.5);
+  letter-spacing: 0.12em;
+  color: var(--ttt-muted);
   margin: 0 0 8px;
 }
 
@@ -470,4 +770,33 @@ body:has(.ttt-game-root) {
 
 .ttt-guide ul {
   padding-left: 18px;
+}
+
+/* ---------- Reduzierte Bewegung ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .ttt-cell-mark,
+  .ttt-cell-win::after,
+  .ttt-cell-win .ttt-cell-mark,
+  .ttt-turn-banner.own-turn,
+  .ttt-finished-banner,
+  .ttt-side-panel,
+  .ttt-emblem-x,
+  .ttt-emblem-o,
+  .ttt-launch-mark .ttt-emblem-x,
+  .ttt-launch-mark .ttt-emblem-o {
+    animation: none;
+  }
+
+  .ttt-cell-win::after {
+    opacity: 1;
+  }
+
+  .ttt-game-btn-icon,
+  .ttt-btn-primary,
+  .ttt-btn-ghost,
+  .ttt-player-avatar,
+  .ttt-cell-ghost {
+    transition: none;
+  }
 }

@@ -6,6 +6,7 @@ const GAME_CONFIG = {
   'connect-four': { bridge: 'connectFour', channel: 'connect-four' },
   chess: { bridge: 'chess', channel: 'chess' },
   'tic-tac-toe': { bridge: 'ticTacToe', channel: 'ticTacToe' },
+  'racing-3d': { bridge: 'racing', channel: 'racing' },
 };
 
 const gameId = process.argv

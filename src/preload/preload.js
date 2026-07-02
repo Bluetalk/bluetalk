@@ -295,6 +295,35 @@ contextBridge.exposeInMainWorld('bluetalk', {
     },
   },
 
+  /** Renn-Spiel-Fenster: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  racing: {
+    openGameWindow: () => ipcRenderer.invoke('racing:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('racing:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('racing:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('racing:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('racing:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('racing:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('racing:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('racing:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('racing:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('racing:state', listener);
+      return () => ipcRenderer.removeListener('racing:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('racing:fromChild', listener);
+      return () => ipcRenderer.removeListener('racing:fromChild', listener);
+    },
+  },
+
   app: {
     clearCache: () => ipcRenderer.invoke('app:clearCache'),
     clearMessages: () => ipcRenderer.invoke('app:clearMessages'),

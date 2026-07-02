@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Crown,
   HelpCircle,
@@ -99,41 +99,62 @@ function PlayerAvatar({ player, isActive, isHost, self = false, disc = 1 }) {
   );
 }
 
+const DISC_NAMES = {
+  1: 'Rot',
+  2: 'Gelb',
+};
+
 function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
   const pub = snapshot?.public;
   const players = pub?.players || [];
   const maxPlayers = pub?.settings?.maxPlayers || 2;
+  const seats = Array.from({ length: maxPlayers }, (_, seat) => players.find((item) => item.seat === seat) || null);
   return (
     <div className="cf-lobby">
+      <div className="cf-lobby-emblem" aria-hidden>
+        <span className="cf-emblem-disc red" />
+        <span className="cf-emblem-disc yellow" />
+        <span className="cf-emblem-disc yellow" />
+        <span className="cf-emblem-disc red" />
+      </div>
       <div className="cf-lobby-header">
         <h2>{pub?.settings?.tableName || 'Vier-gewinnt-Tisch'}</h2>
         <div className="cf-lobby-meta">
-          <span><Users size={14} /> {players.length}/{maxPlayers}</span>
+          <span><Users size={14} /> <b className="cf-num">{players.length}/{maxPlayers}</b></span>
           <span>2 Spieler · 4 in einer Reihe</span>
         </div>
       </div>
       <div className="cf-lobby-seats">
-        {Array.from({ length: maxPlayers }, (_, seat) => {
-          const player = players.find((item) => item.seat === seat);
-          return (
-            <div key={seat} className={`cf-lobby-seat ${player ? 'occupied' : 'empty'}`}>
+        {seats.map((player, seat) => (
+          <React.Fragment key={seat}>
+            {seat > 0 ? <div className="cf-lobby-vs" aria-hidden>VS</div> : null}
+            <div className={`cf-lobby-seat ${player ? 'occupied' : 'empty'}`}>
               {player ? (
-                <PlayerAvatar
-                  player={player}
-                  isHost={player.peerId === pub.hostPeerId}
-                  self={player.peerId === selfId}
-                  disc={player.disc}
-                />
+                <>
+                  <PlayerAvatar
+                    player={player}
+                    isHost={player.peerId === pub.hostPeerId}
+                    self={player.peerId === selfId}
+                    disc={player.disc}
+                  />
+                  <span className={`cf-color-chip cf-chip-${DISC_COLORS[player.disc] || 'red'}`}>
+                    <span className="cf-chip-dot" aria-hidden />
+                    {DISC_NAMES[player.disc] || 'Farbe'}
+                  </span>
+                </>
               ) : (
-                <span className="cf-lobby-empty">Platz {seat + 1}</span>
+                <>
+                  <span className="cf-lobby-empty-circle" aria-hidden />
+                  <span className="cf-lobby-empty">Platz {seat + 1} frei</span>
+                </>
               )}
             </div>
-          );
-        })}
+          </React.Fragment>
+        ))}
       </div>
       <div className="cf-lobby-actions">
         {isHost ? (
-          <button type="button" className="cf-btn-primary" onClick={onStart} disabled={players.length < 2}>
+          <button type="button" className="cf-btn-primary cf-btn-start" onClick={onStart} disabled={players.length < 2}>
             <Play size={16} /> Spiel starten
           </button>
         ) : (
@@ -145,17 +166,41 @@ function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
   );
 }
 
-function BoardView({ snapshot, selfId, onDrop, onRematch, isHost }) {
+function BoardView({ snapshot, selfId, onDrop, onRematch, onLeave, isHost }) {
   const pub = snapshot?.public;
   const board = pub?.board || [];
   const players = pub?.players || [];
   const selfPlayer = players.find((p) => p.peerId === selfId);
   const opponent = players.find((p) => p.peerId !== selfId);
-  const canAct = pub?.toAct === selfId && pub?.phase === 'playing';
+  const activePlayer = players.find((p) => p.peerId === pub?.toAct);
+  const playing = pub?.phase === 'playing';
+  const canAct = pub?.toAct === selfId && playing;
+  const selfColor = DISC_COLORS[selfPlayer?.disc] || 'red';
+  const [hoverCol, setHoverCol] = useState(-1);
   const winSet = useMemo(() => {
     const cells = pub?.winCells || [];
     return new Set(cells.map((c) => `${c.row}:${c.col}`));
   }, [pub?.winCells]);
+
+  // Letzten neu gesetzten Stein erkennen, um die Fall-Animation auszulösen.
+  const prevBoardRef = useRef(null);
+  const [dropCell, setDropCell] = useState(null);
+  useEffect(() => {
+    const prev = prevBoardRef.current;
+    prevBoardRef.current = board;
+    if (!prev || !board.length || prev.length !== board.length) return;
+    const added = [];
+    for (let r = 0; r < board.length; r += 1) {
+      for (let c = 0; c < (board[r]?.length || 0); c += 1) {
+        if ((prev[r]?.[c] ?? 0) === 0 && board[r][c] !== 0) added.push({ row: r, col: c });
+      }
+    }
+    if (added.length === 1) {
+      setDropCell({ ...added[0], key: `${added[0].row}:${added[0].col}:${Date.now()}` });
+    } else if (added.length > 1) {
+      setDropCell(null);
+    }
+  }, [board]);
 
   const isColumnPlayable = (col) => {
     if (!canAct) return false;
@@ -165,15 +210,17 @@ function BoardView({ snapshot, selfId, onDrop, onRematch, isHost }) {
 
   const handleColumnClick = (col) => {
     if (!isColumnPlayable(col)) return;
+    setHoverCol(-1);
     onDrop(col);
   };
 
   const finished = pub?.phase === 'finished';
   const winner = players.find((p) => p.peerId === pub?.winnerPeerId);
+  const winnerColor = winner ? (DISC_COLORS[winner.disc] || 'red') : '';
 
   return (
     <div className="cf-table-container">
-      <div className="cf-opponent-row">
+      <div className={`cf-opponent-row${playing && !canAct ? '' : ' dimmed'}`}>
         {opponent ? (
           <PlayerAvatar
             player={opponent}
@@ -184,40 +231,99 @@ function BoardView({ snapshot, selfId, onDrop, onRematch, isHost }) {
         ) : null}
       </div>
 
+      {playing ? (
+        <div className={`cf-turn-banner${canAct ? ' own' : ' wait'}`} role="status">
+          <span className={`cf-turn-dot cf-dot-${DISC_COLORS[activePlayer?.disc] || 'empty'}`} aria-hidden />
+          {canAct
+            ? 'Du bist am Zug — wähle eine Spalte'
+            : `${activePlayer?.name || 'Gegner'} ist am Zug…`}
+        </div>
+      ) : null}
+
       <div className="cf-board-wrap">
+        <div className={`cf-drop-row${canAct ? ' active' : ''}`} aria-label="Spalten wählen">
+          {Array.from({ length: 7 }, (_, col) => {
+            const playable = isColumnPlayable(col);
+            return (
+              <button
+                key={col}
+                type="button"
+                className={`cf-col-btn${playable ? ' playable' : ''}${playable && hoverCol === col ? ' hovered' : ''}`}
+                disabled={!playable}
+                onMouseEnter={() => setHoverCol(col)}
+                onMouseLeave={() => setHoverCol((cur) => (cur === col ? -1 : cur))}
+                onFocus={() => setHoverCol(col)}
+                onBlur={() => setHoverCol((cur) => (cur === col ? -1 : cur))}
+                onClick={() => handleColumnClick(col)}
+                aria-label={`Spalte ${col + 1}${playable ? ' — Stein setzen' : ''}`}
+              >
+                <span className={`cf-ghost-disc cf-disc-${selfColor}`} aria-hidden />
+              </button>
+            );
+          })}
+        </div>
         <div className="cf-board" role="grid" aria-label="Vier gewinnt Brett">
           {board.map((row, rowIdx) => (
             row.map((cell, colIdx) => {
               const key = `${rowIdx}:${colIdx}`;
               const isWin = winSet.has(key);
+              const isDrop = dropCell && dropCell.row === rowIdx && dropCell.col === colIdx;
+              const isHot = canAct && hoverCol === colIdx && isColumnPlayable(colIdx);
               return (
                 <div
                   key={key}
-                  className={`cf-cell${isWin ? ' cf-cell-win' : ''}`}
+                  className={`cf-cell${isWin ? ' cf-cell-win' : ''}${isHot ? ' cf-cell-hot' : ''}`}
                   role="gridcell"
                   aria-label={cell === 0 ? 'Leer' : `Spieler ${cell}`}
+                  onMouseEnter={() => setHoverCol(colIdx)}
+                  onMouseLeave={() => setHoverCol((cur) => (cur === colIdx ? -1 : cur))}
+                  onClick={() => handleColumnClick(colIdx)}
                 >
-                  <div className={`cf-disc cf-disc-${DISC_COLORS[cell] || 'empty'}${isWin ? ' cf-disc-win' : ''}`} />
+                  <div
+                    key={isDrop ? dropCell.key : 'disc'}
+                    className={`cf-disc cf-disc-${DISC_COLORS[cell] || 'empty'}${isWin ? ' cf-disc-win' : ''}${isDrop && cell !== 0 ? ' cf-disc-drop' : ''}`}
+                    style={isDrop && cell !== 0 ? { '--cf-fall-row': rowIdx } : undefined}
+                  />
                 </div>
               );
             })
           ))}
         </div>
-        <div className="cf-column-buttons" aria-label="Spalten wählen">
-          {Array.from({ length: 7 }, (_, col) => (
-            <button
-              key={col}
-              type="button"
-              className={`cf-col-btn${isColumnPlayable(col) ? ' playable' : ''}`}
-              disabled={!isColumnPlayable(col)}
-              onClick={() => handleColumnClick(col)}
-              aria-label={`Spalte ${col + 1}${isColumnPlayable(col) ? ' — Stein setzen' : ''}`}
-            />
-          ))}
-        </div>
+
+        {finished ? (
+          <div className="cf-result-overlay" role="alertdialog" aria-label="Ergebnis">
+            <div className={`cf-result-card${winner ? ` cf-result-${winnerColor}` : ' cf-result-draw'}`}>
+              {winner ? (
+                <div className={`cf-result-disc cf-disc-${winnerColor}`} aria-hidden />
+              ) : (
+                <div className="cf-result-disc cf-result-disc-split" aria-hidden />
+              )}
+              <h2 className="cf-result-title">
+                {winner
+                  ? (winner.peerId === selfId ? 'Du hast gewonnen!' : `${winner.name} gewinnt`)
+                  : 'Unentschieden'}
+              </h2>
+              <p className="cf-result-sub">
+                {winner ? 'Vier in einer Reihe!' : 'Das Brett ist voll.'}
+              </p>
+              <div className="cf-result-actions">
+                {isHost ? (
+                  <button type="button" className="cf-btn-primary cf-rematch-btn" onClick={onRematch}>
+                    <Play size={16} /> Revanche
+                  </button>
+                ) : (
+                  <p className="cf-panel-note">Warte auf Revanche vom Host.</p>
+                )}
+                <button type="button" className="cf-btn-ghost" onClick={onLeave}>
+                  <LogOut size={16} /> Verlassen
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className="cf-self-row">
+      <div className={`cf-self-row${playing && canAct ? '' : ' dimmed'}`}>
         {selfPlayer ? (
           <PlayerAvatar
             player={selfPlayer}
@@ -233,29 +339,6 @@ function BoardView({ snapshot, selfId, onDrop, onRematch, isHost }) {
         <span className="cf-phase">{PHASE_LABELS[pub?.phase] || pub?.phase}</span>
         {pub?.message ? <span className="cf-message">{pub.message}</span> : null}
       </div>
-
-      {finished ? (
-        <div className="cf-finished-banner">
-          {winner ? (
-            winner.peerId === selfId
-              ? 'Du hast gewonnen!'
-              : `${winner.name} hat gewonnen.`
-          ) : (
-            'Unentschieden — das Brett ist voll.'
-          )}
-          {isHost ? (
-            <button type="button" className="cf-btn-primary cf-rematch-btn" onClick={onRematch}>
-              <Play size={16} /> Revanche
-            </button>
-          ) : (
-            <p className="cf-panel-note">Warte auf Revanche vom Host.</p>
-          )}
-        </div>
-      ) : null}
-
-      {canAct ? (
-        <div className="cf-turn-banner">Du bist am Zug — wähle eine Spalte.</div>
-      ) : null}
     </div>
   );
 }
@@ -378,8 +461,14 @@ export default function ConnectFourGamePage() {
   if (!snapshot?.public) {
     return (
       <div className="cf-game-root">
+        <div className="cf-game-grain" aria-hidden />
         <main className="cf-empty-state">
-          <div className="cf-launch-mark">🔴</div>
+          <div className="cf-lobby-emblem" aria-hidden>
+            <span className="cf-emblem-disc red" />
+            <span className="cf-emblem-disc yellow" />
+            <span className="cf-emblem-disc yellow" />
+            <span className="cf-emblem-disc red" />
+          </div>
           <h1>Vier gewinnt wird vorbereitet…</h1>
           <p>Starte oder öffne ein Spiel über den Spiele-Bereich im Hauptfenster.</p>
           <button type="button" className="cf-btn-ghost" onClick={() => send({ type: 'request_state' })}>Erneut laden</button>
@@ -421,6 +510,7 @@ export default function ConnectFourGamePage() {
             isHost={isHost}
             onDrop={drop}
             onRematch={rematch}
+            onLeave={leave}
           />
         )}
       </main>

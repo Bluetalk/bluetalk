@@ -1,4 +1,5 @@
-/* BlueTalk Vier gewinnt */
+/* BlueTalk Vier gewinnt — Arcade-Look
+   Signaturfarbe: Arcade-Blau (#3b82f6) · Steine: Rot (#ef4444) und Gelb (#facc15) */
 
 html:has(.cf-game-root),
 body:has(.cf-game-root) {
@@ -13,22 +14,36 @@ body:has(.cf-game-root) {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 100%, rgba(220, 38, 38, 0.12), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 80% 20%, rgba(234, 179, 8, 0.08), transparent 50%),
-    linear-gradient(165deg, #050810 0%, #0c1428 45%, #080f1a 100%);
+    radial-gradient(ellipse 90% 65% at 50% 108%, rgba(59, 130, 246, 0.16), transparent 60%),
+    radial-gradient(ellipse 55% 40% at 15% -5%, rgba(37, 99, 235, 0.1), transparent 55%),
+    radial-gradient(ellipse 45% 35% at 88% 12%, rgba(250, 204, 21, 0.05), transparent 55%),
+    linear-gradient(168deg, #04070f 0%, #0a1226 48%, #060b16 100%);
   color: #e8eef6;
   font-family: 'Segoe UI', system-ui, sans-serif;
   overflow: hidden;
   position: relative;
 }
 
+/* Vignette */
+.cf-game-root::after {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse 120% 90% at 50% 45%, transparent 62%, rgba(0, 0, 0, 0.42) 100%);
+  z-index: 1;
+}
+
 .cf-game-grain {
   pointer-events: none;
   position: fixed;
   inset: 0;
-  opacity: 0.03;
+  opacity: 0.035;
+  z-index: 2;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
+
+/* ---------- Titelleiste ---------- */
 
 .cf-game-titlebar {
   flex-shrink: 0;
@@ -37,8 +52,10 @@ body:has(.cf-game-root) {
   justify-content: space-between;
   padding: 8px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(12, 20, 40, 0.95), rgba(6, 10, 20, 0.88));
+  background: linear-gradient(180deg, rgba(13, 22, 45, 0.9), rgba(6, 10, 22, 0.82));
+  backdrop-filter: blur(14px);
   -webkit-app-region: drag;
+  position: relative;
   z-index: 100;
 }
 
@@ -50,7 +67,7 @@ body:has(.cf-game-root) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: linear-gradient(90deg, #ef4444, #eab308);
+  background: linear-gradient(90deg, #93c5fd, #3b82f6 55%, #60a5fa);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -58,6 +75,8 @@ body:has(.cf-game-root) {
 
 .cf-game-titlebar-sub {
   font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   color: rgba(200, 210, 225, 0.45);
 }
 
@@ -70,21 +89,24 @@ body:has(.cf-game-root) {
 .cf-game-btn-icon {
   width: 32px;
   height: 28px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 14, 30, 0.5);
   color: #e8eef6;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 }
 
 .cf-game-btn-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(59, 130, 246, 0.35);
   transform: translateY(-1px);
 }
+
+/* ---------- Hauptbereich ---------- */
 
 .cf-game-main {
   flex: 1;
@@ -94,17 +116,28 @@ body:has(.cf-game-root) {
   justify-content: center;
   padding: 16px;
   overflow: auto;
+  position: relative;
+  z-index: 5;
 }
 
 .cf-empty-state {
   text-align: center;
   padding: 48px 24px;
+  position: relative;
+  z-index: 5;
 }
 
-.cf-launch-mark {
-  font-size: 48px;
-  margin-bottom: 16px;
+.cf-empty-state h1 {
+  font-size: 20px;
+  margin: 18px 0 8px;
 }
+
+.cf-empty-state p {
+  color: rgba(200, 210, 225, 0.6);
+  margin: 0 0 20px;
+}
+
+/* ---------- Buttons ---------- */
 
 .cf-btn-primary,
 .cf-btn-ghost {
@@ -112,22 +145,31 @@ body:has(.cf-game-root) {
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.15s;
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
 }
 
 .cf-btn-primary {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  background: linear-gradient(160deg, #60a5fa 0%, #3b82f6 40%, #2563eb 100%);
   color: #fff;
+  box-shadow:
+    0 4px 16px rgba(37, 99, 235, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .cf-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
   transform: translateY(-1px);
+  box-shadow:
+    0 6px 22px rgba(37, 99, 235, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.cf-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .cf-btn-primary:disabled {
@@ -136,33 +178,80 @@ body:has(.cf-game-root) {
 }
 
 .cf-btn-ghost {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: #e8eef6;
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .cf-btn-ghost:hover {
   background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
 }
 
+.cf-btn-start {
+  padding: 12px 28px;
+  font-size: 15px;
+}
+
+/* ---------- Lobby ---------- */
+
 .cf-lobby {
-  max-width: 480px;
+  max-width: 520px;
   width: 100%;
   text-align: center;
+  padding: 28px 28px 24px;
+  border-radius: 16px;
+  background: rgba(13, 22, 45, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.cf-lobby-emblem {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 30px);
+  grid-auto-rows: 30px;
+  gap: 7px;
+  padding: 13px;
+  margin-bottom: 18px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, #2f6de0 0%, #1e4fb8 55%, #173e94 100%);
+  box-shadow:
+    0 10px 30px rgba(23, 62, 148, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.cf-emblem-disc {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: inset 0 -3px 5px rgba(0, 0, 0, 0.35), inset 0 2px 3px rgba(255, 255, 255, 0.35);
+}
+
+.cf-emblem-disc.red {
+  background: radial-gradient(circle at 32% 28%, #fda4a4, #ef4444 48%, #b91c1c 100%);
+}
+
+.cf-emblem-disc.yellow {
+  background: radial-gradient(circle at 32% 28%, #fef3a0, #facc15 48%, #ca8a04 100%);
 }
 
 .cf-lobby-header h2 {
   margin: 0 0 8px;
   font-size: 22px;
+  letter-spacing: 0.01em;
 }
 
 .cf-lobby-meta {
   display: flex;
   justify-content: center;
   gap: 16px;
-  font-size: 13px;
-  color: rgba(200, 210, 225, 0.65);
-  margin-bottom: 24px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: rgba(200, 210, 225, 0.55);
+  margin-bottom: 26px;
 }
 
 .cf-lobby-meta span {
@@ -171,29 +260,93 @@ body:has(.cf-game-root) {
   gap: 6px;
 }
 
+.cf-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: rgba(230, 238, 250, 0.9);
+}
+
 .cf-lobby-seats {
   display: flex;
+  align-items: stretch;
   justify-content: center;
-  gap: 32px;
-  margin-bottom: 32px;
+  gap: 14px;
+  margin-bottom: 30px;
+}
+
+.cf-lobby-vs {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: rgba(147, 197, 253, 0.55);
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .cf-lobby-seat {
-  min-width: 120px;
-  padding: 16px;
-  border-radius: 12px;
+  min-width: 136px;
+  padding: 18px 14px 14px;
+  border-radius: 14px;
   border: 1px dashed rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
 }
 
 .cf-lobby-seat.occupied {
   border-style: solid;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(6, 12, 26, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.cf-lobby-empty-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.15);
 }
 
 .cf-lobby-empty {
   color: rgba(200, 210, 225, 0.4);
-  font-size: 13px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.cf-color-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.cf-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.cf-chip-red { color: #fca5a5; }
+.cf-chip-red .cf-chip-dot {
+  background: radial-gradient(circle at 32% 28%, #fda4a4, #ef4444 55%, #b91c1c);
+}
+
+.cf-chip-yellow { color: #fde68a; }
+.cf-chip-yellow .cf-chip-dot {
+  background: radial-gradient(circle at 32% 28%, #fef3a0, #facc15 55%, #ca8a04);
 }
 
 .cf-lobby-actions {
@@ -203,21 +356,24 @@ body:has(.cf-game-root) {
   gap: 12px;
 }
 
+/* ---------- Spieler-Avatare ---------- */
+
 .cf-player-avatar {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  opacity: 0.75;
-  transition: opacity 0.2s;
+  opacity: 0.8;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .cf-player-avatar.active {
   opacity: 1;
+  transform: translateY(-1px);
 }
 
 .cf-player-avatar.disconnected {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 .cf-avatar-circle {
@@ -230,15 +386,26 @@ body:has(.cf-game-root) {
   font-weight: 700;
   font-size: 14px;
   position: relative;
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 -4px 7px rgba(0, 0, 0, 0.3), inset 0 3px 4px rgba(255, 255, 255, 0.25);
+}
+
+.cf-player-avatar.active .cf-avatar-circle {
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.28),
+    0 0 18px rgba(59, 130, 246, 0.35),
+    inset 0 -4px 7px rgba(0, 0, 0, 0.3),
+    inset 0 3px 4px rgba(255, 255, 255, 0.25);
 }
 
 .cf-avatar-circle.cf-disc-red {
-  background: radial-gradient(circle at 30% 30%, #f87171, #dc2626 60%, #991b1b);
+  background: radial-gradient(circle at 32% 28%, #fca5a5, #ef4444 55%, #991b1b);
 }
 
 .cf-avatar-circle.cf-disc-yellow {
-  background: radial-gradient(circle at 30% 30%, #fde047, #eab308 60%, #a16207);
+  background: radial-gradient(circle at 32% 28%, #fef3a0, #facc15 55%, #a16207);
+  color: #422006;
 }
 
 .cf-avatar-circle.cf-disc-empty {
@@ -250,21 +417,24 @@ body:has(.cf-game-root) {
   bottom: -4px;
   right: -4px;
   color: #fbbf24;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
 }
 
 .cf-avatar-name {
   font-size: 12px;
-  max-width: 100px;
+  max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ---------- Spieltisch ---------- */
+
 .cf-table-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
   max-width: 560px;
 }
@@ -274,109 +444,292 @@ body:has(.cf-game-root) {
   min-height: 72px;
   display: flex;
   justify-content: center;
+  transition: opacity 0.25s ease;
 }
+
+.cf-opponent-row.dimmed,
+.cf-self-row.dimmed {
+  opacity: 0.45;
+}
+
+/* Zug-Banner */
+
+.cf-turn-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(13, 22, 45, 0.55);
+  backdrop-filter: blur(12px);
+  transition: opacity 0.2s ease;
+}
+
+.cf-turn-banner.own {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+  box-shadow: 0 0 22px rgba(59, 130, 246, 0.25);
+}
+
+.cf-turn-banner.wait {
+  color: rgba(200, 210, 225, 0.6);
+}
+
+.cf-turn-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.35);
+}
+
+.cf-dot-red {
+  background: radial-gradient(circle at 32% 28%, #fda4a4, #ef4444 55%, #b91c1c);
+}
+
+.cf-dot-yellow {
+  background: radial-gradient(circle at 32% 28%, #fef3a0, #facc15 55%, #ca8a04);
+}
+
+.cf-dot-empty {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cf-turn-banner.own .cf-turn-dot {
+  animation: cf-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cf-dot-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+
+/* ---------- Brett ---------- */
 
 .cf-board-wrap {
   position: relative;
   width: 100%;
 }
 
+/* Abwurf-Leiste über dem Brett (Geister-Steine) */
+
+.cf-drop-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  min-height: 42px;
+}
+
+.cf-col-btn {
+  height: 42px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: default;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 2px;
+  transition: background 0.15s ease;
+}
+
+.cf-drop-row.active .cf-col-btn.playable {
+  background: rgba(59, 130, 246, 0.08);
+  cursor: pointer;
+}
+
+.cf-drop-row.active .cf-col-btn.playable.hovered {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.cf-ghost-disc {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.cf-col-btn.playable.hovered .cf-ghost-disc {
+  opacity: 0.85;
+  transform: translateY(0);
+  animation: cf-ghost-bob 1.1s ease-in-out infinite;
+}
+
+@keyframes cf-ghost-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+/* Kunststoffrahmen */
+
 .cf-board {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   grid-template-rows: repeat(6, 1fr);
-  gap: 6px;
-  padding: 12px;
-  background: linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%);
-  border-radius: 12px;
+  gap: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 22%),
+    linear-gradient(165deg, #3574e8 0%, #2456c4 45%, #1a419c 100%);
+  border-radius: 18px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    inset 0 2px 0 rgba(255, 255, 255, 0.1);
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(147, 197, 253, 0.18),
+    0 0 40px rgba(37, 99, 235, 0.22),
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.35);
   aspect-ratio: 7 / 6;
   max-width: 100%;
+  position: relative;
 }
+
+/* Loch-Optik */
 
 .cf-cell {
   aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(2, 6, 16, 0.92) 0%, rgba(4, 9, 22, 0.85) 62%, rgba(10, 20, 45, 0.6) 100%);
   border-radius: 50%;
   padding: 4px;
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.65),
+    inset 0 -1px 1px rgba(147, 197, 253, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: box-shadow 0.15s ease;
+}
+
+.cf-cell-hot {
+  cursor: pointer;
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.65),
+    inset 0 0 0 2px rgba(147, 197, 253, 0.4),
+    0 0 12px rgba(59, 130, 246, 0.45);
 }
 
 .cf-cell-win {
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(255, 255, 255, 0.5);
 }
+
+/* Glossy Steine */
 
 .cf-disc {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  transition: transform 0.2s ease;
+  position: relative;
+}
+
+.cf-disc-red,
+.cf-disc-yellow {
+  box-shadow:
+    inset 0 -5px 9px rgba(0, 0, 0, 0.4),
+    inset 0 3px 5px rgba(255, 255, 255, 0.25),
+    0 2px 5px rgba(0, 0, 0, 0.45);
+}
+
+/* Glanzpunkt */
+.cf-disc-red::before,
+.cf-disc-yellow::before {
+  content: '';
+  position: absolute;
+  top: 12%;
+  left: 18%;
+  width: 34%;
+  height: 24%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.75), transparent 70%);
+  transform: rotate(-18deg);
+  pointer-events: none;
+}
+
+/* Innenring wie bei echten Spielsteinen */
+.cf-disc-red::after,
+.cf-disc-yellow::after {
+  content: '';
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.14), inset 0 2px 4px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
 }
 
 .cf-disc-empty {
-  background: rgba(0, 0, 0, 0.2);
+  background: transparent;
 }
 
 .cf-disc-red {
-  background: radial-gradient(circle at 35% 30%, #fca5a5, #ef4444 45%, #b91c1c 100%);
-  box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.3);
+  background: radial-gradient(circle at 34% 28%, #fecaca 0%, #f87171 22%, #ef4444 48%, #b91c1c 82%, #7f1d1d 100%);
 }
 
 .cf-disc-yellow {
-  background: radial-gradient(circle at 35% 30%, #fef08a, #eab308 45%, #ca8a04 100%);
-  box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.3);
+  background: radial-gradient(circle at 34% 28%, #fef9c3 0%, #fde047 22%, #facc15 48%, #ca8a04 82%, #854d0e 100%);
 }
+
+/* Fall-Animation: Stein fällt von oben in die Zielzelle und federt kurz nach */
+
+.cf-disc-drop {
+  animation: cf-fall 0.5s cubic-bezier(0.33, 0, 0.66, 0.33) both;
+  will-change: transform;
+}
+
+@keyframes cf-fall {
+  0% { transform: translateY(calc((var(--cf-fall-row, 0) + 1.4) * -106%)); }
+  62% { transform: translateY(0); }
+  76% { transform: translateY(-9%); }
+  88% { transform: translateY(0); }
+  94% { transform: translateY(-3%); }
+  100% { transform: translateY(0); }
+}
+
+/* Gewinnlinie: Pulsieren + Glühen */
 
 .cf-disc-win {
-  animation: cf-pulse 1s ease-in-out infinite;
+  animation: cf-win-pulse 1.1s ease-in-out infinite;
+  z-index: 3;
 }
 
-@keyframes cf-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
+@keyframes cf-win-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: brightness(1) drop-shadow(0 0 4px rgba(255, 255, 255, 0.45));
+  }
+  50% {
+    transform: scale(1.1);
+    filter: brightness(1.25) drop-shadow(0 0 12px rgba(255, 255, 255, 0.85));
+  }
 }
 
-.cf-column-buttons {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  padding: 0 12px;
-  margin-top: 8px;
-}
-
-.cf-col-btn {
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  cursor: default;
-  transition: background 0.15s;
-}
-
-.cf-col-btn.playable {
-  background: rgba(255, 255, 255, 0.15);
-  cursor: pointer;
-}
-
-.cf-col-btn.playable:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
+/* ---------- Statuszeile ---------- */
 
 .cf-game-info {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  font-size: 13px;
-  color: rgba(200, 210, 225, 0.7);
+  font-size: 12px;
+  color: rgba(200, 210, 225, 0.65);
+  font-variant-numeric: tabular-nums;
 }
 
 .cf-phase {
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
   color: #93c5fd;
 }
 
@@ -384,33 +737,100 @@ body:has(.cf-game-root) {
   font-style: italic;
 }
 
-.cf-turn-banner {
-  padding: 10px 20px;
-  border-radius: 8px;
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.35);
-  color: #86efac;
-  font-size: 14px;
-  font-weight: 600;
+/* ---------- Ergebnis-Overlay ---------- */
+
+.cf-result-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 20;
+  background: rgba(3, 6, 14, 0.55);
+  backdrop-filter: blur(5px);
+  border-radius: 18px;
+  animation: cf-overlay-in 0.25s ease both;
 }
 
-.cf-finished-banner {
+@keyframes cf-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.cf-result-card {
   text-align: center;
-  padding: 16px 24px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 26px 34px 24px;
+  border-radius: 16px;
+  background: rgba(13, 22, 45, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  font-size: 16px;
-  font-weight: 600;
+  gap: 6px;
+  max-width: 340px;
+  animation: cf-card-in 0.3s cubic-bezier(0.18, 0.9, 0.32, 1.2) both;
+}
+
+@keyframes cf-card-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.cf-result-card.cf-result-red {
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 34px rgba(239, 68, 68, 0.3);
+}
+
+.cf-result-card.cf-result-yellow {
+  border-color: rgba(250, 204, 21, 0.45);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 34px rgba(250, 204, 21, 0.28);
+}
+
+.cf-result-disc {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  margin-bottom: 8px;
+  animation: cf-win-pulse 1.4s ease-in-out infinite;
+}
+
+.cf-result-disc-split {
+  background: linear-gradient(115deg, #ef4444 0%, #b91c1c 49%, #ca8a04 51%, #facc15 100%);
+  box-shadow: inset 0 -5px 9px rgba(0, 0, 0, 0.4), inset 0 3px 5px rgba(255, 255, 255, 0.25);
+  animation: none;
+}
+
+.cf-result-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.cf-result-red .cf-result-title { color: #fca5a5; }
+.cf-result-yellow .cf-result-title { color: #fde68a; }
+
+.cf-result-sub {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: rgba(200, 210, 225, 0.6);
+}
+
+.cf-result-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
 
 .cf-rematch-btn {
-  margin-top: 4px;
+  padding: 11px 26px;
 }
+
+/* ---------- Panels / Overlays ---------- */
 
 .cf-panel-note {
   font-size: 13px;
@@ -421,7 +841,8 @@ body:has(.cf-game-root) {
 .cf-panel-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(2, 5, 12, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -430,15 +851,17 @@ body:has(.cf-game-root) {
 }
 
 .cf-side-panel {
-  background: #0f172a;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  background: rgba(13, 22, 45, 0.92);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
   max-width: 420px;
   width: 100%;
   max-height: 80vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
 }
 
 .cf-side-panel header {
@@ -451,7 +874,11 @@ body:has(.cf-game-root) {
 
 .cf-side-panel header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #93c5fd;
 }
 
 .cf-side-panel-content {
@@ -470,10 +897,17 @@ body:has(.cf-game-root) {
 .cf-settings-form input,
 .cf-settings-form select {
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(0, 0, 0, 0.3);
   color: #e8eef6;
+}
+
+.cf-settings-form input:focus,
+.cf-settings-form select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 }
 
 .cf-settings-readonly p {
@@ -482,9 +916,9 @@ body:has(.cf-game-root) {
 }
 
 .cf-panel-subheading {
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: rgba(200, 210, 225, 0.5);
   margin: 0 0 8px;
 }
@@ -515,4 +949,30 @@ body:has(.cf-game-root) {
 
 .cf-guide ul {
   padding-left: 18px;
+}
+
+/* ---------- Reduzierte Bewegung ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-disc-drop,
+  .cf-disc-win,
+  .cf-result-disc,
+  .cf-turn-banner.own .cf-turn-dot,
+  .cf-col-btn.playable.hovered .cf-ghost-disc,
+  .cf-result-overlay,
+  .cf-result-card {
+    animation: none;
+  }
+
+  .cf-game-btn-icon,
+  .cf-btn-primary,
+  .cf-btn-ghost,
+  .cf-player-avatar,
+  .cf-ghost-disc {
+    transition: none;
+  }
+
+  .cf-disc-win {
+    filter: brightness(1.2) drop-shadow(0 0 8px rgba(255, 255, 255, 0.7));
+  }
 }

@@ -1,6 +1,6 @@
 {
   "name": "bluetalk",
-  "version": "1.1.21",
+  "version": "1.1.22",
   "description": "Peer-to-peer chat app designed for stealth, performance, and restricted networks",
   "author": {
     "name": "Henny263462",
@@ -37,6 +37,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "three": "^0.185.1",
     "ws": "^8.21.0"
   },
   "overrides": {

@@ -1,8 +1,8 @@
 {
   "id": "racing-3d",
   "name": "3D Live Autorennen",
-  "version": "1.0.1",
-  "description": "Mehrspieler-3D-Rennen mit 5 Strecken, Host-Lobby und Realtime-API-Synchronisierung.",
+  "version": "3.0.1",
+  "description": "Echtes 3D-Rennen (Three.js) im Trackmania-Stil — 5 Strecken mit Höhen, Steilkurven & Sprüngen, Direkteinstieg ins freie Fahren, Multiplayer, Minimap, Rundenzeiten, Gamepad und Sound.",
   "author": "BlueTalk",
   "main": "main.js",
   "ui": "ui.js",
@@ -11,11 +11,11 @@
   "game": {
     "mark": "🏎️",
     "title": "3D Live Autorennen",
-    "description": "Bis zu 8 Spieler rasen in Echtzeit über 5 3D-Strecken — synchronisiert über die BlueTalk Realtime API.",
+    "description": "Echtes 3D im Trackmania-Stil: sofort losfahren über 5 Strecken mit Höhen, Steilkurven und Sprüngen — bis zu 8 Fahrer in Echtzeit, mit Gamepad und Sound.",
     "tag": "3D",
     "labels": {
-      "launchNew": "Rennen hosten",
-      "openWindow": "Renn-Lobby öffnen"
+      "launchNew": "Losfahren",
+      "openWindow": "Rennfenster öffnen"
     }
   }
 }

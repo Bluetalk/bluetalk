@@ -480,6 +480,36 @@
     return state.halfMoveClock >= 100;
   }
 
+  function moveToSan(state, move) {
+    const piece = state.board[move.from.r][move.from.c];
+    if (!piece) return '';
+    if (move.castle === 'K') return 'O-O';
+    if (move.castle === 'Q') return 'O-O-O';
+    const target = state.board[move.to.r][move.to.c];
+    const isCapture = Boolean(target) || move.enPassant === true;
+    let san = '';
+    if (piece.type === 'P') {
+      if (isCapture) san += `${String.fromCharCode(97 + move.from.c)}x`;
+      san += sqToAlg(move.to);
+      if (move.promotion) san += `=${move.promotion.toUpperCase()}`;
+      return san;
+    }
+    san += piece.type;
+    const rivals = getLegalMoves(state, piece.color).filter((m) => !sqEqual(m.from, move.from)
+      && sqEqual(m.to, move.to)
+      && state.board[m.from.r][m.from.c]?.type === piece.type);
+    if (rivals.length) {
+      const sameFile = rivals.some((m) => m.from.c === move.from.c);
+      const sameRank = rivals.some((m) => m.from.r === move.from.r);
+      if (!sameFile) san += String.fromCharCode(97 + move.from.c);
+      else if (!sameRank) san += String(8 - move.from.r);
+      else san += sqToAlg(move.from);
+    }
+    if (isCapture) san += 'x';
+    san += sqToAlg(move.to);
+    return san;
+  }
+
   function moveToWire(move) {
     return {
       from: sqToAlg(move.from),
@@ -536,6 +566,7 @@
       chessState = parseFen(restoredGame.chessState.fen);
     }
     let lastMove = restoredGame?.lastMove || null;
+    let moveHistory = Array.isArray(restoredGame?.moveHistory) ? restoredGame.moveHistory : [];
     let message = restoredGame?.message || '';
     let gameResult = restoredGame?.gameResult || null;
     let drawOffer = restoredGame?.drawOffer || null;
@@ -608,6 +639,7 @@
         })),
         chessState: { fen: boardToFen(chessState) },
         lastMove,
+        moveHistory: [...moveHistory],
         gameResult,
         drawOffer,
         clocks: { whiteMs, blackMs },
@@ -651,6 +683,7 @@
         fen: boardToFen(chessState),
         turn: chessState.turn,
         lastMove,
+        moveHistory: [...moveHistory],
         message,
         gameResult,
         drawOffer,
@@ -755,6 +788,7 @@
       }
       chessState = createInitialState();
       lastMove = null;
+      moveHistory = [];
       gameResult = null;
       drawOffer = null;
       phase = 'playing';
@@ -780,8 +814,13 @@
 
       tickClocks();
       const prevTurn = chessState.turn;
+      let san = moveToSan(chessState, match);
       chessState = applyMove(chessState, match);
       lastMove = moveToWire(match);
+      const nextColor = opponent(prevTurn);
+      if (isCheckmate(chessState, nextColor)) san += '#';
+      else if (isInCheck(chessState, nextColor)) san += '+';
+      moveHistory = [...moveHistory, { san, color: prevTurn, from: lastMove.from, to: lastMove.to }];
       drawOffer = null;
       clockLastTick = Date.now();
 
@@ -989,6 +1028,7 @@
     isInsufficientMaterial,
     isFiftyMoveDraw,
     normalizeMove,
+    moveToSan,
     createHost,
     sanitizeSettings,
   });

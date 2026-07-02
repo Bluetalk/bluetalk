@@ -34,10 +34,23 @@ const PHASE_LABELS = {
   matchOver: 'Match beendet',
 };
 
+const CARD_GLYPHS = {
+  skip: '⊘',
+  reverse: '⇄',
+  draw2: '+2',
+  wild: '✦',
+  wild4: '+4',
+};
+
 function cardDisplayLabel(card) {
   if (!card) return '';
   if (card.value === 'wild' || card.value === 'wild4') return VALUE_LABELS[card.value];
   return VALUE_LABELS[card.value] || String(card.value);
+}
+
+function cardGlyph(card) {
+  if (!card) return '';
+  return CARD_GLYPHS[card.value] || String(card.value);
 }
 
 function useUnoState() {
@@ -104,30 +117,38 @@ function UnoCard3D({
   hidden = false,
   animate = '',
   playable = false,
+  dimmed = false,
   compact = false,
   onClick,
   style,
 }) {
   const color = card?.color || 'wild';
   const label = cardDisplayLabel(card);
+  const glyph = cardGlyph(card);
   const isWild = color === 'wild';
   return (
     <button
       type="button"
-      className={`uno-card-3d uno-card-${isWild ? 'wild' : color}${hidden ? ' uno-card-back' : ''}${animate ? ` ${animate}` : ''}${playable ? ' uno-card-playable' : ''}${compact ? ' uno-card-compact' : ''}`}
+      className={`uno-card-3d uno-card-${isWild ? 'wild' : color}${hidden ? ' uno-card-back' : ''}${animate ? ` ${animate}` : ''}${playable ? ' uno-card-playable' : ''}${dimmed ? ' uno-card-dimmed' : ''}${compact ? ' uno-card-compact' : ''}`}
       style={style}
       onClick={onClick}
       disabled={!onClick}
       aria-label={hidden ? 'Verdeckte Karte' : `${COLOR_LABELS[color] || 'Wild'} ${label}`}
     >
       {hidden ? (
-        <div className="uno-card-pattern"><span>UNO</span></div>
+        <span className="uno-card-face">
+          <span className="uno-card-ellipse">
+            <span className="uno-card-glyph uno-card-logo">BT</span>
+          </span>
+        </span>
       ) : (
-        <>
-          <div className="uno-card-corner uno-card-tl"><strong>{label}</strong></div>
-          <div className="uno-card-center">{label}</div>
-          <div className="uno-card-corner uno-card-br"><strong>{label}</strong></div>
-        </>
+        <span className="uno-card-face">
+          <span className="uno-card-corner uno-card-tl">{glyph}</span>
+          <span className="uno-card-ellipse">
+            <span className="uno-card-glyph">{glyph}</span>
+          </span>
+          <span className="uno-card-corner uno-card-br">{glyph}</span>
+        </span>
       )}
     </button>
   );
@@ -135,6 +156,7 @@ function UnoCard3D({
 
 function PlayerAvatar({ player, isActive, isHost, self = false }) {
   const initials = player?.name?.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '?';
+  const oneCardLeft = player?.cardCount === 1;
   return (
     <div className={`uno-player-avatar${isActive ? ' active' : ''}${player?.connected === false ? ' disconnected' : ''}${self ? ' self' : ''}`}>
       <div className="uno-avatar-circle">
@@ -142,9 +164,13 @@ function PlayerAvatar({ player, isActive, isHost, self = false }) {
         {isHost ? <Crown size={11} className="uno-host-icon" aria-label="Host" /> : null}
         {player?.cardCount > 0 ? <span className="uno-card-count">{player.cardCount}</span> : null}
       </div>
-      <div className="uno-avatar-name">{player?.name || 'Spieler'}{self ? ' (du)' : ''}</div>
-      {player?.saidUno ? <span className="uno-said-badge">UNO!</span> : null}
-      {player?.score > 0 ? <div className="uno-avatar-score">{player.score} Pkt.</div> : null}
+      <div className="uno-avatar-info">
+        <div className="uno-avatar-name">{player?.name || 'Spieler'}{self ? ' (du)' : ''}</div>
+        {player?.score > 0 ? <div className="uno-avatar-score">{player.score} Pkt.</div> : null}
+      </div>
+      {oneCardLeft || player?.saidUno ? (
+        <span className={`uno-said-badge${oneCardLeft ? ' uno-one-left' : ''}`}>UNO!</span>
+      ) : null}
     </div>
   );
 }
@@ -152,16 +178,17 @@ function PlayerAvatar({ player, isActive, isHost, self = false }) {
 function ColorPicker({ onChoose, onCancel }) {
   return (
     <div className="uno-color-picker" role="dialog" aria-label="Farbe wählen">
-      <p>Farbe wählen:</p>
+      <p className="uno-color-picker-title">Wähle eine Farbe</p>
       <div className="uno-color-options">
         {COLORS.map((color) => (
           <button
             key={color}
             type="button"
-            className={`uno-color-btn uno-color-${color}`}
+            className={`uno-color-tile uno-color-tile-${color}`}
             onClick={() => onChoose(color)}
           >
-            {COLOR_LABELS[color]}
+            <span className="uno-color-tile-glow" aria-hidden />
+            <span className="uno-color-tile-label">{COLOR_LABELS[color]}</span>
           </button>
         ))}
       </div>
@@ -222,6 +249,7 @@ function UnoHand({ cards, topCard, activeColor, houseRules, canAct, pendingDrawS
     <div className="uno-hand" style={{ '--uno-hand-count': cards.length }}>
       {cards.map((card, index) => {
         const rotate = -offset + index * spread;
+        const lift = Math.abs(rotate) * 0.9;
         const playable = canAct && (
           pendingDrawStack > 0
             ? (houseRules === 'casual' && (card.value === 'draw2' || card.value === 'wild4'))
@@ -234,11 +262,12 @@ function UnoHand({ cards, topCard, activeColor, houseRules, canAct, pendingDrawS
             key={card.id}
             card={card}
             playable={playable}
+            dimmed={canAct && !playable}
             animate={animate}
             onClick={playable ? () => onPlay(card) : undefined}
             style={{
               '--uno-hand-rotate': `${rotate}deg`,
-              '--uno-hand-index': index,
+              '--uno-hand-lift': `${lift}px`,
               zIndex: index + 1,
             }}
           />
@@ -330,17 +359,31 @@ function GameTable({ snapshot, selfId, onAction }) {
           <PlayerAvatar key={p.peerId} player={p} isActive={pub?.toAct === p.peerId} isHost={p.peerId === pub?.hostPeerId} />
         ))}</div>
         <div className="uno-table-center">
+          {pub?.phase === 'playing' && pub?.toAct ? (
+            <div className={`uno-turn-chip${canAct ? ' self' : ''}`}>
+              <span className="uno-turn-dot" aria-hidden />
+              {canAct ? 'Du bist am Zug' : `${players.find((p) => p.peerId === pub.toAct)?.name || 'Spieler'} ist am Zug`}
+            </div>
+          ) : null}
           <div className="uno-piles">
             <div className={`uno-draw-pile${drawAnim ? ' uno-draw-pulse' : ''}`}>
-              <UnoCard3D hidden />
-              <span className="uno-pile-count">{pub?.drawPileCount ?? 0}</span>
+              <div className="uno-draw-stack">
+                <UnoCard3D hidden />
+              </div>
+              <span className="uno-pile-label">Nachziehen</span>
+              <span className="uno-pile-count">{pub?.drawPileCount ?? 0} Karten</span>
             </div>
             <div className="uno-discard-pile">
-              {pub?.topCard ? (
-                <UnoCard3D card={pub.topCard} animate={pub?.lastEvent?.type === 'play' ? 'uno-discard-flip' : ''} />
-              ) : (
-                <UnoCard3D hidden />
-              )}
+              <div className="uno-discard-stack">
+                <span className="uno-discard-under uno-discard-under-1" aria-hidden />
+                <span className="uno-discard-under uno-discard-under-2" aria-hidden />
+                {pub?.topCard ? (
+                  <UnoCard3D card={pub.topCard} animate={pub?.lastEvent?.type === 'play' ? 'uno-discard-flip' : ''} />
+                ) : (
+                  <UnoCard3D hidden />
+                )}
+              </div>
+              <span className="uno-pile-label">Ablage</span>
               {pub?.activeColor ? (
                 <span className={`uno-active-color uno-color-${pub.activeColor}`}>{COLOR_LABELS[pub.activeColor]}</span>
               ) : null}
@@ -350,7 +393,12 @@ function GameTable({ snapshot, selfId, onAction }) {
             <div className="uno-pending-draw">+{pub.pendingDrawStack} ausstehend</div>
           ) : null}
           {pub?.direction ? (
-            <div className="uno-direction">{pub.direction === 1 ? '↻ Uhrzeiger' : '↺ Gegen Uhrzeiger'}</div>
+            <div className="uno-direction">
+              <span className={`uno-direction-icon${pub.direction === -1 ? ' reversed' : ''}`} aria-hidden>
+                {pub.direction === 1 ? '↻' : '↺'}
+              </span>
+              <span>{pub.direction === 1 ? 'Im Uhrzeigersinn' : 'Gegen den Uhrzeigersinn'}</span>
+            </div>
           ) : null}
         </div>
         <div className="uno-players-right">{right.map((p) => (
@@ -588,15 +636,25 @@ export default function UnoGamePage() {
         ) : (
           <GameTable snapshot={snapshot} selfId={selfId} onAction={action} />
         )}
+        {(pub.phase === 'roundOver' || pub.phase === 'matchOver') && pub?.roundWinner ? (
+          <div className="uno-winner-banner">
+            <div className="uno-confetti" aria-hidden>
+              {Array.from({ length: 14 }, (_, i) => (
+                <span key={i} className="uno-confetti-piece" style={{ '--uno-confetti-i': i }} />
+              ))}
+            </div>
+            <span className="uno-winner-kicker">{pub.phase === 'matchOver' ? 'Match beendet' : 'Runde beendet'}</span>
+            <strong className="uno-winner-title">
+              {pub.roundWinner === selfId
+                ? (pub.phase === 'matchOver' ? 'Du hast das Match gewonnen!' : 'Du hast die Runde gewonnen!')
+                : `${(pub.players || []).find((p) => p.peerId === pub.roundWinner)?.name || 'Ein Spieler'} gewinnt ${pub.phase === 'matchOver' ? 'das Match' : 'die Runde'}`}
+            </strong>
+          </div>
+        ) : null}
         {canNextRound ? (
           <button type="button" className="uno-next-round uno-btn-primary" onClick={() => send({ type: 'host_start' })}>
             <Play size={16} /> Nächste Runde
           </button>
-        ) : null}
-        {pub.phase === 'roundOver' && pub?.roundWinner ? (
-          <div className="uno-winner-banner">
-            {pub.roundWinner === selfId ? 'Du hast die Runde gewonnen!' : 'Runde beendet'}
-          </div>
         ) : null}
       </main>
       {panel === 'help' ? <OverlayPanel title="UNO — Kurz erklärt" onClose={() => setPanel('')}><UnoGuide /></OverlayPanel> : null}

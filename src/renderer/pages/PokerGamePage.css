@@ -1115,7 +1115,323 @@ body:has(.poker-game-root) {
   .poker-manage-row { align-items: flex-start; flex-direction: column; }
 }
 
+/* ============ CASINO-REFINEMENT (BlueTalk Arcade) ============ */
+
+/* Vignette über dem gesamten Fenster */
+.poker-game-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(ellipse 120% 95% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.38) 100%);
+}
+
+.poker-game-titlebar,
+.poker-panel-overlay,
+.poker-side-panel {
+  position: relative;
+  z-index: 100;
+}
+.poker-panel-overlay { position: fixed; z-index: 300; }
+
+/* Zahlen überall gleichbreit */
+.poker-avatar-chips,
+.poker-pot-amount,
+.poker-tocall,
+.poker-chip-inner span,
+.poker-game-info,
+.poker-raise-picker input[type='number'],
+.poker-actions button,
+.poker-manage-player span {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Tisch: echte Ellipse mit Filz, Gold-Trim und Holzrand --- */
+.poker-felt {
+  max-width: 640px;
+  padding: 44px 56px;
+  border: 0;
+  background:
+    radial-gradient(ellipse 75% 65% at 50% 42%, #14532d 0%, #0b3d20 55%, #052e16 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(245, 215, 110, 0.35),
+    inset 0 0 60px rgba(0, 0, 0, 0.55),
+    inset 0 14px 34px rgba(255, 255, 255, 0.05),
+    0 0 0 6px #3b2a17,
+    0 0 0 8px #59401f,
+    0 0 0 9px rgba(245, 215, 110, 0.4),
+    0 24px 70px rgba(0, 0, 0, 0.65);
+}
+
+.poker-felt::before {
+  inset: 22px;
+  border: 1px solid rgba(245, 215, 110, 0.18);
+  border-style: solid;
+}
+
+.poker-felt-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 42% at 50% 8%, rgba(255, 255, 255, 0.09), transparent 70%);
+}
+
+/* --- Pot prominent in der Tischmitte --- */
+.poker-pot {
+  gap: 10px;
+  padding: 7px 18px 7px 8px;
+  border-radius: 999px;
+  background: rgba(2, 12, 6, 0.55);
+  border: 1px solid rgba(245, 215, 110, 0.35);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.poker-pot-text { display: flex; flex-direction: column; line-height: 1.15; }
+.poker-pot-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(245, 215, 110, 0.7);
+}
+.poker-pot-amount { font-size: 17px; }
+
+/* --- Phasen-Stepper --- */
+.poker-phase-steps {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(4, 10, 16, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  width: fit-content;
+}
+
+.poker-phase-step {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(200, 210, 225, 0.35);
+  padding: 3px 10px;
+  border-radius: 999px;
+  transition: color 0.25s, background-color 0.25s;
+}
+
+.poker-phase-step.done { color: rgba(245, 215, 110, 0.55); }
+
+.poker-phase-step.current {
+  color: #052e16;
+  background: linear-gradient(180deg, #f5d76e, #d4af37);
+  box-shadow: 0 2px 10px rgba(212, 175, 55, 0.35);
+}
+
+/* --- Aktiver Spieler: goldener Puls-Ring --- */
+.poker-player-avatar {
+  background: rgba(6, 12, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+}
+
+.poker-player-avatar.active {
+  animation: none;
+  border-color: rgba(245, 215, 110, 0.65);
+  box-shadow: 0 0 22px rgba(212, 175, 55, 0.22);
+}
+
+.poker-player-avatar.active::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 16px;
+  border: 2px solid rgba(245, 215, 110, 0.85);
+  pointer-events: none;
+  animation: pokerActiveRing 1.6s ease-out infinite;
+}
+
+@keyframes pokerActiveRing {
+  0% { opacity: 0.9; transform: scale(1); }
+  70% { opacity: 0; transform: scale(1.07); }
+  100% { opacity: 0; transform: scale(1.07); }
+}
+
+.poker-player-avatar.self {
+  background: rgba(212, 175, 55, 0.08);
+  border-color: rgba(245, 215, 110, 0.3);
+}
+
+/* --- Gewinner: Sitz glüht gold --- */
+.poker-player-avatar.winner {
+  border-color: rgba(245, 215, 110, 0.9);
+  background: rgba(212, 175, 55, 0.14);
+  box-shadow: 0 0 30px rgba(212, 175, 55, 0.45), inset 0 0 18px rgba(212, 175, 55, 0.12);
+  animation: pokerWinnerPop 0.45s ease-out;
+}
+
+@keyframes pokerWinnerPop {
+  0% { transform: scale(0.94); opacity: 0.6; }
+  60% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* --- Dealer-Button als Gold-Chip --- */
+.poker-dealer-badge {
+  background: radial-gradient(circle at 35% 30%, #f5d76e, #d4af37 70%);
+  color: #3b2a17;
+  border: 1px dashed rgba(59, 42, 23, 0.55);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* --- Karten: cremeweiß, klare Farben --- */
+.poker-card-3d {
+  background: linear-gradient(150deg, #fffdf6 0%, #f8f4e8 60%, #e7e1cf 100%);
+  color: #17181c;
+}
+.poker-card-red { color: #c0262e; }
+
+.poker-card-back,
+.poker-card-peek-back.poker-card-back {
+  background: linear-gradient(150deg, #12304f, #081627 65%, #0e2740);
+  border: 2px solid rgba(232, 212, 143, 0.85);
+}
+
+.poker-card-peek-face {
+  background: linear-gradient(150deg, #fffdf6 0%, #f8f4e8 60%, #e7e1cf 100%);
+}
+.poker-card-peek-front.poker-card-red { color: #c0262e; }
+
+/* --- Aufdeck-Animation mit gestaffelter Verzögerung --- */
+.poker-card-deal {
+  animation: cardDeal 0.55s cubic-bezier(0.22, 0.9, 0.32, 1.2) both;
+  animation-delay: var(--deal-delay, 0ms);
+}
+
+/* Winner-Banner glasig mit Gold-Trim */
+.poker-winner-banner {
+  background: rgba(4, 12, 8, 0.82);
+  border: 1px solid rgba(245, 215, 110, 0.5);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(212, 175, 55, 0.18);
+  z-index: 10;
+}
+
+.poker-winner { font-size: 15px; }
+.poker-winner svg { color: #f5d76e; }
+.poker-winner-hand {
+  font-size: 12px;
+  color: rgba(245, 215, 110, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* --- „Du bist dran"-Banner + Warteanzeige --- */
+.poker-action-bar {
+  background: rgba(4, 10, 16, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+}
+
+.poker-action-info { align-items: center; }
+
+.poker-your-turn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f5d76e, #d4af37);
+  color: #052e16;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.4);
+  animation: pokerTurnPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pokerTurnPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.82; transform: scale(0.985); }
+}
+
+.poker-turn-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(4, 10, 16, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  color: rgba(220, 228, 238, 0.75);
+}
+
+.poker-turn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5d76e;
+  box-shadow: 0 0 10px rgba(245, 215, 110, 0.7);
+  animation: pokerTurnPulse 1.4s ease-in-out infinite;
+}
+
+/* --- Aktionsleiste: Fold rötlich, Check/Call neutral, Raise gold --- */
+.poker-actions button.poker-act-fold {
+  background: rgba(185, 28, 28, 0.22);
+  color: #fda4a4;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+.poker-actions button.poker-act-fold:hover { background: rgba(185, 28, 28, 0.35); }
+
+.poker-actions button.poker-act-check,
+.poker-actions button.poker-act-call {
+  background: rgba(148, 163, 184, 0.14);
+  color: #e6ecf4;
+  border: 1px solid rgba(203, 213, 225, 0.3);
+}
+.poker-actions button.poker-act-check:hover,
+.poker-actions button.poker-act-call:hover { background: rgba(148, 163, 184, 0.24); }
+
+.poker-actions button.poker-act-raise {
+  background: linear-gradient(180deg, #f5d76e 0%, #d4af37 60%, #b8941f 100%);
+  color: #1f1503;
+  border: 1px solid rgba(255, 240, 190, 0.5);
+  box-shadow: 0 4px 14px rgba(212, 175, 55, 0.35);
+}
+.poker-actions button.poker-act-raise:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(212, 175, 55, 0.5); }
+
+.poker-actions button.poker-act-allin {
+  background: rgba(12, 10, 4, 0.6);
+  color: #f5d76e;
+  border: 1px solid rgba(245, 215, 110, 0.55);
+}
+.poker-actions button.poker-act-allin:hover { background: rgba(212, 175, 55, 0.14); }
+
+/* Info-Leiste glasig */
+.poker-game-info {
+  background: rgba(4, 10, 16, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  align-self: center;
+  flex-wrap: wrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .poker-card-deal, .poker-player-avatar.active, .poker-side-panel { animation: none; }
-  .poker-card-3d, .poker-card-peek-inner, .poker-game-btn-icon, .poker-actions button { transition: none; }
+  .poker-card-deal,
+  .poker-player-avatar.active,
+  .poker-player-avatar.active::after,
+  .poker-player-avatar.winner,
+  .poker-your-turn,
+  .poker-turn-dot,
+  .poker-winner-banner,
+  .poker-side-panel { animation: none; }
+  .poker-card-3d, .poker-card-peek-inner, .poker-game-btn-icon, .poker-actions button, .poker-phase-step { transition: none; }
 }
