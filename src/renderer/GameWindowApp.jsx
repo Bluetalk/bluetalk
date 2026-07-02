@@ -8,6 +8,7 @@ const ConnectFourGamePage = lazy(() => import('./pages/ConnectFourGamePage'));
 const ChessGamePage = lazy(() => import('./pages/ChessGamePage'));
 const TicTacToeGamePage = lazy(() => import('./pages/TicTacToeGamePage'));
 const RacingGamePage = lazy(() => import('./pages/RacingGamePage'));
+const DocsEditorPage = lazy(() => import('./pages/DocsEditorPage'));
 
 function GameWindowFallback() {
   return (
@@ -29,6 +30,7 @@ export default function GameWindowApp() {
             <Route path="/chess-game" element={<ChessGamePage />} />
             <Route path="/tic-tac-toe-game" element={<TicTacToeGamePage />} />
             <Route path="/racing-game" element={<RacingGamePage />} />
+            <Route path="/docs-editor" element={<DocsEditorPage />} />
             <Route path="*" element={<GameWindowFallback />} />
           </Routes>
         </Suspense>

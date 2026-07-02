@@ -9,6 +9,7 @@ const GAME_WINDOW_ROUTES = new Set([
   '/chess-game',
   '/tic-tac-toe-game',
   '/racing-game',
+  '/docs-editor',
 ]);
 
 const hashPath = window.location.hash.slice(1).split(/[?#]/, 1)[0] || '/';

@@ -324,6 +324,35 @@ contextBridge.exposeInMainWorld('bluetalk', {
     },
   },
 
+  /** Live-Dokumente-Editor: Zustand vom Hauptfenster, Aktionen zurück zum Plugin */
+  docs: {
+    openGameWindow: () => ipcRenderer.invoke('docs:openGameWindow'),
+    closeGameWindow: () => ipcRenderer.invoke('docs:closeGameWindow'),
+    minimizeWindow: () => ipcRenderer.invoke('docs:minimizeWindow'),
+    maximizeWindow: () => ipcRenderer.invoke('docs:maximizeWindow'),
+    isWindowMaximized: () => ipcRenderer.invoke('docs:isWindowMaximized'),
+    onWindowMaximizedChange: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, maximized) => callback(maximized);
+      ipcRenderer.on('docs:windowMaximized', listener);
+      return () => ipcRenderer.removeListener('docs:windowMaximized', listener);
+    },
+    pushState: (payload) => ipcRenderer.send('docs:pumpState', payload),
+    sendAction: (payload) => ipcRenderer.send('docs:fromChild', payload),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('docs:state', listener);
+      return () => ipcRenderer.removeListener('docs:state', listener);
+    },
+    onFromChild: (callback) => {
+      if (typeof callback !== 'function') return () => undefined;
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('docs:fromChild', listener);
+      return () => ipcRenderer.removeListener('docs:fromChild', listener);
+    },
+  },
+
   app: {
     clearCache: () => ipcRenderer.invoke('app:clearCache'),
     clearMessages: () => ipcRenderer.invoke('app:clearMessages'),

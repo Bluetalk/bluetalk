@@ -27,6 +27,8 @@ let chessGameWindow = null;
 let ticTacToeGameWindow = null;
 /** Separates Fenster für das 3D-Autorennen-Plugin. */
 let racingGameWindow = null;
+/** Separates Fenster für den Live-Dokumente-Editor. */
+let docsEditorWindow = null;
 /** Cached game UI state — replayed when a game window finishes loading. */
 const gameStateCache = new Map();
 
@@ -1360,6 +1362,14 @@ function isRacingGameSender(event) {
   );
 }
 
+function isDocsEditorSender(event) {
+  return Boolean(
+    docsEditorWindow
+    && !docsEditorWindow.isDestroyed()
+    && event.sender === docsEditorWindow.webContents,
+  );
+}
+
 function isTrustedRendererUrl(value) {
   try {
     const url = new URL(value);
@@ -1780,6 +1790,56 @@ function createRacingGameWindow() {
   bindGameWindowStateReplay(racingGameWindow, 'racing-3d', 'racing:state');
 
   return racingGameWindow;
+}
+
+function createDocsEditorWindow() {
+  if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+    try {
+      docsEditorWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    replayGameState('live-docs', docsEditorWindow, 'docs:state');
+    return docsEditorWindow;
+  }
+
+  docsEditorWindow = new BrowserWindow({
+    width: 1060,
+    height: 760,
+    minWidth: 640,
+    minHeight: 480,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0b0f19',
+    icon: createAppIcon(256),
+    webPreferences: gameWindowWebPreferences('live-docs'),
+    show: false,
+  });
+  hardenWindow(docsEditorWindow);
+
+  if (isDev) {
+    docsEditorWindow.loadURL('http://localhost:5173/#/docs-editor');
+  } else {
+    const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    docsEditorWindow.loadURL(`${pathToFileURL(indexHtml).href}#/docs-editor`);
+  }
+
+  docsEditorWindow.once('ready-to-show', () => {
+    try {
+      docsEditorWindow?.show();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  docsEditorWindow.on('closed', () => {
+    docsEditorWindow = null;
+  });
+
+  bindWindowMaximizeEvents(docsEditorWindow, 'docs:windowMaximized');
+  bindGameWindowStateReplay(docsEditorWindow, 'live-docs', 'docs:state');
+
+  return docsEditorWindow;
 }
 
 function createTray() {
@@ -2254,6 +2314,72 @@ function setupIPC() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
       mainWindow.webContents.send('racing:fromChild', payload);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  // ---------- Live-Dokumente-Editor (gleiches Muster wie die Spielfenster) ----------
+
+  ipcMain.handle('docs:openGameWindow', async () => {
+    try {
+      await openGameWindowAndReplay(createDocsEditorWindow, 'live-docs', 'docs:state');
+      return { ok: true };
+    } catch (e) {
+      console.error('docs:openGameWindow error:', e);
+      return { ok: false, error: e?.message || 'open_failed' };
+    }
+  });
+
+  ipcMain.handle('docs:closeGameWindow', () => {
+    try {
+      if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+        docsEditorWindow.close();
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:minimizeWindow', (event) => {
+    if (!isDocsEditorSender(event)) return { ok: false };
+    try {
+      docsEditorWindow?.minimize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:maximizeWindow', (event) => {
+    if (!isDocsEditorSender(event)) return { ok: false };
+    try {
+      if (docsEditorWindow?.isMaximized()) docsEditorWindow.unmaximize();
+      else docsEditorWindow?.maximize();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('docs:isWindowMaximized', (event) => {
+    if (!isDocsEditorSender(event)) return false;
+    return docsEditorWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.on('docs:pumpState', (event, payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    rememberAndRelayGameState('live-docs', docsEditorWindow, 'docs:state', payload);
+  });
+
+  ipcMain.on('docs:fromChild', (event, payload) => {
+    if (!docsEditorWindow || docsEditorWindow.isDestroyed()) return;
+    if (event.sender !== docsEditorWindow.webContents) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('docs:fromChild', payload);
     } catch {
       /* ignore */
     }
@@ -2815,6 +2941,10 @@ app.on('before-quit', (event) => {
     if (racingGameWindow && !racingGameWindow.isDestroyed()) {
       racingGameWindow.destroy();
       racingGameWindow = null;
+    }
+    if (docsEditorWindow && !docsEditorWindow.isDestroyed()) {
+      docsEditorWindow.destroy();
+      docsEditorWindow = null;
     }
   } catch {
     /* ignore */
