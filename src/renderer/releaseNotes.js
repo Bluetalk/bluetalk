@@ -3,6 +3,13 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '1.1.24': {
+    title: "What's new in BlueTalk 1.1.24",
+    items: [
+      'Live Dokumente: Einladungen erscheinen jetzt als Karte direkt im Chat — ein Klick auf „Mitschreiben“ öffnet den Editor und tritt der Sitzung bei.',
+      'Behoben: Eingeladene konnten Dokument-Sitzungen nicht beitreten — der Host lehnte den Beitritt fälschlich ab.',
+    ],
+  },
   '1.1.23': {
     title: "What's new in BlueTalk 1.1.23",
     items: [

@@ -1194,6 +1194,7 @@ body {
 .msg--embed .connect-four-invite-card,
 .msg--embed .chess-invite-card,
 .msg--embed .ttt-invite-card,
+.msg--embed .live-docs-invite-card,
 .msg--embed .contact-share-card {
   width: min(100%, 360px);
 }
@@ -4532,6 +4533,101 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 }
 
 .ttt-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.live-docs-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #2563eb 35%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #2563eb 12%, var(--bg-2)),
+    color-mix(in srgb, #0ea5e9 6%, var(--bg-2))
+  );
+  max-width: 360px;
+}
+
+.live-docs-invite-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.live-docs-invite-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.live-docs-invite-card-copy { min-width: 0; }
+
+.live-docs-invite-card-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #2563eb;
+  margin-bottom: 2px;
+}
+
+.live-docs-invite-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-0);
+  overflow-wrap: anywhere;
+}
+
+.live-docs-invite-card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
+.live-docs-invite-card-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-2);
+}
+
+.live-docs-invite-card-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.live-docs-invite-card-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.live-docs-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.live-docs-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.live-docs-invite-card-btn--inactive:hover {
   filter: none;
   transform: none;
 }

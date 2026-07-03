@@ -996,7 +996,7 @@ export default function App() {
         if (isBlocked) {
           const k = msg.kind;
           const blockable =
-            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'connect-four-invite' || k === 'chess-invite' || k === 'tic-tac-toe-invite' || k === 'contact-share';
+            k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'connect-four-invite' || k === 'chess-invite' || k === 'tic-tac-toe-invite' || k === 'live-docs-invite' || k === 'contact-share';
           if (blockable && fromId && msg.messageId) {
             void window.bluetalk.peer.send(fromId, {
               kind: 'messaging-blocked',

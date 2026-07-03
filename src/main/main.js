@@ -1261,6 +1261,8 @@ function queueIncomingChatNotification(data) {
                 ? `Schach: ${data.tableName || 'Einladung'}`
                 : data.kind === 'tic-tac-toe-invite'
                   ? `Tic-Tac-Toe: ${data.tableName || 'Einladung'}`
+            : data.kind === 'live-docs-invite'
+              ? `Dokument: ${data.fileName || data.tableName || 'Einladung'}`
             : data.kind === 'contact-share'
             ? `Kontakt: ${data.sharedContact?.displayName || data.sharedContact?.name || 'geteilt'}`
             : (data.content || 'New message');

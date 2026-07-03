@@ -1,12 +1,12 @@
 {
   "id": "live-docs",
   "name": "Live Dokumente",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Word-Dokumente (.docx) gemeinsam in Echtzeit bearbeiten — importieren, live zusammen schreiben, als .docx exportieren.",
   "author": "BlueTalk",
   "main": "main.js",
   "ui": "ui.js",
-  "permissions": ["peer:send", "contacts:read"],
+  "permissions": ["peer:send", "chat:send", "contacts:read"],
   "autoEnable": true,
   "game": {
     "tool": true,

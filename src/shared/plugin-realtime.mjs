@@ -352,6 +352,9 @@ class RealtimeRoom {
   /** @param {string} peerId */
   invite(peerId) {
     if (!this.isHost || this.closed || !peerId) return false;
+    // Den Eingeladenen host-seitig vormerken, damit sein späterer ROOM_JOIN die
+    // Invite-Prüfung besteht (ohne das lehnt der Host den Beitritt ab).
+    this.manager._recordInvite(this.roomId, peerId);
     this._sendWire(peerId, WIRE.ROOM_INVITE, {
       roomId: this.roomId,
       name: this.name,
@@ -699,6 +702,17 @@ class RealtimeManager {
     return Boolean(set && set.has(peerId));
   }
 
+  /** @private — merkt einen eingeladenen Peer für die Beitritts-Prüfung vor. */
+  _recordInvite(roomId, peerId) {
+    if (!roomId || !peerId) return;
+    let set = this.invites.get(roomId);
+    if (!set) {
+      set = new Set();
+      this.invites.set(roomId, set);
+    }
+    set.add(peerId);
+  }
+
   /** @private */
   _removeRoom(roomId) {
     this.rooms.delete(roomId);
@@ -735,12 +749,7 @@ class RealtimeManager {
     }
 
     if (wire === WIRE.ROOM_INVITE && from) {
-      let set = this.invites.get(roomId);
-      if (!set) {
-        set = new Set();
-        this.invites.set(roomId, set);
-      }
-      set.add(from);
+      this._recordInvite(roomId, from);
       this.emitter.emit('room-invite', {
         roomId,
         hostPeerId: payload?.hostPeerId || from,

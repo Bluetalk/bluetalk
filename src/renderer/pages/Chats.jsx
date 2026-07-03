@@ -335,6 +335,7 @@ function getMessagePreviewText(message, debugMode = false) {
   if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'live-docs-invite') return `Dokument: ${message.fileName || message.tableName || 'Einladung'}`;
   const content = String(message.content || '').trim();
   if (!content) return 'Nachricht';
   return content.length > 120 ? `${content.slice(0, 117)}…` : content;
@@ -369,6 +370,9 @@ function getMessageCopyText(message, debugMode = false) {
   }
   if (message.kind === 'tic-tac-toe-invite') {
     return String(message.ticTacToeSettingsSummary || message.content || `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`).trim();
+  }
+  if (message.kind === 'live-docs-invite') {
+    return String(message.content || `Dokument: ${message.fileName || message.tableName || 'Einladung'}`).trim();
   }
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments?.length) {
@@ -435,6 +439,9 @@ function getLastPreview(message, debugMode = false) {
   }
   if (message.kind === 'tic-tac-toe-invite') {
     return `${message.from === 'self' ? 'Du: ' : ''}Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
+  }
+  if (message.kind === 'live-docs-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}Dokument: ${message.fileName || message.tableName || 'Einladung'}`;
   }
   return (message.from === 'self' ? 'You: ' : '') + (message.content || 'Message');
 }
@@ -647,7 +654,7 @@ function isBareMediaMessage(message) {
 function isChatEmbedMessage(message, debugMode = false) {
   if (!message) return false;
   if (message.kind === 'uno-invite') return debugMode;
-  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'contact-share';
+  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'live-docs-invite' || message.kind === 'contact-share';
 }
 
 function FileTypeIcon({ mime, fileName, size = 22 }) {
@@ -1308,6 +1315,61 @@ function TicTacToeInviteMessage({ message }) {
       >
         {inviteActive ? 'Spiel beitreten' : 'Einladung abgelaufen'}
       </button>
+    </div>
+  );
+}
+
+function LiveDocsInviteMessage({ message }) {
+  const { peers } = useApp();
+  const { toast } = useToast();
+  const fileName = message.fileName || message.tableName || 'Dokument';
+  const hostPeerId = message.hostPeerId || message.from;
+  const roomId = message.roomId;
+  const isSelf = message.from === 'self';
+  const hostOnline = Boolean(peers?.some((peer) => peer?.id === hostPeerId));
+  const canJoin = Boolean(roomId && hostPeerId && !isSelf && hostOnline);
+
+  const join = async () => {
+    if (!canJoin) return;
+    const res = await pluginRuntime.invokePluginCommand('live-docs', 'joinInvite', { roomId, hostPeerId, fileName });
+    if (!res?.ok) {
+      toast({
+        variant: 'warning',
+        title: 'Dokumente',
+        message: res?.error === 'not_active'
+          ? 'Die Erweiterung „Dokumente“ ist nicht aktiv — zuerst aktivieren.'
+          : 'Beitritt nicht möglich.',
+      });
+    }
+  };
+
+  const hint = isSelf
+    ? 'Einladung im Chat gesendet — der Kontakt kann hier mitschreiben.'
+    : hostOnline
+      ? 'Peer-to-Peer — du musst mit dem Host verbunden sein.'
+      : 'Der Host ist gerade offline — sobald ihr verbunden seid, kannst du beitreten.';
+
+  return (
+    <div className="live-docs-invite-card" role="group" aria-label="Dokument-Einladung">
+      <div className="live-docs-invite-card-head">
+        <span className="live-docs-invite-card-icon" aria-hidden>📝</span>
+        <div className="live-docs-invite-card-copy">
+          <div className="live-docs-invite-card-kicker">Live Dokument</div>
+          <div className="live-docs-invite-card-title">{fileName}</div>
+          <div className="live-docs-invite-card-meta">Gemeinsam in Echtzeit bearbeiten</div>
+        </div>
+      </div>
+      <p className="live-docs-invite-card-hint">{hint}</p>
+      {!isSelf ? (
+        <button
+          type="button"
+          className={`live-docs-invite-card-btn${canJoin ? '' : ' live-docs-invite-card-btn--inactive'}`}
+          onClick={join}
+          disabled={!canJoin}
+        >
+          {canJoin ? 'Mitschreiben' : 'Host offline'}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -4747,6 +4809,8 @@ export default function ChatsPage() {
                           <ChessInviteMessage message={m} />
                         ) : m.kind === 'tic-tac-toe-invite' ? (
                           <TicTacToeInviteMessage message={m} />
+                        ) : m.kind === 'live-docs-invite' ? (
+                          <LiveDocsInviteMessage message={m} />
                         ) : m.kind === 'uno-invite' && debugMode ? (
                           <UnoInviteMessage message={m} />
                         ) : m.kind === 'uno-invite' ? (

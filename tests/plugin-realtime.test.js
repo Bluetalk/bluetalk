@@ -123,6 +123,98 @@ test('host room join flow', async () => {
   assert.equal(joinedRoom.members.size, 2);
 });
 
+test('invite-access room accepts an invited peer', async () => {
+  const { createRealtimeManager, WIRE } = await import(realtimeUrl);
+
+  const hostPeer = mockPeer();
+  const clientPeer = mockPeer();
+
+  const hostHandlers = [];
+  const clientHandlers = [];
+
+  const hostManager = createRealtimeManager({
+    pluginId: 'live-docs',
+    peer: hostPeer,
+    selfPeerId: () => 'host-id',
+    onPeerMessage: (handler) => {
+      hostHandlers.push(handler);
+      return () => {};
+    },
+  });
+
+  const clientManager = createRealtimeManager({
+    pluginId: 'live-docs',
+    peer: clientPeer,
+    selfPeerId: () => 'client-id',
+    onPeerMessage: (handler) => {
+      clientHandlers.push(handler);
+      return () => {};
+    },
+  });
+
+  const room = hostManager.createRoom({ roomId: 'doc-room', name: 'Notes', access: 'invite' });
+  assert.equal(room.access, 'invite');
+
+  // Host lädt den Client ein.
+  assert.equal(room.invite('client-id'), true);
+  const inviteWire = hostPeer.sent.find((s) => s.data?.pluginRealtime?.wire === WIRE.ROOM_INVITE);
+  assert.ok(inviteWire);
+  assert.equal(inviteWire.peerId, 'client-id');
+
+  // Client erhält die Einladung und tritt bei.
+  clientHandlers[0]({ ...inviteWire.data, from: 'host-id' });
+  const joinPromise = clientManager.joinRoom({ roomId: 'doc-room', hostPeerId: 'host-id', name: 'Alice' });
+
+  const clientJoin = clientPeer.sent.find((s) => s.data?.pluginRealtime?.wire === WIRE.ROOM_JOIN);
+  assert.ok(clientJoin);
+  hostHandlers[0]({ ...clientJoin.data, from: 'client-id' });
+
+  // Der Host darf NICHT ablehnen — der Beitritt muss bestätigt werden.
+  const reject = hostPeer.sent.find((s) => s.data?.pluginRealtime?.wire === WIRE.ROOM_JOIN_REJECT);
+  assert.equal(reject, undefined);
+  const joinOk = hostPeer.sent.find((s) => s.data?.pluginRealtime?.wire === WIRE.ROOM_JOIN_OK);
+  assert.ok(joinOk);
+
+  clientHandlers[0]({ ...joinOk.data, from: 'host-id' });
+  const joinedRoom = await joinPromise;
+  assert.ok(joinedRoom);
+  assert.equal(joinedRoom.isHost, false);
+  assert.equal(joinedRoom.members.size, 2);
+});
+
+test('invite-access room rejects an uninvited peer', async () => {
+  const { createRealtimeManager, WIRE } = await import(realtimeUrl);
+
+  const hostPeer = mockPeer();
+  const hostHandlers = [];
+  const hostManager = createRealtimeManager({
+    pluginId: 'live-docs',
+    peer: hostPeer,
+    selfPeerId: () => 'host-id',
+    onPeerMessage: (h) => {
+      hostHandlers.push(h);
+      return () => {};
+    },
+  });
+
+  hostManager.createRoom({ roomId: 'doc-room', name: 'Notes', access: 'invite' });
+
+  hostHandlers[0]({
+    kind: 'plugin-realtime',
+    from: 'stranger',
+    pluginRealtime: {
+      pluginId: 'live-docs',
+      roomId: 'doc-room',
+      wire: WIRE.ROOM_JOIN,
+      payload: { name: 'Mallory' },
+    },
+  });
+
+  const reject = hostPeer.sent.find((s) => s.data?.pluginRealtime?.wire === WIRE.ROOM_JOIN_REJECT);
+  assert.ok(reject);
+  assert.equal(reject.data.pluginRealtime.payload.reason, 'invite-required');
+});
+
 test('shared document revision conflicts', async () => {
   const { createRealtimeManager, WIRE } = await import(realtimeUrl);
 

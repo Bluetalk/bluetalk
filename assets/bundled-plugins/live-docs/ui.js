@@ -139,6 +139,26 @@
     }
   }
 
+  // Einladung zusätzlich als Chat-Nachricht schicken (wie bei den Spielen), damit
+  // sie im Gespräch sichtbar ist und mit einem Klick beigetreten werden kann.
+  function sendChatInvite(peerId) {
+    if (!room || !peerId) return;
+    const name = fileName || 'Dokument';
+    try {
+      void api.chat?.send?.(peerId, {
+        kind: 'live-docs-invite',
+        roomId: room.roomId,
+        hostPeerId: room.hostPeerId || selfPeerId,
+        docId: sessionDocId,
+        tableName: name,
+        fileName: name,
+        content: `📝 Einladung: „${name}“ gemeinsam bearbeiten`,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   function wireRoom() {
     if (!room) return;
     room.on('message', ({ from, payload }) => {
@@ -281,7 +301,8 @@
         if (payload.peerId) {
           const doInvite = () => {
             if (room?.invite(payload.peerId)) {
-              api.notify.toast?.({ title: 'Live Dokumente', message: `${contactName(payload.peerId)} wurde eingeladen.` });
+              sendChatInvite(payload.peerId);
+              api.notify.toast?.({ title: 'Live Dokumente', message: `${contactName(payload.peerId)} wurde im Chat eingeladen.` });
             }
           };
           if (room) doInvite();
@@ -326,6 +347,21 @@
   });
   api.ui.registerCommand('openWindow', () => {
     void openEditorWindow();
+    return { ok: true };
+  });
+  // Einer Sitzung über eine Chat-Einladung beitreten (roomId + hostPeerId aus der
+  // Einladungs-Nachricht). Öffnet danach den Editor.
+  api.ui.registerCommand('joinInvite', (args) => {
+    const roomId = args && args.roomId;
+    const hostPeerId = args && args.hostPeerId;
+    const name = (args && args.fileName) || 'Dokument';
+    void (async () => {
+      if (!room && roomId && hostPeerId) {
+        pendingInvite = null;
+        await joinSession(hostPeerId, roomId, name);
+      }
+      await openEditorWindow();
+    })();
     return { ok: true };
   });
   // „Zuletzt bearbeitet" für die Dokumente-Seite.
