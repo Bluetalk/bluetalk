@@ -16,6 +16,9 @@ concurrency:
 jobs:
   build-windows:
     name: Build Windows Release
+    # v2 (Tauri) wird ueber den Workflow auf dem v2-Branch veroeffentlicht, nicht
+    # ueber diesen Electron-Build. Fuer v2-Releases hier nichts tun.
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.release.tag_name, 'v2') }}
     runs-on: windows-latest
     timeout-minutes: 45
     env:
