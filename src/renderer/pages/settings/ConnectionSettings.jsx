@@ -69,8 +69,8 @@ export default function ConnectionSettingsPage() {
     if (!endpoint) {
       toast({
         variant: 'warning',
-        title: 'Nothing to copy',
-        message: 'Your address is not ready yet. Wait a few seconds and try again.',
+        title: 'Nichts zu kopieren',
+        message: 'Deine Adresse ist noch nicht bereit. Warte ein paar Sekunden und versuche es erneut.',
       });
       return;
     }
@@ -78,13 +78,13 @@ export default function ConnectionSettingsPage() {
     try {
       await navigator.clipboard.writeText(endpoint);
       setCopied(true);
-      toast({ variant: 'success', title: 'Copied', message: 'Peer address copied to clipboard.' });
+      toast({ variant: 'success', title: 'Kopiert', message: 'Peer-Adresse in die Zwischenablage kopiert.' });
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast({
         variant: 'error',
-        title: 'Copy failed',
-        message: 'Clipboard access was denied or is unavailable.',
+        title: 'Kopieren fehlgeschlagen',
+        message: 'Zugriff auf die Zwischenablage verweigert oder nicht verfügbar.',
       });
     }
   };
@@ -104,31 +104,31 @@ export default function ConnectionSettingsPage() {
         void window.bluetalk?.peer?.refreshDiscovery?.();
         toast({
           variant: 'success',
-          title: 'Port test complete',
-          message: recommended ? `Recommended port: ${recommended}` : 'At least one port responded as open.',
+          title: 'Porttest abgeschlossen',
+          message: recommended ? `Empfohlener Port: ${recommended}` : 'Mindestens ein Port hat als offen geantwortet.',
         });
       } else {
         toast({
           variant: 'warning',
-          title: 'Port test finished',
-          message: 'No open standard ports detected from this machine.',
+          title: 'Porttest beendet',
+          message: 'Keine offenen Standard-Ports von diesem Rechner erkannt.',
         });
       }
 
       if (window.bluetalk?.notify?.show) {
         const title = openPorts.length > 0
-          ? 'BlueTalk network test complete'
-          : 'BlueTalk network test finished';
+          ? 'BlueTalk-Netzwerktest abgeschlossen'
+          : 'BlueTalk-Netzwerktest beendet';
         const body = openPorts.length > 0
-          ? `Recommended port: ${recommended}`
-          : 'No open standard ports detected.';
+          ? `Empfohlener Port: ${recommended}`
+          : 'Keine offenen Standard-Ports erkannt.';
         window.bluetalk.notify.show({ title, body });
       }
     } catch (e) {
-      const msg = e?.message || 'The port probe could not be completed.';
-      toast({ variant: 'error', title: 'Port test failed', message: msg });
+      const msg = e?.message || 'Der Porttest konnte nicht abgeschlossen werden.';
+      toast({ variant: 'error', title: 'Porttest fehlgeschlagen', message: msg });
       window.bluetalk?.notify?.show?.({
-        title: 'BlueTalk network test failed',
+        title: 'BlueTalk-Netzwerktest fehlgeschlagen',
         body: msg,
       });
     } finally {
@@ -146,8 +146,8 @@ export default function ConnectionSettingsPage() {
         setPortDiagnostics(report.portProbe);
       }
     } catch (e) {
-      const msg = e?.message || 'Doctor check failed.';
-      toast({ variant: 'error', title: 'Doctor failed', message: msg });
+      const msg = e?.message || 'Diagnose fehlgeschlagen.';
+      toast({ variant: 'error', title: 'Diagnose fehlgeschlagen', message: msg });
     } finally {
       setDoctorLoading(false);
     }
@@ -160,8 +160,8 @@ export default function ConnectionSettingsPage() {
       change('apiPort', next);
       toast({
         variant: 'success',
-        title: 'Setting updated',
-        message: `API port set to ${next}. The REST listener was restarted.`,
+        title: 'Einstellung aktualisiert',
+        message: `API-Port auf ${next} gesetzt. Der REST-Listener wurde neu gestartet.`,
       });
     }
   };
@@ -179,10 +179,10 @@ export default function ConnectionSettingsPage() {
         setConfigTail(tail.text || '');
         if (tail.path) setConfigPath(tail.path);
       } else {
-        setConfigTail(tail?.error || 'Could not read configuration file.');
+        setConfigTail(tail?.error || 'Konfigurationsdatei konnte nicht gelesen werden.');
       }
     } catch (e) {
-      setConfigTail(e?.message || 'Read failed.');
+      setConfigTail(e?.message || 'Lesen fehlgeschlagen.');
     } finally {
       setConfigLoading(false);
     }
@@ -196,11 +196,11 @@ export default function ConnectionSettingsPage() {
       void window.bluetalk.peer.refreshDiscovery?.();
       toast({
         variant: 'success',
-        title: 'Reconnect started',
-        message: 'Dialing saved contact addresses in the background.',
+        title: 'Neuverbindung gestartet',
+        message: 'Gespeicherte Kontaktadressen werden im Hintergrund angewählt.',
       });
     } catch (e) {
-      toast({ variant: 'error', title: 'Reconnect failed', message: e?.message || 'Unknown error' });
+      toast({ variant: 'error', title: 'Neuverbindung fehlgeschlagen', message: e?.message || 'Unbekannter Fehler' });
     } finally {
       setRedialing(false);
     }
@@ -213,14 +213,14 @@ export default function ConnectionSettingsPage() {
       await window.bluetalk.peer.resetAllConnections();
       toast({
         variant: 'success',
-        title: 'Connections reset',
-        message: 'All peer connections were closed; reconnecting to contacts and discovery in the background.',
+        title: 'Verbindungen zurückgesetzt',
+        message: 'Alle Peer-Verbindungen wurden getrennt; Neuverbindung zu Kontakten und Discovery läuft im Hintergrund.',
       });
     } catch (e) {
       toast({
         variant: 'error',
-        title: 'Reset failed',
-        message: e?.message || 'Unknown error',
+        title: 'Zurücksetzen fehlgeschlagen',
+        message: e?.message || 'Unbekannter Fehler',
       });
     } finally {
       setResettingConnections(false);
@@ -230,8 +230,8 @@ export default function ConnectionSettingsPage() {
   return (
     <div className="page">
       <SettingsBackHeader
-        title="Connection"
-        subtitle="Peers, network, and ports"
+        title="Verbindung"
+        subtitle="Peers, Netzwerk und Ports"
         icon={Plug}
       />
 
@@ -242,14 +242,14 @@ export default function ConnectionSettingsPage() {
               <span className="section-title-icon" aria-hidden>
                 <Plug size={15} strokeWidth={SETTINGS_ICON_STROKE} />
               </span>
-              Connections
+              Verbindungen
             </h3>
           </div>
           <div className="card flex flex-col gap-3">
             <div className="input-group">
-              <label>Reconnect to contacts</label>
+              <label>Zu Kontakten neu verbinden</label>
               <p className="text-sm text-muted" style={{ margin: '0 0 8px' }}>
-                Retry outbound connections to every saved contact address and refresh LAN discovery. Use this after a network change or if peers show as offline.
+                Versucht ausgehende Verbindungen zu allen gespeicherten Kontaktadressen erneut und aktualisiert die LAN-Discovery. Nützlich nach einem Netzwerkwechsel oder wenn Peers als offline angezeigt werden.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -263,7 +263,7 @@ export default function ConnectionSettingsPage() {
                   }
                 >
                   <Unplug size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {resettingConnections ? 'Resetting…' : 'Reset all & reconnect'}
+                  {resettingConnections ? 'Wird zurückgesetzt…' : 'Alle zurücksetzen & neu verbinden'}
                 </button>
                 <button
                   type="button"
@@ -272,15 +272,15 @@ export default function ConnectionSettingsPage() {
                   disabled={redialing || resettingConnections || !window.bluetalk?.peer?.reconnectContacts}
                 >
                   <RefreshCw size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {redialing ? 'Reconnecting…' : 'Reconnect'}
+                  {redialing ? 'Wird verbunden…' : 'Neu verbinden'}
                 </button>
               </div>
               <p className="text-sm text-muted" style={{ margin: '8px 0 0' }}>
-                Reset all closes every active chat connection first, then runs the same reconnect and discovery refresh as above. Use when chats are stuck or state looks inconsistent.
+                „Alle zurücksetzen“ trennt zuerst alle aktiven Chat-Verbindungen und führt dann dieselbe Neuverbindung und Discovery-Aktualisierung wie oben aus. Nützlich, wenn Chats hängen oder der Zustand inkonsistent wirkt.
               </p>
             </div>
             <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
-              <span className="text-muted">Currently connected:</span>
+              <span className="text-muted">Aktuell verbunden:</span>
               <span className="badge badge-default">{peers.length}</span>
             </div>
           </div>
@@ -293,29 +293,29 @@ export default function ConnectionSettingsPage() {
               <span className="section-title-icon" aria-hidden>
                 <Network size={15} strokeWidth={SETTINGS_ICON_STROKE} />
               </span>
-              Network
+              Netzwerk
             </h3>
           </div>
           <div className="card flex flex-col gap-3">
             {peerInfo && (
               <>
                 <div className="input-group">
-                  <label>Your Primary Address</label>
+                  <label>Deine primäre Adresse</label>
                   <div className="flex gap-2">
                     <input
                       className="input font-mono"
-                      value={peerInfo?.endpoints?.[0] || (peerInfo?.addresses?.[0] ? `${peerInfo.addresses[0]}:${peerInfo.port}` : 'Detecting...')}
+                      value={peerInfo?.endpoints?.[0] || (peerInfo?.addresses?.[0] ? `${peerInfo.addresses[0]}:${peerInfo.port}` : 'Wird ermittelt…')}
                       readOnly
                       style={{ color: 'var(--fg-1)' }}
                     />
-                    <button className="btn btn-secondary btn-icon" onClick={copyAddress} title="Copy address">
+                    <button className="btn btn-secondary btn-icon" onClick={copyAddress} title="Adresse kopieren">
                       {copied ? <Check size={15} strokeWidth={SETTINGS_ICON_STROKE} /> : <Copy size={15} strokeWidth={SETTINGS_ICON_STROKE} />}
                     </button>
                   </div>
                 </div>
 
                 <div className="input-group">
-                  <label>Listening Ports</label>
+                  <label>Lauschende Ports</label>
                   <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
                     {(peerInfo?.ports?.length ? peerInfo.ports : [peerInfo.port]).map((port) => (
                       <span key={port} className="badge badge-default">{port}</span>
@@ -324,9 +324,9 @@ export default function ConnectionSettingsPage() {
                 </div>
 
                 <div className="input-group">
-                  <label>Reachable Endpoints</label>
+                  <label>Erreichbare Endpunkte</label>
                   <div className="code-block" style={{ marginTop: 0 }}>
-                    {(peerInfo?.endpoints?.length ? peerInfo.endpoints : ['Detecting...']).map((endpoint) => (
+                    {(peerInfo?.endpoints?.length ? peerInfo.endpoints : ['Wird ermittelt…']).map((endpoint) => (
                       <div key={endpoint}>{endpoint}</div>
                     ))}
                   </div>
@@ -335,7 +335,7 @@ export default function ConnectionSettingsPage() {
             )}
 
             <div className="input-group">
-              <label>API Port</label>
+              <label>API-Port</label>
               <input
                 className="input font-mono"
                 type="number"
@@ -345,7 +345,7 @@ export default function ConnectionSettingsPage() {
             </div>
 
             <div className="input-group">
-              <label>API Bearer Token</label>
+              <label>API-Bearer-Token</label>
               <div className="flex gap-2">
                 <input
                   className="input font-mono"
@@ -360,33 +360,33 @@ export default function ConnectionSettingsPage() {
                   onClick={async () => {
                     if (!apiAccess?.token) return;
                     await navigator.clipboard.writeText(apiAccess.token);
-                    toast({ variant: 'success', title: 'API token copied' });
+                    toast({ variant: 'success', title: 'API-Token kopiert' });
                   }}
                 >
-                  Copy
+                  Kopieren
                 </button>
               </div>
               <p className="text-sm text-muted" style={{ margin: '8px 0 0' }}>
-                The local REST API listens only on 127.0.0.1 and requires this token as an Authorization: Bearer header.
+                Die lokale REST-API lauscht nur auf 127.0.0.1 und erwartet dieses Token als Authorization: Bearer-Header.
               </p>
             </div>
 
             <div className="input-group">
-              <label>Port Test</label>
+              <label>Porttest</label>
               <div className="flex gap-2" style={{ alignItems: 'center' }}>
                 <button
                   className="btn btn-secondary"
                   onClick={testNetworkPorts}
                   disabled={testingPorts}
-                  title="Test common ports in restrictive networks"
+                  title="Gängige Ports in restriktiven Netzwerken testen"
                 >
                   <TestTube2 size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {testingPorts ? 'Testing ports...' : 'Test ports'}
+                  {testingPorts ? 'Teste Ports…' : 'Ports testen'}
                 </button>
                 {portDiagnostics?.recommendedPort ? (
-                  <span className="badge badge-success">Recommended: {portDiagnostics.recommendedPort}</span>
+                  <span className="badge badge-success">Empfohlen: {portDiagnostics.recommendedPort}</span>
                 ) : (
-                  <span className="badge badge-muted">No recommendation</span>
+                  <span className="badge badge-muted">Keine Empfehlung</span>
                 )}
               </div>
 
@@ -401,7 +401,7 @@ export default function ConnectionSettingsPage() {
                       <div key={check.port} className="flex items-center gap-2" style={{ marginTop: 2 }}>
                         <Cable size={14} strokeWidth={SETTINGS_ICON_STROKE} className="text-muted" style={{ flexShrink: 0 }} aria-hidden />
                         <span>
-                        Port {check.port}: {check.status === 'open' ? 'open' : 'blocked'}
+                        Port {check.port}: {check.status === 'open' ? 'offen' : 'blockiert'}
                         {check.code ? ` (${check.code})` : ''}
                         </span>
                       </div>
@@ -412,9 +412,9 @@ export default function ConnectionSettingsPage() {
             </div>
 
             <div className="input-group">
-              <label>Network doctor</label>
+              <label>Netzwerkdiagnose</label>
               <p className="text-sm text-muted" style={{ margin: '0 0 8px' }}>
-                Combines outbound port probes with local listener state and suggests one-click fixes when they help.
+                Kombiniert ausgehende Port-Prüfungen mit dem lokalen Listener-Status und schlägt Ein-Klick-Korrekturen vor, wenn sie helfen.
               </p>
               <div className="flex gap-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
@@ -422,15 +422,15 @@ export default function ConnectionSettingsPage() {
                   className="btn btn-secondary"
                   onClick={runNetworkDoctor}
                   disabled={doctorLoading}
-                  title="Run connectivity and configuration checks"
+                  title="Verbindungs- und Konfigurationsprüfungen ausführen"
                 >
                   <Stethoscope size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {doctorLoading ? 'Running…' : 'Run doctor'}
+                  {doctorLoading ? 'Läuft…' : 'Diagnose starten'}
                 </button>
                 {doctorResult?.issues?.length ? (
-                  <span className="badge badge-warn">{doctorResult.issues.length} finding{doctorResult.issues.length !== 1 ? 's' : ''}</span>
+                  <span className="badge badge-warn">{doctorResult.issues.length} Befund{doctorResult.issues.length !== 1 ? 'e' : ''}</span>
                 ) : doctorResult ? (
-                  <span className="badge badge-success">No issues</span>
+                  <span className="badge badge-success">Keine Probleme</span>
                 ) : null}
               </div>
               {doctorResult?.issues?.length > 0 && (
@@ -462,9 +462,9 @@ export default function ConnectionSettingsPage() {
             </div>
 
             <div className="input-group">
-              <label>Configuration log (tail)</label>
+              <label>Konfigurationsprotokoll (Auszug)</label>
               <p className="text-sm text-muted" style={{ margin: '0 0 8px' }}>
-                Last portion of the on-disk settings JSON (no separate log file). Useful for support and verifying ports after changes.
+                Letzter Teil der gespeicherten Einstellungs-JSON (keine separate Logdatei). Nützlich für Support und zum Prüfen der Ports nach Änderungen.
               </p>
               <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
                 <button
@@ -474,7 +474,7 @@ export default function ConnectionSettingsPage() {
                   disabled={configLoading}
                 >
                   <ScrollText size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {configLoading ? 'Loading…' : 'Load tail'}
+                  {configLoading ? 'Wird geladen…' : 'Auszug laden'}
                 </button>
                 {configPath ? (
                   <span className="text-xs text-muted font-mono" style={{ alignSelf: 'center', wordBreak: 'break-all' }} title={configPath}>
@@ -489,11 +489,11 @@ export default function ConnectionSettingsPage() {
 
             <div className="mt-1">
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-medium" style={{ fontSize: 13 }}>Connected Peers</span>
+                <span className="font-medium" style={{ fontSize: 13 }}>Verbundene Peers</span>
                 <span className="badge badge-default">{peers.length}</span>
               </div>
               {peers.length === 0 ? (
-                <p className="text-sm text-muted">BlueTalk discovers peers on the local network and can test multiple ports in parallel.</p>
+                <p className="text-sm text-muted">BlueTalk findet Peers im lokalen Netzwerk und kann mehrere Ports parallel testen.</p>
               ) : (
                 <div className="flex flex-col gap-2">
                   {peers.map((peer) => (

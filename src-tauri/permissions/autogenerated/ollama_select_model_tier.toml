@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-select-model-tier"
+description = "Enables the ollama_select_model_tier command without any pre-configured scope."
+commands.allow = ["ollama_select_model_tier"]
+
+[[permission]]
+identifier = "deny-ollama-select-model-tier"
+description = "Denies the ollama_select_model_tier command without any pre-configured scope."
+commands.deny = ["ollama_select_model_tier"]

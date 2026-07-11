@@ -98,7 +98,7 @@ export function ToastProvider({ children, solidBottomRight = false }) {
               role="status"
               style={stackStyle}
             >
-              <Icon className="toast-icon" size={18} strokeWidth={2} aria-hidden />
+              <Icon className="toast-icon" size={18} strokeWidth={1.75} aria-hidden />
               <div className="toast-body">
                 {t.title ? <div className="toast-title">{t.title}</div> : null}
                 {t.message ? <div className="toast-message">{t.message}</div> : null}
@@ -109,7 +109,7 @@ export function ToastProvider({ children, solidBottomRight = false }) {
                 onClick={() => dismissToast(t.id)}
                 aria-label="Dismiss notification"
               >
-                <X size={14} strokeWidth={2} aria-hidden />
+                <X size={14} strokeWidth={1.75} aria-hidden />
               </button>
             </div>
           );

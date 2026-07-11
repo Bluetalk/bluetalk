@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-game-window-push-state"
+description = "Enables the game_window_push_state command without any pre-configured scope."
+commands.allow = ["game_window_push_state"]
+
+[[permission]]
+identifier = "deny-game-window-push-state"
+description = "Denies the game_window_push_state command without any pre-configured scope."
+commands.deny = ["game_window_push_state"]

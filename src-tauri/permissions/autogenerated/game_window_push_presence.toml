@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-game-window-push-presence"
+description = "Enables the game_window_push_presence command without any pre-configured scope."
+commands.allow = ["game_window_push_presence"]
+
+[[permission]]
+identifier = "deny-game-window-push-presence"
+description = "Denies the game_window_push_presence command without any pre-configured scope."
+commands.deny = ["game_window_push_presence"]

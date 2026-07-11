@@ -66,7 +66,7 @@ export default function NotificationCenter() {
         }
         aria-expanded={open}
       >
-        <Bell size={18} strokeWidth={2} />
+        <Bell size={18} strokeWidth={1.75} />
         {count > 0 && <span className="notif-center-request-dot" aria-hidden />}
       </button>
 

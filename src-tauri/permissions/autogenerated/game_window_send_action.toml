@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-game-window-send-action"
+description = "Enables the game_window_send_action command without any pre-configured scope."
+commands.allow = ["game_window_send_action"]
+
+[[permission]]
+identifier = "deny-game-window-send-action"
+description = "Denies the game_window_send_action command without any pre-configured scope."
+commands.deny = ["game_window_send_action"]

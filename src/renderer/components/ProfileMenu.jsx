@@ -126,14 +126,14 @@ export default function ProfileMenu({ variant = 'default' }) {
         {isSidebar ? (
           <span className="profile-menu-sidebar-label">Profile</span>
         ) : (
-          open ? <ChevronDown size={15} strokeWidth={2} /> : <ChevronUp size={15} strokeWidth={2} />
+          open ? <ChevronDown size={15} strokeWidth={1.75} /> : <ChevronUp size={15} strokeWidth={1.75} />
         )}
       </button>
 
       {open && (
         <div className="profile-menu-dropdown animate-scale">
           <div className="profile-menu-header">
-            <User size={14} strokeWidth={2} aria-hidden />
+            <User size={14} strokeWidth={1.75} aria-hidden />
             <span>Your profile</span>
           </div>
 
@@ -198,7 +198,7 @@ export default function ProfileMenu({ variant = 'default' }) {
                 navigate('/cloud-sync');
               }}
             >
-              <Cloud size={16} strokeWidth={2} />
+              <Cloud size={16} strokeWidth={1.75} />
               Cloud sync
             </button>
           </div>

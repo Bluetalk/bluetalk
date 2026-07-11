@@ -3,8 +3,7 @@
  *
  * Responsibilities:
  *   - Keep a live list of installed plugins (from main via `bluetalk.plugins.list()`).
- *   - Execute each enabled plugin's `ui.js` source inside a per-plugin function
- *     closure so plugin globals don't collide.
+ *   - Activate trusted built-in plugins through static ESM chunks.
  *   - Provide the plugin-facing `BlueTalkPlugin` API: events, peer, messages,
  *     (tabs, screens, commands, composer attachments), storage, toast, realtime.
  *   - Maintain registries for custom tabs + screens and notify subscribers
@@ -13,15 +12,24 @@
  * Game plugins (manifest.game): no sidebar tab; register launcher commands via
  * api.ui.registerCommand — launcherState, launchNew, launchResume, openWindow.
  *
- * The API is intentionally permissive — all plugins are locally installed by
- * the user. Guard rails are limited to avoiding obvious foot-guns (passing
- * frozen snapshots out, scoping storage per plugin, removing listeners on
- * disable/uninstall).
+ * Third-party plugin code is deliberately never evaluated in this privileged
+ * webview. It is handled by the isolated v2 plugin host instead.
  */
 
 import { createRealtimeManager } from '../../shared/plugin-realtime.mjs';
 
 const LEGACY_GAME_TAB_IDS = new Set(['uno:game', 'poker:table']);
+
+const BUNDLED_UI_LOADERS = Object.freeze({
+  chess: () => import('../../../assets/bundled-plugins/chess/ui.js'),
+  'connect-four': () => import('../../../assets/bundled-plugins/connect-four/ui.js'),
+  hello: () => import('../../../assets/bundled-plugins/hello/ui.js'),
+  'live-docs': () => import('../../../assets/bundled-plugins/live-docs/ui.js'),
+  poker: () => import('../../../assets/bundled-plugins/poker/ui.js'),
+  'theme-studio': () => import('../../../assets/bundled-plugins/theme-studio/ui.js'),
+  'tic-tac-toe': () => import('../../../assets/bundled-plugins/tic-tac-toe/ui.js'),
+  uno: () => import('../../../assets/bundled-plugins/uno/ui.js'),
+});
 
 const EVENTS_FROM_MAIN = [
   'peer:connected',
@@ -173,7 +181,10 @@ export class PluginRuntime {
 
         if (plugin.enabled && plugin.hasUi) {
           const isGame = this._isGamePlugin(plugin);
-          const uiChanged = Boolean(activeRec) && existing?.ui !== plugin.ui;
+          const uiChanged = Boolean(activeRec) && (
+            existing?.manifest?.version !== plugin.manifest?.version
+            || existing?.source !== plugin.source
+          );
           const needsActivation = !activeRec
             || uiChanged
             || (isGame && !activeRec.commands.has('launcherState'));
@@ -227,6 +238,7 @@ export class PluginRuntime {
       eventListeners: new Map(),
       disposers: new Set(),
       timers: new Map(),
+      activation: null,
       logger,
     };
     this.active.set(plugin.id, record);
@@ -237,25 +249,38 @@ export class PluginRuntime {
     } catch (e) {
       logger.error('API build failed:', e);
       this.active.delete(plugin.id);
-      return;
+      return Promise.resolve(false);
     }
     record.api = api;
 
-    try {
-      // Wrap plugin source in a function scope for hygiene.
-      // eslint-disable-next-line no-new-func
-      const fn = new Function('BlueTalkPlugin', 'plugin', 'window', 'document', plugin.ui || '');
-      fn(api, api, window, document);
-    } catch (e) {
-      logger.error('activation failed:', e);
+    const loader = BUNDLED_UI_LOADERS[plugin.id];
+    const trustedBundledPlugin = plugin.bundled === true || plugin.source === 'bundled';
+    if (!loader || !trustedBundledPlugin) {
+      logger.error('third-party UI refused in the privileged app webview');
       this._deactivate(plugin.id, { emit: false });
-      return;
+      return Promise.resolve(false);
     }
 
-    if (record.isGameLauncher && !record.commands.has('launcherState')) {
-      logger.error('activation incomplete: missing launcher commands');
-      this._deactivate(plugin.id, { emit: false });
-    }
+    record.activation = loader()
+      .then((module) => {
+        if (this.active.get(plugin.id) !== record) return false;
+        if (typeof module.default !== 'function') {
+          throw new Error('built-in plugin has no activation export');
+        }
+        module.default(api);
+        if (record.isGameLauncher && !record.commands.has('launcherState')) {
+          throw new Error('activation incomplete: missing launcher commands');
+        }
+        return true;
+      })
+      .catch((error) => {
+        logger.error('activation failed:', error);
+        if (this.active.get(plugin.id) === record) {
+          this._deactivate(plugin.id, { emit: false });
+        }
+        return false;
+      });
+    return record.activation;
   }
 
   _deactivate(id, options = {}) {
@@ -686,6 +711,7 @@ export class PluginRuntime {
 
   async invokePluginCommand(pluginId, commandId, args) {
     let record = this.active.get(pluginId);
+    if (record?.activation) await record.activation;
     let handler = record?.commands.get(commandId);
     if (!record || !handler) {
       await this.refresh();
@@ -694,9 +720,10 @@ export class PluginRuntime {
         if (this.active.has(pluginId)) {
           this._deactivate(pluginId, { emit: false });
         }
-        this._activate(plugin);
+        await this._activate(plugin);
       }
       record = this.active.get(pluginId);
+      if (record?.activation) await record.activation;
       handler = record?.commands.get(commandId);
     }
 

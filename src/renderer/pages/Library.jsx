@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Music,
   FileText,
+  Search,
   Smile,
 } from 'lucide-react';
 import { useApp } from '../App';
@@ -57,6 +58,7 @@ export default function LibraryPage() {
   const { toast } = useToast();
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [previewCache, setPreviewCache] = useState({});
   const previewCacheRef = useRef({});
@@ -93,9 +95,15 @@ export default function LibraryPage() {
   );
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return items;
-    return items.filter((item) => item.category === filter);
-  }, [items, filter]);
+    const base = filter === 'all' ? items : items.filter((item) => item.category === filter);
+    const query = search.trim().toLowerCase();
+    if (!query) return base;
+    return base.filter((item) =>
+      `${item.fileName || ''} ${item.sender || ''} ${contactName(item.peerId, item.sender)}`
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [items, filter, search, contactName]);
 
   const loadPreview = useCallback(async (item) => {
     const key = `${item.peerId}:${item.messageId}`;
@@ -196,6 +204,15 @@ export default function LibraryPage() {
       </div>
 
       <div className="page-body">
+        <div className="search-bar" style={{ minWidth: 200, maxWidth: 360, marginBottom: 12 }}>
+          <Search size={14} />
+          <input
+            className="input"
+            placeholder="Nach Datei oder Absender suchen…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <div className="library-filters">
           {FILTERS.map(({ id, label, icon: Icon }) => (
             <button
@@ -225,8 +242,17 @@ export default function LibraryPage() {
         ) : filtered.length === 0 ? (
           <div className="library-empty card">
             <FolderOpen size={32} strokeWidth={ICON_STROKE} aria-hidden />
-            <p>Noch keine empfangenen Dateien</p>
-            <span>Dateien und Sticker aus Chats erscheinen hier automatisch.</span>
+            {items.length > 0 ? (
+              <>
+                <p>Keine Treffer</p>
+                <span>Keine Datei passt zu Filter oder Suche.</span>
+              </>
+            ) : (
+              <>
+                <p>Noch keine empfangenen Dateien</p>
+                <span>Dateien und Sticker aus Chats erscheinen hier automatisch.</span>
+              </>
+            )}
           </div>
         ) : (
           <div className="library-grid">

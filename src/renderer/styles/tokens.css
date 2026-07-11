@@ -1,0 +1,102 @@
+/* ============================================================
+   BlueTalk — Vercel-inspired design system
+   Light + Dark theme via [data-theme] attribute
+   ============================================================ */
+
+/* ---------- Theme tokens ---------- */
+:root,
+[data-theme="light"] {
+  --bg-0: #ffffff;
+  --bg-1: #fafafa;
+  --bg-2: #f5f5f5;
+  --bg-3: #ebebeb;
+  --bg-hover: #f0f0f0;
+  --bg-active: #e8e8e8;
+  --bg-input: #ffffff;
+
+  --fg-0: #171717;
+  --fg-1: #3f3f46;
+  --fg-2: #71717a;
+  --fg-3: #a1a1aa;
+  --fg-inv: #ffffff;
+
+  --accent: #000000;
+  --accent-hover: #171717;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(0,0,0,0.06);
+
+  --blue: #2563eb;
+  --blue-soft: rgba(37,99,235,0.08);
+  --green: #16a34a;
+  --green-soft: rgba(22,163,74,0.08);
+  --red: #dc2626;
+  --red-soft: rgba(220,38,38,0.06);
+  --amber: #b45309;
+  --amber-soft: rgba(180,83,9,0.1);
+
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.1);
+
+  /* Theme-unabhängig; wird u.a. von .msg-agent-tool-line referenziert */
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
+}
+
+[data-theme="dark"] {
+  --bg-0: #0a0a0a;
+  --bg-1: #111111;
+  --bg-2: #191919;
+  --bg-3: #222222;
+  --bg-hover: #1a1a1a;
+  --bg-active: #242424;
+  --bg-input: #111111;
+
+  --fg-0: #ededed;
+  --fg-1: #a1a1aa;
+  --fg-2: #71717a;
+  --fg-3: #52525b;
+  --fg-inv: #000000;
+
+  --accent: #ffffff;
+  --accent-hover: #e5e5e5;
+  --accent-fg: #000000;
+  --accent-soft: rgba(255,255,255,0.06);
+
+  --blue: #3b82f6;
+  --blue-soft: rgba(59,130,246,0.1);
+  --green: #22c55e;
+  --green-soft: rgba(34,197,94,0.1);
+  --red: #ef4444;
+  --red-soft: rgba(239,68,68,0.08);
+  --amber: #fbbf24;
+  --amber-soft: rgba(251,191,36,0.12);
+
+  --border: #262626;
+  --border-strong: #333333;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.5);
+}
+
+/* ---------- Reset ---------- */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root { height: 100%; overflow: hidden; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }
+

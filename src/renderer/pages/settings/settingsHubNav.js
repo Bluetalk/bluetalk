@@ -4,14 +4,14 @@ export const SETTINGS_HUB_NAV = [
   {
     to: '/settings/account',
     icon: User,
-    title: 'Account',
-    subtitle: 'Profile, identity, and local data',
+    title: 'Konto',
+    subtitle: 'Profil, Identität und lokale Daten',
   },
   {
     to: '/settings/connection',
     icon: Plug,
-    title: 'Connection',
-    subtitle: 'Peers, network, and ports',
+    title: 'Verbindung',
+    subtitle: 'Peers, Netzwerk und Ports',
   },
   {
     to: '/settings/stickers',
@@ -34,19 +34,19 @@ export const SETTINGS_HUB_NAV = [
   {
     to: '/docs/getting-started',
     icon: BookOpen,
-    title: 'Plugin API Docs',
-    subtitle: 'Developer documentation for extensions',
+    title: 'Plugin-API-Doku',
+    subtitle: 'Entwicklerdokumentation für Erweiterungen',
   },
   {
     to: '/settings/updates',
     icon: ArrowUpCircle,
     title: 'Updates',
-    subtitle: 'Automatic checks, downloads, and installs',
+    subtitle: 'Automatische Prüfungen, Downloads und Installationen',
   },
   {
     to: '/settings/application',
     icon: Server,
-    title: 'Application',
-    subtitle: 'Notifications, theme, startup, and debug',
+    title: 'Anwendung',
+    subtitle: 'Benachrichtigungen, Design, Autostart und Debug',
   },
 ];

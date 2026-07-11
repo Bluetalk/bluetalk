@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-download-model"
+description = "Enables the ollama_download_model command without any pre-configured scope."
+commands.allow = ["ollama_download_model"]
+
+[[permission]]
+identifier = "deny-ollama-download-model"
+description = "Denies the ollama_download_model command without any pre-configured scope."
+commands.deny = ["ollama_download_model"]

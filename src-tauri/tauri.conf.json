@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BlueTalk",
+  "version": "2.0.0",
+  "identifier": "com.bluetalk.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "BlueTalk",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 840,
+        "minHeight": 560,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main", "game-windows"],
+      "freezePrototype": true,
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:* http://127.0.0.1:*; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "../assets/bundled-plugins/": "bundled-plugins/"
+    },
+    "shortDescription": "Secure peer-to-peer chat",
+    "longDescription": "BlueTalk is a local-first peer-to-peer messenger with encrypted chats, extensible tools and offline AI.",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": true,
+        "languages": ["English", "German"],
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1NzAxOUZEOTA4RDJGQkIKUldTN0w0MlEvUmx3VlFZNUJXRVE1M2d1NlVLWFZhTHNrQUVuRkU2OTdvVDZsWVVwME05OFpMM08K",
+      "endpoints": [
+        "https://github.com/Bluetalk/bluetalk/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

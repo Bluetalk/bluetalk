@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-peer-reset-all-connections"
+description = "Enables the peer_reset_all_connections command without any pre-configured scope."
+commands.allow = ["peer_reset_all_connections"]
+
+[[permission]]
+identifier = "deny-peer-reset-all-connections"
+description = "Denies the peer_reset_all_connections command without any pre-configured scope."
+commands.deny = ["peer_reset_all_connections"]

@@ -1,0 +1,794 @@
+/* Poker-Einladung (Chat-Embed) */
+.poker-invite-card {
+  max-width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  background:
+    radial-gradient(ellipse 120% 80% at 50% 0%, rgba(34, 197, 94, 0.12), transparent 55%),
+    linear-gradient(155deg, rgba(8, 14, 22, 0.98) 0%, rgba(10, 22, 36, 0.96) 48%, rgba(5, 18, 8, 0.98) 100%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(240, 215, 140, 0.08);
+  color: #e8eef6;
+}
+
+.poker-invite-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.poker-invite-card-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 22px;
+  line-height: 1;
+  color: #f0d78c;
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.22);
+  box-shadow: 0 0 18px rgba(212, 175, 55, 0.12);
+}
+
+.poker-invite-card-copy {
+  min-width: 0;
+}
+
+.poker-invite-card-kicker {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(240, 215, 140, 0.72);
+  margin-bottom: 2px;
+}
+
+.poker-invite-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #f5f7fb;
+}
+
+.poker-invite-card-meta {
+  font-size: 12px;
+  color: rgba(200, 210, 225, 0.72);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.poker-invite-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.poker-invite-card-stats div {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(212, 175, 55, 0.12);
+}
+
+.poker-invite-card-stats dt {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(200, 210, 225, 0.55);
+}
+
+.poker-invite-card-stats dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0d78c;
+}
+
+.poker-invite-card-hint {
+  font-size: 12px;
+  color: rgba(200, 210, 225, 0.68);
+  margin: 12px 0 10px;
+  line-height: 1.45;
+}
+
+.poker-invite-card-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(240, 215, 140, 0.35);
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.95), rgba(180, 140, 40, 0.95));
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.poker-invite-card-btn:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 8px 20px rgba(212, 175, 55, 0.22);
+  transform: translateY(-1px);
+}
+
+.poker-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+/* UNO-Einladung (Chat-Embed) */
+.uno-invite-card {
+  max-width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background:
+    radial-gradient(ellipse 120% 80% at 20% 0%, rgba(239, 68, 68, 0.1), transparent 50%),
+    radial-gradient(ellipse 100% 70% at 80% 0%, rgba(34, 197, 94, 0.1), transparent 50%),
+    linear-gradient(155deg, rgba(8, 12, 28, 0.98) 0%, rgba(12, 18, 40, 0.96) 100%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  color: #e8eef6;
+}
+
+.uno-invite-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.uno-invite-card-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.uno-invite-card-copy { min-width: 0; }
+
+.uno-invite-card-kicker {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #ef4444, #eab308, #22c55e, #3b82f6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 2px;
+  font-weight: 700;
+}
+
+.uno-invite-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #f5f7fb;
+}
+
+.uno-invite-card-meta {
+  font-size: 12px;
+  color: rgba(200, 210, 225, 0.72);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.uno-invite-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.uno-invite-card-stats div {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.uno-invite-card-stats dt {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(200, 210, 225, 0.55);
+}
+
+.uno-invite-card-stats dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.uno-invite-card-hint {
+  font-size: 12px;
+  color: rgba(200, 210, 225, 0.68);
+  margin: 12px 0 10px;
+  line-height: 1.45;
+}
+
+.uno-invite-card-alpha {
+  font-size: 11px;
+  color: rgba(253, 230, 138, 0.9);
+  margin: 0 0 10px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+}
+
+.uno-invite-card-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(90deg, #ef4444, #eab308, #22c55e, #3b82f6);
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.uno-invite-card-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.uno-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.poker-invite-card-btn--inactive,
+.uno-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.poker-invite-card-btn--inactive:hover,
+.uno-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.connect-four-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #ef4444 35%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #ef4444 10%, var(--bg-2)),
+    color-mix(in srgb, #eab308 6%, var(--bg-2))
+  );
+}
+
+.connect-four-invite-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.connect-four-invite-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.connect-four-invite-card-copy { min-width: 0; }
+
+.connect-four-invite-card-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #f87171;
+  margin-bottom: 2px;
+}
+
+.connect-four-invite-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-0);
+}
+
+.connect-four-invite-card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
+.connect-four-invite-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.connect-four-invite-card-stats div {
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg-0) 4%, transparent);
+  text-align: center;
+}
+
+.connect-four-invite-card-stats dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin: 0 0 2px;
+}
+
+.connect-four-invite-card-stats dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.connect-four-invite-card-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-2);
+}
+
+.connect-four-invite-card-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.connect-four-invite-card-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.connect-four-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.connect-four-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.connect-four-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.chess-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #c9a227 35%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #c9a227 10%, var(--bg-2)),
+    color-mix(in srgb, #8b6914 6%, var(--bg-2))
+  );
+}
+
+.chess-invite-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.chess-invite-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.chess-invite-card-copy { min-width: 0; }
+
+.chess-invite-card-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #c9a227;
+  margin-bottom: 2px;
+}
+
+.chess-invite-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-0);
+}
+
+.chess-invite-card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
+.chess-invite-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.chess-invite-card-stats div {
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg-0) 4%, transparent);
+  text-align: center;
+}
+
+.chess-invite-card-stats dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin: 0 0 2px;
+}
+
+.chess-invite-card-stats dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.chess-invite-card-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-2);
+}
+
+.chess-invite-card-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #1a1510;
+  background: linear-gradient(135deg, #c9a227, #a8841a);
+  box-shadow: 0 2px 8px rgba(201, 162, 39, 0.25);
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.chess-invite-card-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.chess-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.chess-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.chess-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.ttt-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #60a5fa 35%, var(--border));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, #3b82f6 12%, var(--bg-2)), var(--bg-1));
+  max-width: 360px;
+}
+
+.ttt-invite-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ttt-invite-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  color: #60a5fa;
+}
+
+.ttt-invite-card-copy { min-width: 0; }
+
+.ttt-invite-card-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ttt-invite-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.ttt-invite-card-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.ttt-invite-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.ttt-invite-card-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-2) 80%, transparent);
+}
+
+.ttt-invite-card-stats dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.ttt-invite-card-stats dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ttt-invite-card-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.ttt-invite-card-btn {
+  align-self: stretch;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.ttt-invite-card-btn:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.ttt-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.ttt-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.ttt-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.live-docs-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #2563eb 35%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #2563eb 12%, var(--bg-2)),
+    color-mix(in srgb, #0ea5e9 6%, var(--bg-2))
+  );
+  max-width: 360px;
+}
+
+.live-docs-invite-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.live-docs-invite-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.live-docs-invite-card-copy { min-width: 0; }
+
+.live-docs-invite-card-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #2563eb;
+  margin-bottom: 2px;
+}
+
+.live-docs-invite-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-0);
+  overflow-wrap: anywhere;
+}
+
+.live-docs-invite-card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
+.live-docs-invite-card-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-2);
+}
+
+.live-docs-invite-card-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.live-docs-invite-card-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.live-docs-invite-card-btn:active {
+  transform: translateY(0);
+}
+
+.live-docs-invite-card-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.live-docs-invite-card-btn--inactive:hover {
+  filter: none;
+  transform: none;
+}
+
+.game-presence-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+}
+
+.game-presence-banner-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.game-presence-banner-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.game-presence-banner-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.game-presence-banner-meta {
+  font-size: 12px;
+  color: var(--fg-2);
+  margin-top: 2px;
+}
+
+.game-presence-banner-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.game-presence-banner-btn--inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  border: 1px solid var(--border);
+}
+
+.game-presence-list-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+

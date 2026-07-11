@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-get-storage-paths"
+description = "Enables the ollama_get_storage_paths command without any pre-configured scope."
+commands.allow = ["ollama_get_storage_paths"]
+
+[[permission]]
+identifier = "deny-ollama-get-storage-paths"
+description = "Denies the ollama_get_storage_paths command without any pre-configured scope."
+commands.deny = ["ollama_get_storage_paths"]

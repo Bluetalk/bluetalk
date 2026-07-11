@@ -1,0 +1,62 @@
+[workspace]
+members = [".", "network-core"]
+
+[package]
+name = "bluetalk"
+version = "2.0.0"
+description = "Secure peer-to-peer communication with BlueTalk"
+authors = ["Henny263462"]
+edition = "2024"
+rust-version = "1.88"
+
+[lib]
+name = "bluetalk_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+bluetalk-network = { path = "network-core" }
+if-addrs = "0.14"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+keyring = "4.1.4"
+log = "0.4"
+parking_lot = "0.12"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+semver = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-window-state = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+walkdir = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = "symbols"
+

@@ -20,8 +20,8 @@ export default function ApplicationSettingsPage() {
   return (
     <div className="page">
       <SettingsBackHeader
-        title="Application"
-        subtitle="Notifications, theme, startup, and debug"
+        title="Anwendung"
+        subtitle="Benachrichtigungen, Design, Autostart und Debug"
         icon={Server}
       />
 
@@ -91,7 +91,7 @@ export default function ApplicationSettingsPage() {
                 className="btn btn-secondary btn-sm"
                 onClick={() => window.bluetalk?.notify?.show?.({
                   title: 'BlueTalk',
-                  body: 'Windows notifications are active.',
+                  body: 'Windows-Benachrichtigungen sind aktiv.',
                   allowInForeground: true,
                 })}
               >
@@ -101,19 +101,19 @@ export default function ApplicationSettingsPage() {
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Theme</span>
-                <span>Switch between light and dark mode</span>
+                <span>Design</span>
+                <span>Zwischen hellem und dunklem Modus wechseln</span>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={toggleTheme}>
                 {theme === 'dark' ? <Sun size={15} strokeWidth={SETTINGS_ICON_STROKE} /> : <Moon size={15} strokeWidth={SETTINGS_ICON_STROKE} />}
-                {theme === 'dark' ? 'Light' : 'Dark'}
+                {theme === 'dark' ? 'Hell' : 'Dunkel'}
               </button>
             </div>
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Minimize to Tray</span>
-                <span>Keep running in the background when closed</span>
+                <span>In den Infobereich minimieren</span>
+                <span>Läuft beim Schließen im Hintergrund weiter</span>
               </div>
               <label className="toggle">
                 <input
@@ -129,9 +129,9 @@ export default function ApplicationSettingsPage() {
               <div className="toggle-row-info">
                 <span className="toggle-row-label-with-icon">
                   <Power size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
-                  Launch at startup
+                  Beim Anmelden starten
                 </span>
-                <span>Open BlueTalk automatically when you sign in to this computer</span>
+                <span>BlueTalk automatisch öffnen, wenn du dich an diesem Computer anmeldest</span>
               </div>
               <label className="toggle">
                 <input
@@ -147,9 +147,9 @@ export default function ApplicationSettingsPage() {
               <div className="toggle-row-info">
                 <span className="toggle-row-label-with-icon">
                   <Bug size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
-                  Debug mode
+                  Debug-Modus
                 </span>
-                <span>Show the Network section (addresses, API port, port tests, doctor, config tail)</span>
+                <span>Zeigt den Netzwerk-Bereich (Adressen, API-Port, Porttests, Diagnose, Konfigurationsauszug)</span>
               </div>
               <label className="toggle">
                 <input

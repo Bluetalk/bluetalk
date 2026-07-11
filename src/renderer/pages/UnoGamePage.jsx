@@ -611,7 +611,6 @@ export default function UnoGamePage() {
         <div className="uno-title">
           <h1>
             {pub.settings?.tableName || 'UNO'}
-            <span className="uno-alpha-tag">Alpha</span>
           </h1>
           <div className="uno-game-titlebar-sub">
             {PHASE_LABELS[pub.phase] || pub.phase}{isHost ? ' · Du bist Host' : ''}
@@ -631,9 +630,6 @@ export default function UnoGamePage() {
         </div>
       </header>
       <main className="uno-game-main">
-        <p className="uno-alpha-notice" role="note">
-          Alpha — Regeln, Verbindung und Darstellung können noch unzuverlässig sein.
-        </p>
         {inLobby ? (
           <LobbyView snapshot={snapshot} selfId={selfId} isHost={isHost} onStart={() => send({ type: 'host_start' })} onLeave={leave} />
         ) : (

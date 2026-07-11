@@ -3,6 +3,17 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.0.0': {
+    title: "What's new in BlueTalk 2.0.0",
+    items: [
+      'Komplett neu aufgebaut: BlueTalk läuft jetzt auf einem Rust-Backend (Tauri) — deutlich schneller, kleiner und sparsamer als die alte Electron-Version.',
+      'Neues Peer-Protokoll v2: Verbindungen sind jetzt zusätzlich transportverschlüsselt und kryptographisch authentifiziert (Ed25519 + ChaCha20-Poly1305). Deine Chats bleiben wie bisher Ende-zu-Ende-verschlüsselt.',
+      'Alle lokalen Daten (Nachrichten, Einstellungen, Kontakte) liegen jetzt in einer verschlüsselten Datenbank; der Schlüssel wird im Windows-Anmeldeinformations-Speicher verwahrt.',
+      'Deine BlueTalk-v1-Daten werden beim ersten Start automatisch übernommen. Hinweis: Das neue Protokoll ist nicht mit v1-Clients verbindbar — beide Seiten benötigen v2.',
+      'Plugins wurden gehärtet: Fremder Plugin-Code läuft nicht mehr im App-Fenster; Spiele und Werkzeuge starten in isolierten Fenstern mit minimalen Rechten.',
+      'Automatische Updates sind jetzt kryptographisch signiert.',
+    ],
+  },
   '1.1.24': {
     title: "What's new in BlueTalk 1.1.24",
     items: [

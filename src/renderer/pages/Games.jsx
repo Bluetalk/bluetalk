@@ -113,10 +113,12 @@ export default function GamesPage() {
     <div className="page page-games">
       <div className="page-header">
         <div>
-          <h2>
-            <Sparkles size={18} strokeWidth={ICON_STROKE} />
+          <h1 className="page-title-row">
+            <span className="page-title-icon" aria-hidden>
+              <Sparkles size={18} strokeWidth={ICON_STROKE} />
+            </span>
             Spiele
-          </h2>
+          </h1>
           <p>
             Starte installierte Spiele — Host erstellt die Lobby, Gäste treten per Chat-Einladung bei.
           </p>
@@ -142,6 +144,9 @@ export default function GamesPage() {
         <div className="games-grid">
           {entries.map(({ game, state, labels }) => {
             const cardClass = `games-launch-card${state.active ? ' is-active' : ''}${!game.enabled ? ' is-inactive' : ''}`;
+            // Alpha-Badge nur, wenn das Manifest tatsächlich einen alphaNotice-Text liefert.
+            const isAlpha = Boolean(game.alphaNotice);
+            const showTag = game.tag && String(game.tag).toLowerCase() !== 'alpha';
             return (
               <article key={game.id} className={cardClass}>
                 <div className="games-launch-card-head">
@@ -151,7 +156,12 @@ export default function GamesPage() {
                   <div className="games-launch-heading">
                     <div className="games-launch-title-row">
                       <h3>{game.name}</h3>
-                      {game.tag ? <span className="plugin-tag-badge plugin-tag-badge--card">{game.tag}</span> : null}
+                      {isAlpha ? (
+                        <span className="plugin-tag-badge plugin-tag-badge--card plugin-tag-badge--alpha">Alpha</span>
+                      ) : null}
+                      {showTag ? (
+                        <span className="plugin-tag-badge plugin-tag-badge--card">{game.tag}</span>
+                      ) : null}
                     </div>
                     {state.active ? (
                       <span className="games-launch-status games-launch-status--live">

@@ -1,0 +1,160 @@
+/* ============================================================
+   BlueTalk — Motion layer
+   Enhancement-only: transitions, entrance and page animations.
+   Colours, tokens and layout are untouched — this file only adds
+   movement. Loaded last so it layers on top of the base styles.
+   ============================================================ */
+
+/* ---------- Keyframes ---------- */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes list-row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+@keyframes fade-overlay {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ---------- Page / route transitions ----------
+   Route components remount on navigation, so the animation replays
+   on every page change without any JS — a gentle fade-and-rise. */
+.content > .page {
+  animation: page-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.page-body {
+  scroll-behavior: smooth;
+}
+
+/* ---------- Chat message entrance ----------
+   Each row animates in as it mounts (new message, chat open, load-more).
+   The transform origin differs per side for a natural "grow from corner"
+   feel. content-visibility rows are unaffected until visible. */
+.msg-row {
+  animation: msg-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.msg-row-self { transform-origin: bottom right; }
+.msg-row-other { transform-origin: bottom left; }
+
+/* ---------- Sidebar navigation ---------- */
+.sidebar-link {
+  transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
+}
+.sidebar-link:hover { transform: translateX(2px); }
+.sidebar-link:active { transform: translateX(0) scale(0.98); }
+.sidebar-link.active { animation: pop-in 0.2s ease both; }
+
+/* ---------- Chat list rows ----------
+   Background-only feedback; scaling would shimmer the row text on click. */
+.list-item {
+  transition: background 0.14s ease;
+}
+
+/* ---------- Cards lift on hover ---------- */
+.games-launch-card,
+.plugin-card,
+.library-item,
+.doc-card {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, border-color 0.16s ease;
+}
+.games-launch-card:hover,
+.plugin-card:hover,
+.doc-card:hover,
+.library-item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ---------- Card grids: gentle staggered entrance ----------
+   `backwards` fill (not `both`) so the final frame does NOT pin the
+   transform — the hover lift above keeps working once the intro ends. */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.plugin-grid > .plugin-card,
+.games-grid > .games-launch-card {
+  animation: card-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.plugin-grid > .plugin-card:nth-child(2),
+.games-grid > .games-launch-card:nth-child(2) { animation-delay: 0.04s; }
+.plugin-grid > .plugin-card:nth-child(3),
+.games-grid > .games-launch-card:nth-child(3) { animation-delay: 0.08s; }
+.plugin-grid > .plugin-card:nth-child(4),
+.games-grid > .games-launch-card:nth-child(4) { animation-delay: 0.12s; }
+.plugin-grid > .plugin-card:nth-child(5),
+.games-grid > .games-launch-card:nth-child(5) { animation-delay: 0.16s; }
+.plugin-grid > .plugin-card:nth-child(n + 6),
+.games-grid > .games-launch-card:nth-child(n + 6) { animation-delay: 0.2s; }
+
+/* ---------- Menus, dropdowns & modals ---------- */
+.context-menu,
+.dropdown-menu,
+.profile-menu,
+.chat-header-peer-menu,
+.ai-chat-model-picker-menu {
+  animation: pop-in 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top;
+}
+.modal-overlay { animation: fade-overlay 0.18s ease both; }
+.modal { animation: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* ---------- Inputs ---------- */
+.input:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- Toggle bounce ---------- */
+.toggle input:checked + .toggle-slider::before {
+  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+}
+
+/* ---------- Reduced motion: honour the OS preference ----------
+   Everything above is decorative; disable it wholesale so the app
+   stays fully usable for users who ask for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .content > .page,
+  .content > .page > .page-body,
+  .msg-row,
+  .sidebar-link.active,
+  .context-menu,
+  .dropdown-menu,
+  .profile-menu,
+  .chat-header-peer-menu,
+  .ai-chat-model-picker-menu,
+  .modal,
+  .composer-live-indicator,
+  .plugin-grid > .plugin-card,
+  .games-grid > .games-launch-card {
+    animation: none !important;
+  }
+  .btn:hover,
+  .btn:active,
+  .btn-icon:hover,
+  .btn-icon:active,
+  .sidebar-link:hover,
+  .sidebar-link:active,
+  .games-launch-card:hover,
+  .plugin-card:hover,
+  .doc-card:hover,
+  .library-item:hover {
+    transform: none !important;
+  }
+  .page-body { scroll-behavior: auto; }
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-messages-delete-message"
+description = "Enables the messages_delete_message command without any pre-configured scope."
+commands.allow = ["messages_delete_message"]
+
+[[permission]]
+identifier = "deny-messages-delete-message"
+description = "Denies the messages_delete_message command without any pre-configured scope."
+commands.deny = ["messages_delete_message"]

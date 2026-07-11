@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-peer-refresh-discovery"
+description = "Enables the peer_refresh_discovery command without any pre-configured scope."
+commands.allow = ["peer_refresh_discovery"]
+
+[[permission]]
+identifier = "deny-peer-refresh-discovery"
+description = "Denies the peer_refresh_discovery command without any pre-configured scope."
+commands.deny = ["peer_refresh_discovery"]

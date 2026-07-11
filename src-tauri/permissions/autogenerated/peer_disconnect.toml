@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-peer-disconnect"
+description = "Enables the peer_disconnect command without any pre-configured scope."
+commands.allow = ["peer_disconnect"]
+
+[[permission]]
+identifier = "deny-peer-disconnect"
+description = "Denies the peer_disconnect command without any pre-configured scope."
+commands.deny = ["peer_disconnect"]

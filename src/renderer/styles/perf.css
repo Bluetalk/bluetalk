@@ -1,0 +1,28 @@
+/* ============ Rendering-/Scroll-Performance (additiv, Optik unverändert) ============ */
+/* Off-Screen-Karten in den Grids erst beim Scrollen layouten/painten.
+   contain-intrinsic-size (Schätzwert; "auto" merkt sich die echte Größe nach dem
+   ersten Rendern) verhindert Scrollbar-Sprünge.
+   Chat-Nachrichtenzeilen (.msg-row) bewusst NICHT aufgenommen: stark variable
+   Höhen (Text, Medien, Embeds) plus Scroll-Verankerung am Chat-Ende machen
+   content-visibility dort riskant (Sprünge beim Hochscrollen im Verlauf). */
+.library-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+.plugin-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+.games-launch-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px;
+}
+
+/* Scroll-Ketten in verschachtelten Scroll-Containern unterbinden */
+.chat-messages,
+.split-list-body,
+.page-body,
+.plugin-grid,
+.games-grid {
+  overscroll-behavior: contain;
+}

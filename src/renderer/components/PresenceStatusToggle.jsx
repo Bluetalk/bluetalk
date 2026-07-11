@@ -20,9 +20,9 @@ export default function PresenceStatusToggle() {
       aria-label={active ? 'Nicht stören aktiv' : 'Verfügbar'}
     >
       {active ? (
-        <BellOff size={18} strokeWidth={2} aria-hidden />
+        <BellOff size={18} strokeWidth={1.75} aria-hidden />
       ) : (
-        <Bell size={18} strokeWidth={2} aria-hidden />
+        <Bell size={18} strokeWidth={1.75} aria-hidden />
       )}
       <span className="presence-toggle-label">
         {active ? 'Nicht stören' : 'Verfügbar'}

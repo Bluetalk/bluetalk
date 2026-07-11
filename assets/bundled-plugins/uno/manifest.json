@@ -1,18 +1,20 @@
 {
+  "schemaVersion": 2,
   "id": "uno",
   "name": "UNO",
-  "version": "1.1.0-alpha",
-  "tag": "alpha",
-  "description": "UNO für bis zu 8 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster mit 3D-Karten. Alpha: kann noch unzuverlässig sein oder nicht wie erwartet funktionieren.",
+  "version": "1.2.0",
+  "apiVersion": "^2.0.0",
+  "description": "UNO für bis zu 8 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster mit 3D-Karten.",
   "author": "BlueTalk",
-  "main": "main.js",
-  "ui": "ui.js",
-  "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "tabs:register"],
+  "ui": { "entry": "ui.js", "kind": "trusted-renderer" },
+  "permissions": ["peer:send", "peer:broadcast", "chat:send", "contacts:read", "ui:tab"],
   "autoEnable": true,
-  "game": {
-    "mark": "🎴",
-    "title": "UNO",
-    "description": "Bis zu 8 Spieler, Einladungen per Chat, separates Spielfenster.",
-    "alphaNotice": "Alpha: Spielregeln, Sync und UI können noch fehlerhaft sein."
+  "metadata": {
+    "game": {
+      "mark": "🎴",
+      "title": "UNO",
+      "description": "Bis zu 8 Spieler, Einladungen per Chat, separates Spielfenster.",
+      "labels": { "launchNew": "Neues Spiel", "openWindow": "UNO-Fenster öffnen" }
+    }
   }
 }

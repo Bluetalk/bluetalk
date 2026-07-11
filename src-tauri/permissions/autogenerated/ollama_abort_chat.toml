@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-abort-chat"
+description = "Enables the ollama_abort_chat command without any pre-configured scope."
+commands.allow = ["ollama_abort_chat"]
+
+[[permission]]
+identifier = "deny-ollama-abort-chat"
+description = "Denies the ollama_abort_chat command without any pre-configured scope."
+commands.deny = ["ollama_abort_chat"]

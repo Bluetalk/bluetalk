@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-messages-patch"
+description = "Enables the messages_patch command without any pre-configured scope."
+commands.allow = ["messages_patch"]
+
+[[permission]]
+identifier = "deny-messages-patch"
+description = "Denies the messages_patch command without any pre-configured scope."
+commands.deny = ["messages_patch"]

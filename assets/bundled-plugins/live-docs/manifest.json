@@ -1,22 +1,22 @@
 {
+  "schemaVersion": 2,
   "id": "live-docs",
   "name": "Live Dokumente",
-  "version": "1.0.1",
+  "version": "1.1.0",
+  "apiVersion": "^2.0.0",
   "description": "Word-Dokumente (.docx) gemeinsam in Echtzeit bearbeiten — importieren, live zusammen schreiben, als .docx exportieren.",
   "author": "BlueTalk",
-  "main": "main.js",
-  "ui": "ui.js",
+  "ui": { "entry": "ui.js", "kind": "trusted-renderer" },
   "permissions": ["peer:send", "chat:send", "contacts:read"],
   "autoEnable": true,
-  "game": {
-    "tool": true,
-    "mark": "📝",
-    "title": "Dokumente",
-    "description": "Word-Dokumente gemeinsam in Echtzeit bearbeiten — mit Formatierung, Live-Cursor und .docx-Import/-Export.",
-    "tag": "Live",
-    "labels": {
-      "launchNew": "Neues Dokument",
-      "openWindow": "Editor öffnen"
+  "metadata": {
+    "game": {
+      "tool": true,
+      "mark": "📝",
+      "title": "Dokumente",
+      "description": "Word-Dokumente gemeinsam in Echtzeit bearbeiten — mit Formatierung, Live-Cursor und .docx-Import/-Export.",
+      "tag": "Live",
+      "labels": { "launchNew": "Neues Dokument", "openWindow": "Editor öffnen" }
     }
   }
 }

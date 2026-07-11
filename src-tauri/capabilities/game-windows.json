@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "game-windows",
+  "description": "Event-only capability for the isolated game and document windows.",
+  "windows": [
+    "game-poker",
+    "game-uno",
+    "game-connect-four",
+    "game-chess",
+    "game-tic-tac-toe",
+    "docs"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-game-window-close",
+    "allow-game-window-minimize",
+    "allow-game-window-maximize",
+    "allow-game-window-is-maximized",
+    "allow-game-window-send-action",
+    "allow-peer-get-info",
+    "allow-file-save-as"
+  ]
+}
+

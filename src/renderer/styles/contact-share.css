@@ -1,0 +1,29 @@
+/* Geteilter Kontakt (Chat) */
+.contact-share-card {
+  max-width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.contact-share-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.contact-share-card-title {
+  font-weight: 600;
+  color: var(--fg-0);
+}
+.contact-share-card-meta,
+.contact-share-card-bio {
+  font-size: 12px;
+  color: var(--fg-2);
+  margin-top: 4px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.contact-share-card .btn {
+  margin-top: 10px;
+}
+

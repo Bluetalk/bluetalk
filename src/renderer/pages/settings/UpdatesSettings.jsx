@@ -86,7 +86,7 @@ export default function UpdatesSettingsPage() {
     <div className="page">
       <SettingsBackHeader
         title="Updates"
-        subtitle="Automatic checks, downloads, and installs"
+        subtitle="Automatische Prüfungen, Downloads und Installationen"
         icon={ArrowUpCircle}
       />
 
@@ -95,8 +95,8 @@ export default function UpdatesSettingsPage() {
           <div className="card">
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Automatic update checks</span>
-                <span>Poll GitHub Releases in the background for packaged installs</span>
+                <span>Automatische Update-Prüfung</span>
+                <span>Sucht bei paketierten Installationen im Hintergrund auf GitHub Releases nach neuen Versionen</span>
               </div>
               <label className="toggle">
                 <input
@@ -110,8 +110,8 @@ export default function UpdatesSettingsPage() {
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Automatically download updates</span>
-                <span>Download the installer as soon as a newer release is found</span>
+                <span>Updates automatisch herunterladen</span>
+                <span>Lädt den Installer herunter, sobald eine neuere Version gefunden wird</span>
               </div>
               <label className="toggle">
                 <input
@@ -128,7 +128,7 @@ export default function UpdatesSettingsPage() {
                 <div style={{ minWidth: 0 }}>
                   <div className="font-medium" style={{ fontSize: 13.5 }}>BlueTalk {updaterState?.currentVersion || APP_VERSION}</div>
                   <p className="text-sm text-muted" style={{ marginTop: 4 }}>
-                    {updaterState?.message || 'Check for updates manually or let BlueTalk check in the background.'}
+                    {updaterState?.message || 'Prüfe manuell auf Updates oder lass BlueTalk im Hintergrund suchen.'}
                   </p>
                 </div>
                 <span className={`badge ${getUpdateBadgeClass(updaterState)}`}>
@@ -138,19 +138,19 @@ export default function UpdatesSettingsPage() {
 
               <div className="updater-grid">
                 <div className="input-group">
-                  <label>Current Version</label>
+                  <label>Aktuelle Version</label>
                   <input className="input font-mono" value={updaterState?.currentVersion || APP_VERSION} readOnly />
                 </div>
                 <div className="input-group">
-                  <label>Latest Release</label>
+                  <label>Neueste Version</label>
                   <input className="input font-mono" value={latestVersion} readOnly />
                 </div>
                 <div className="input-group">
-                  <label>Last Checked</label>
+                  <label>Zuletzt geprüft</label>
                   <input className="input" value={formatDateTime(updaterState?.lastCheckedAt)} readOnly />
                 </div>
                 <div className="input-group">
-                  <label>Release Date</label>
+                  <label>Veröffentlicht am</label>
                   <input className="input" value={formatDateTime(updaterState?.releaseDate)} readOnly />
                 </div>
               </div>
@@ -188,20 +188,20 @@ export default function UpdatesSettingsPage() {
               <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
                 <button className="btn btn-secondary" onClick={checkForUpdates} disabled={isCheckingUpdates || isDownloadingUpdate}>
                   <RefreshCw size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                  {isCheckingUpdates ? 'Checking...' : 'Check now'}
+                  {isCheckingUpdates ? 'Prüfe…' : 'Jetzt prüfen'}
                 </button>
 
                 {showManualDownload && (
                   <button className="btn btn-secondary" onClick={downloadUpdate} disabled={isDownloadingUpdate}>
                     <Download size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                    {isDownloadingUpdate ? 'Downloading...' : 'Download update'}
+                    {isDownloadingUpdate ? 'Wird geladen…' : 'Update herunterladen'}
                   </button>
                 )}
 
                 {showInstallAction && (
                   <button className="btn btn-primary" onClick={installUpdate}>
                     <RotateCw size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-                    Restart and install
+                    Neu starten und installieren
                   </button>
                 )}
               </div>

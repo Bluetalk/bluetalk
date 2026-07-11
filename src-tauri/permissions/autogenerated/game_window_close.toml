@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-game-window-close"
+description = "Enables the game_window_close command without any pre-configured scope."
+commands.allow = ["game_window_close"]
+
+[[permission]]
+identifier = "deny-game-window-close"
+description = "Denies the game_window_close command without any pre-configured scope."
+commands.deny = ["game_window_close"]

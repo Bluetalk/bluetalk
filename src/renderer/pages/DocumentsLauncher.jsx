@@ -96,10 +96,12 @@ export default function DocumentsLauncherPage() {
     <div className="page page-games">
       <div className="page-header">
         <div>
-          <h2>
-            <FileText size={18} strokeWidth={ICON_STROKE} />
+          <h1 className="page-title-row">
+            <span className="page-title-icon" aria-hidden>
+              <FileText size={18} strokeWidth={ICON_STROKE} />
+            </span>
             Dokumente
-          </h2>
+          </h1>
           <p>
             Word-Dokumente gemeinsam in Echtzeit bearbeiten — mit Formatierung, Live-Cursor und .docx-Import/-Export.
           </p>

@@ -10,16 +10,16 @@ const MAX_AVATAR_BYTES = 380 * 1024;
 function readImageDataUrl(file) {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
-      reject(new Error('Not an image'));
+      reject(new Error('Keine Bilddatei'));
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
-      reject(new Error(`Use an image under ${Math.round(MAX_AVATAR_BYTES / 1024)} KB`));
+      reject(new Error(`Bitte ein Bild unter ${Math.round(MAX_AVATAR_BYTES / 1024)} KB verwenden`));
       return;
     }
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Read failed'));
+    reader.onerror = () => reject(new Error('Lesen fehlgeschlagen'));
     reader.readAsDataURL(file);
   });
 }
@@ -66,8 +66,8 @@ export default function AccountSettingsPage() {
     } catch (err) {
       toast({
         variant: 'error',
-        title: 'Profile photo',
-        message: err.message || 'Could not use this image.',
+        title: 'Profilbild',
+        message: err.message || 'Dieses Bild konnte nicht verwendet werden.',
       });
     }
   };
@@ -84,7 +84,7 @@ export default function AccountSettingsPage() {
 
   const clearAppCache = () => runDataAction('cache', async () => {
     const ok = window.confirm(
-      'Clear the in-app browser cache and web storage (localStorage, etc.)? Your chats and settings stay on disk until you delete them separately.'
+      'Browser-Cache und Web-Speicher der App (localStorage usw.) leeren? Deine Chats und Einstellungen bleiben auf der Festplatte, bis du sie separat löschst.'
     );
     if (!ok) return;
 
@@ -92,21 +92,21 @@ export default function AccountSettingsPage() {
     if (result?.ok) {
       toast({
         variant: 'success',
-        title: 'Cache cleared',
-        message: 'Temporary web data was removed.',
+        title: 'Cache geleert',
+        message: 'Temporäre Web-Daten wurden entfernt.',
       });
     } else {
       toast({
         variant: 'error',
-        title: 'Could not clear cache',
-        message: result?.error || 'Unknown error',
+        title: 'Cache konnte nicht geleert werden',
+        message: result?.error || 'Unbekannter Fehler',
       });
     }
   });
 
   const clearChatHistoryOnly = () => runDataAction('messages', async () => {
     const ok = window.confirm(
-      'Delete all saved chat messages and read receipts? Contacts and settings are kept.'
+      'Alle gespeicherten Chat-Nachrichten und Lesebestätigungen löschen? Kontakte und Einstellungen bleiben erhalten.'
     );
     if (!ok) return;
 
@@ -114,21 +114,21 @@ export default function AccountSettingsPage() {
     if (result?.ok) {
       toast({
         variant: 'success',
-        title: 'Chats cleared',
-        message: 'All stored messages were removed.',
+        title: 'Chats geleert',
+        message: 'Alle gespeicherten Nachrichten wurden entfernt.',
       });
     } else {
       toast({
         variant: 'error',
-        title: 'Could not clear chats',
-        message: result?.error || 'Unknown error',
+        title: 'Chats konnten nicht geleert werden',
+        message: result?.error || 'Unbekannter Fehler',
       });
     }
   });
 
   const wipeAllAppData = () => runDataAction('wipe', async () => {
     const ok = window.confirm(
-      'Delete ALL local BlueTalk data (chats, contacts, settings, identity)? This cannot be undone. The app will reload your empty profile.'
+      'ALLE lokalen BlueTalk-Daten löschen (Chats, Kontakte, Einstellungen, Identität)? Das kann nicht rückgängig gemacht werden. Die App lädt danach dein leeres Profil.'
     );
     if (!ok) return;
 
@@ -136,14 +136,14 @@ export default function AccountSettingsPage() {
     if (result?.ok) {
       toast({
         variant: 'success',
-        title: 'All data deleted',
-        message: 'Local storage was reset. You may get a new peer ID.',
+        title: 'Alle Daten gelöscht',
+        message: 'Der lokale Speicher wurde zurückgesetzt. Du erhältst eventuell eine neue Peer-ID.',
       });
     } else {
       toast({
         variant: 'error',
-        title: 'Delete failed',
-        message: result?.error || 'Unknown error',
+        title: 'Löschen fehlgeschlagen',
+        message: result?.error || 'Unbekannter Fehler',
       });
     }
   });
@@ -151,8 +151,8 @@ export default function AccountSettingsPage() {
   return (
     <div className="page">
       <SettingsBackHeader
-        title="Account"
-        subtitle="Profile, identity, and local data"
+        title="Konto"
+        subtitle="Profil, Identität und lokale Daten"
         icon={User}
       />
 
@@ -163,7 +163,7 @@ export default function AccountSettingsPage() {
               <span className="section-title-icon" aria-hidden>
                 <User size={15} strokeWidth={SETTINGS_ICON_STROKE} />
               </span>
-              Profile
+              Profil
             </h3>
           </div>
           <div className="card flex flex-col gap-3">
@@ -175,11 +175,11 @@ export default function AccountSettingsPage() {
               )}
               <div className="profile-menu-avatar-actions">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}>
-                  Change photo
+                  Foto ändern
                 </button>
                 {local.profilePicture ? (
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => change('profilePicture', '')}>
-                    Remove
+                    Entfernen
                   </button>
                 ) : null}
               </div>
@@ -192,16 +192,16 @@ export default function AccountSettingsPage() {
               />
             </div>
             <div className="input-group">
-              <label htmlFor="account-display-name">Display name</label>
+              <label htmlFor="account-display-name">Anzeigename</label>
               <p className="text-sm text-muted" style={{ margin: '0 0 8px' }}>
-                This is how you appear to others.
+                So erscheinst du bei anderen.
               </p>
               <input
                 id="account-display-name"
                 className="input"
                 value={local.displayName || ''}
                 onChange={(e) => change('displayName', e.target.value)}
-                placeholder="Your name"
+                placeholder="Dein Name"
               />
             </div>
             <div className="input-group">
@@ -210,7 +210,7 @@ export default function AccountSettingsPage() {
                 id="account-bio"
                 className="input profile-menu-bio"
                 rows={3}
-                placeholder="A short line about you…"
+                placeholder="Eine kurze Zeile über dich…"
                 value={local.bio || ''}
                 maxLength={500}
                 onChange={(e) => change('bio', e.target.value)}
@@ -225,7 +225,7 @@ export default function AccountSettingsPage() {
               <span className="section-title-icon" aria-hidden>
                 <User size={15} strokeWidth={SETTINGS_ICON_STROKE} />
               </span>
-              Identity
+              Identität
             </h3>
           </div>
           <div className="card flex flex-col gap-3">
@@ -235,7 +235,7 @@ export default function AccountSettingsPage() {
                 <input className="input font-mono" value={peerInfo.id || ''} readOnly style={{ color: 'var(--fg-2)' }} />
               </div>
             ) : (
-              <p className="text-sm text-muted" style={{ margin: 0 }}>Loading peer information…</p>
+              <p className="text-sm text-muted" style={{ margin: 0 }}>Peer-Informationen werden geladen…</p>
             )}
           </div>
         </section>
@@ -246,14 +246,14 @@ export default function AccountSettingsPage() {
               <span className="section-title-icon" aria-hidden>
                 <Trash2 size={15} strokeWidth={SETTINGS_ICON_STROKE} />
               </span>
-              Data &amp; storage
+              Daten &amp; Speicher
             </h3>
           </div>
           <div className="card flex flex-col gap-0">
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Clear cache</span>
-                <span>Removes Chromium disk cache and web storage for this window. Does not delete your chat history file.</span>
+                <span>Cache leeren</span>
+                <span>Entfernt den Chromium-Festplatten-Cache und Web-Speicher dieses Fensters. Deine Chat-Verlaufsdatei bleibt erhalten.</span>
               </div>
               <button
                 type="button"
@@ -261,14 +261,14 @@ export default function AccountSettingsPage() {
                 onClick={clearAppCache}
                 disabled={Boolean(dataAction)}
               >
-                {dataAction === 'cache' ? 'Working…' : 'Clear cache'}
+                {dataAction === 'cache' ? 'Läuft…' : 'Cache leeren'}
               </button>
             </div>
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Clear all chats</span>
-                <span>Deletes every stored message and read receipt. Keeps contacts and settings.</span>
+                <span>Alle Chats löschen</span>
+                <span>Löscht alle gespeicherten Nachrichten und Lesebestätigungen. Kontakte und Einstellungen bleiben erhalten.</span>
               </div>
               <button
                 type="button"
@@ -276,14 +276,14 @@ export default function AccountSettingsPage() {
                 onClick={clearChatHistoryOnly}
                 disabled={Boolean(dataAction)}
               >
-                {dataAction === 'messages' ? 'Working…' : 'Clear chats'}
+                {dataAction === 'messages' ? 'Läuft…' : 'Chats löschen'}
               </button>
             </div>
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Delete all local data</span>
-                <span>Wipes the config file (chats, contacts, settings) and assigns a fresh peer identity. Use only if you want a clean install.</span>
+                <span>Alle lokalen Daten löschen</span>
+                <span>Löscht die Konfigurationsdatei (Chats, Kontakte, Einstellungen) und weist eine neue Peer-Identität zu. Nur für einen sauberen Neustart verwenden.</span>
               </div>
               <button
                 type="button"
@@ -291,7 +291,7 @@ export default function AccountSettingsPage() {
                 onClick={wipeAllAppData}
                 disabled={Boolean(dataAction)}
               >
-                {dataAction === 'wipe' ? 'Working…' : 'Delete everything'}
+                {dataAction === 'wipe' ? 'Läuft…' : 'Alles löschen'}
               </button>
             </div>
           </div>

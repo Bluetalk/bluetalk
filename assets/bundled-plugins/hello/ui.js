@@ -3,7 +3,7 @@
  *
  * Registers a sidebar tab with a live event log and a "ping all peers" button.
  */
-(function helloPluginUi() {
+export default function activateHelloPlugin(BlueTalkPlugin) {
   const api = BlueTalkPlugin;
 
   api.ui.registerTab({
@@ -116,9 +116,14 @@
         }
       }));
 
-      container.querySelector('[data-action="ping"]').addEventListener('click', async () => {
-        const result = await api.invokeMainCommand('ping-peers');
-        const sent = result?.result?.sent ?? 0;
+      container.querySelector('[data-action="ping"]').addEventListener('click', () => {
+        // v2 has no main-process runtime, so broadcast straight from the UI side.
+        const sent = (api.peers() || []).length;
+        api.peer.broadcast({
+          kind: 'plugin-hello-ping',
+          text: 'Hello from the hello plugin!',
+          timestamp: Date.now(),
+        });
         log(`broadcast sent to ${sent} peer(s)`);
       });
 
@@ -149,4 +154,4 @@
   });
 
   api.log.info('Hello plugin UI registered');
-})();
+}

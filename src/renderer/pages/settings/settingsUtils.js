@@ -1,7 +1,7 @@
 export const SETTINGS_ICON_STROKE = 1.75;
 
 export function formatDateTime(timestamp) {
-  if (!timestamp) return 'Never';
+  if (!timestamp) return 'Nie';
   return new Date(timestamp).toLocaleString();
 }
 
@@ -16,21 +16,21 @@ export function formatBytes(bytes) {
 export function getUpdateStatusLabel(state) {
   switch (state?.status) {
     case 'unsupported':
-      return 'Unavailable';
+      return 'Nicht verfügbar';
     case 'checking':
-      return 'Checking';
+      return 'Prüfe';
     case 'available':
-      return 'Update found';
+      return 'Update gefunden';
     case 'downloading':
-      return 'Downloading';
+      return 'Wird geladen';
     case 'downloaded':
-      return 'Ready to install';
+      return 'Bereit zur Installation';
     case 'pending_build':
-      return 'Build pending';
+      return 'Build ausstehend';
     case 'error':
-      return 'Error';
+      return 'Fehler';
     default:
-      return 'Idle';
+      return 'Inaktiv';
   }
 }
 

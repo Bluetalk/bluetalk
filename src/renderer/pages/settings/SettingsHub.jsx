@@ -12,9 +12,9 @@ export default function SettingsHub() {
           <span className="page-title-icon" aria-hidden>
             <Settings2 size={18} strokeWidth={SETTINGS_ICON_STROKE} />
           </span>
-          Settings
+          Einstellungen
         </h1>
-        <p>Configure your BlueTalk instance</p>
+        <p>Konfiguriere deine BlueTalk-Instanz</p>
       </div>
 
       <div className="page-body">

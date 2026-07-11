@@ -19,7 +19,7 @@ import {
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
 
 export default function StickersSettingsPage() {
-  const toast = useToast();
+  const { toast } = useToast();
   const fileInputRef = useRef(null);
   const [packs, setPacks] = useState([]);
   const [favorites, setFavorites] = useState([]);

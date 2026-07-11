@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-peer-reconnect-contacts"
+description = "Enables the peer_reconnect_contacts command without any pre-configured scope."
+commands.allow = ["peer_reconnect_contacts"]
+
+[[permission]]
+identifier = "deny-peer-reconnect-contacts"
+description = "Denies the peer_reconnect_contacts command without any pre-configured scope."
+commands.deny = ["peer_reconnect_contacts"]

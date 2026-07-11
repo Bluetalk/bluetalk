@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-reply-ask-user"
+description = "Enables the ollama_reply_ask_user command without any pre-configured scope."
+commands.allow = ["ollama_reply_ask_user"]
+
+[[permission]]
+identifier = "deny-ollama-reply-ask-user"
+description = "Denies the ollama_reply_ask_user command without any pre-configured scope."
+commands.deny = ["ollama_reply_ask_user"]

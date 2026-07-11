@@ -12,8 +12,8 @@ export default function SettingsBackHeader({ title, subtitle, icon: Icon }) {
         className="btn btn-ghost btn-sm settings-subpage-back"
         onClick={() => navigate('/settings')}
       >
-        <ArrowLeft size={16} strokeWidth={2} />
-        Settings
+        <ArrowLeft size={16} strokeWidth={1.75} />
+        Einstellungen
       </button>
       <h1 className="page-title-row">
         {Icon ? (

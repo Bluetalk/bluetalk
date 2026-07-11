@@ -67,7 +67,7 @@ export default function NewConnectionsPage() {
       <div className="page-header">
         <h1 className="page-title-row">
           <span className="page-title-icon">
-            <UserPlus size={22} strokeWidth={2} />
+            <UserPlus size={18} strokeWidth={1.75} />
           </span>
           New connections
         </h1>

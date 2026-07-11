@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-network-get-api-access"
+description = "Enables the network_get_api_access command without any pre-configured scope."
+commands.allow = ["network_get_api_access"]
+
+[[permission]]
+identifier = "deny-network-get-api-access"
+description = "Denies the network_get_api_access command without any pre-configured scope."
+commands.deny = ["network_get_api_access"]

@@ -1,10 +1,13 @@
 {
+  "schemaVersion": 2,
   "id": "theme-studio",
   "name": "Theme Studio",
-  "version": "1.1.0",
-  "description": "Customize colors and accents for light and dark mode. Live preview, visual presets, fine-tuning, export/import, and reset.",
+  "version": "1.2.0",
+  "apiVersion": "^2.0.0",
+  "description": "Farben und Akzente für hell und dunkel anpassen. Live-Vorschau, visuelle Presets, Feinabstimmung, Export/Import und Zurücksetzen.",
   "author": "BlueTalk",
-  "ui": "ui.js",
-  "permissions": ["tabs:register"],
-  "autoEnable": true
+  "ui": { "entry": "ui.js", "kind": "trusted-renderer" },
+  "permissions": ["ui:tab"],
+  "autoEnable": true,
+  "metadata": {}
 }

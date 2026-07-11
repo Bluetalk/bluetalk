@@ -71,35 +71,6 @@ body:has(.uno-game-root) {
   color: transparent;
 }
 
-.uno-alpha-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #fde68a;
-  background: rgba(234, 179, 8, 0.18);
-  border: 1px solid rgba(234, 179, 8, 0.35);
-  -webkit-background-clip: border-box;
-  background-clip: border-box;
-}
-
-.uno-alpha-notice {
-  flex-shrink: 0;
-  margin: 0 0 10px;
-  padding: 7px 12px;
-  border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.45;
-  text-align: center;
-  color: rgba(253, 230, 138, 0.95);
-  background: rgba(234, 179, 8, 0.08);
-  border: 1px solid rgba(234, 179, 8, 0.22);
-}
-
 .uno-game-titlebar-sub {
   font-size: 10px;
   letter-spacing: 0.08em;

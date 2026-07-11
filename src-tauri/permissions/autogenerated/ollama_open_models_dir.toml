@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-open-models-dir"
+description = "Enables the ollama_open_models_dir command without any pre-configured scope."
+commands.allow = ["ollama_open_models_dir"]
+
+[[permission]]
+identifier = "deny-ollama-open-models-dir"
+description = "Denies the ollama_open_models_dir command without any pre-configured scope."
+commands.deny = ["ollama_open_models_dir"]

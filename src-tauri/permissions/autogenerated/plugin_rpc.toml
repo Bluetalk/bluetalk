@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-rpc"
+description = "Enables the plugin_rpc command without any pre-configured scope."
+commands.allow = ["plugin_rpc"]
+
+[[permission]]
+identifier = "deny-plugin-rpc"
+description = "Denies the plugin_rpc command without any pre-configured scope."
+commands.deny = ["plugin_rpc"]

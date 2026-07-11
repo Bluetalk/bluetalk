@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-network-test-ports"
+description = "Enables the network_test_ports command without any pre-configured scope."
+commands.allow = ["network_test_ports"]
+
+[[permission]]
+identifier = "deny-network-test-ports"
+description = "Denies the network_test_ports command without any pre-configured scope."
+commands.deny = ["network_test_ports"]

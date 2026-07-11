@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-start-cloud-sign-in"
+description = "Enables the ollama_start_cloud_sign_in command without any pre-configured scope."
+commands.allow = ["ollama_start_cloud_sign_in"]
+
+[[permission]]
+identifier = "deny-ollama-start-cloud-sign-in"
+description = "Denies the ollama_start_cloud_sign_in command without any pre-configured scope."
+commands.deny = ["ollama_start_cloud_sign_in"]

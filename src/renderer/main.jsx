@@ -1,5 +1,6 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
+import '../bridge/bluetalkBridge.js';
 import './styles/global.css';
 
 const GAME_WINDOW_ROUTES = new Set([

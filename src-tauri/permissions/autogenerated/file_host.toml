@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-host"
+description = "Enables the file_host command without any pre-configured scope."
+commands.allow = ["file_host"]
+
+[[permission]]
+identifier = "deny-file-host"
+description = "Denies the file_host command without any pre-configured scope."
+commands.deny = ["file_host"]

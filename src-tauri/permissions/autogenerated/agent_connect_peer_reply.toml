@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-agent-connect-peer-reply"
+description = "Enables the agent_connect_peer_reply command without any pre-configured scope."
+commands.allow = ["agent_connect_peer_reply"]
+
+[[permission]]
+identifier = "deny-agent-connect-peer-reply"
+description = "Denies the agent_connect_peer_reply command without any pre-configured scope."
+commands.deny = ["agent_connect_peer_reply"]

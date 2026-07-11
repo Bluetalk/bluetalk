@@ -1,11 +1,13 @@
 {
+  "schemaVersion": 2,
   "id": "hello",
   "name": "Hello Plugin",
-  "version": "1.0.0",
-  "description": "Example BlueTalk plugin. Adds a sidebar tab that shows peer events in real time and lets you broadcast a ping.",
+  "version": "1.1.0",
+  "apiVersion": "^2.0.0",
+  "description": "Beispiel-Plugin für BlueTalk. Fügt einen Sidebar-Tab hinzu, der Peer-Ereignisse in Echtzeit zeigt und einen Ping senden lässt.",
   "author": "BlueTalk",
-  "main": "main.js",
-  "ui": "ui.js",
-  "permissions": ["peer:broadcast", "contacts:read", "tabs:register"],
-  "autoEnable": true
+  "ui": { "entry": "ui.js", "kind": "trusted-renderer" },
+  "permissions": ["peer:broadcast", "contacts:read", "ui:tab"],
+  "autoEnable": true,
+  "metadata": {}
 }

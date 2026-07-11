@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-get-model-catalog"
+description = "Enables the ollama_get_model_catalog command without any pre-configured scope."
+commands.allow = ["ollama_get_model_catalog"]
+
+[[permission]]
+identifier = "deny-ollama-get-model-catalog"
+description = "Denies the ollama_get_model_catalog command without any pre-configured scope."
+commands.deny = ["ollama_get_model_catalog"]

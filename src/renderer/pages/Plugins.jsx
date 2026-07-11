@@ -10,6 +10,7 @@ import {
   Plus,
   Power,
   RefreshCw,
+  Search,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -18,6 +19,44 @@ import { useToast } from '../components/ToastProvider';
 import { pluginRuntime } from '../plugins/pluginRuntime';
 
 const ICON_STROKE = 1.75;
+
+// Rohe Permission-Codes aus dem Manifest in menschenlesbare Labels übersetzen.
+const PERMISSION_LABELS = {
+  'peer:send': 'Nachrichten senden',
+  'peer:sendmany': 'Nachrichten senden',
+  'peer:broadcast': 'An alle senden',
+  'peer:connect': 'Verbindungen aufbauen',
+  'chat:send': 'Chat-Nachrichten senden',
+  'chat:delete': 'Nachrichten löschen',
+  'contacts:read': 'Kontakte lesen',
+  'contacts:write': 'Kontakte ändern',
+  'ui:tab': 'Sidebar-Tab',
+  'ui:screen': 'Eigene Ansichten',
+  'ui:composer': 'Composer-Aktion',
+  notify: 'Benachrichtigungen',
+  storage: 'Lokaler Speicher',
+};
+
+function humanizePermission(code) {
+  const key = String(code).toLowerCase().trim();
+  if (PERMISSION_LABELS[key]) return PERMISSION_LABELS[key];
+  const cleaned = key.replace(/[:._-]+/g, ' ').trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : code;
+}
+
+// Deduplizierte, menschenlesbare Berechtigungen einer Erweiterung.
+function describePermissions(plugin) {
+  const perms = Array.isArray(plugin.manifest?.permissions) ? plugin.manifest.permissions : [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of perms) {
+    const label = humanizePermission(raw);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push({ code: String(raw), label });
+  }
+  return out;
+}
 
 function clampMenuPosition(x, y, menuW = 240, menuH = 280) {
   const pad = 8;
@@ -37,7 +76,17 @@ export default function PluginsPage() {
   const [plugins, setPlugins] = useState(() => pluginRuntime.getPlugins());
   const [busy, setBusy] = useState('');
   const [menu, setMenu] = useState(null);
+  const [search, setSearch] = useState('');
   const menuRef = useRef(null);
+
+  const query = search.trim().toLowerCase();
+  const visiblePlugins = query
+    ? plugins.filter((plugin) =>
+        `${plugin.manifest?.name || ''} ${plugin.manifest?.description || ''} ${plugin.id}`
+          .toLowerCase()
+          .includes(query)
+      )
+    : plugins;
 
   const refresh = useCallback(async () => {
     if (!window.bluetalk?.plugins) return;
@@ -264,10 +313,12 @@ export default function PluginsPage() {
     <div className="page page-plugins" onContextMenu={openPageMenu}>
       <div className="page-header">
         <div>
-          <h2>
-            <Blocks size={18} strokeWidth={ICON_STROKE} />
+          <h1 className="page-title-row">
+            <span className="page-title-icon" aria-hidden>
+              <Blocks size={18} strokeWidth={ICON_STROKE} />
+            </span>
             Erweiterungen
-          </h2>
+          </h1>
           <p>
             Füge Spiele, Tools und Extras hinzu. Aktivierte Erweiterungen erscheinen in der Seitenleiste.
           </p>
@@ -278,7 +329,7 @@ export default function PluginsPage() {
         <div className="page-header-actions">
           <Link to="/docs/getting-started" className="btn btn-secondary btn-sm">
             <BookOpen size={15} strokeWidth={ICON_STROKE} />
-            API Documentation
+            API-Dokumentation
           </Link>
           <button type="button" className="btn btn-primary btn-sm" onClick={installFromDialog} disabled={busy === 'install'}>
             <Plus size={15} strokeWidth={ICON_STROKE} />
@@ -307,6 +358,18 @@ export default function PluginsPage() {
         </div>
       </div>
 
+      <div className="plugin-search-row">
+        <div className="search-bar" style={{ minWidth: 200, maxWidth: 360 }}>
+          <Search size={14} />
+          <input
+            className="input"
+            placeholder="Erweiterungen durchsuchen…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
       <div className="plugin-grid">
         {plugins.length === 0 ? (
           <div className="plugin-empty">
@@ -316,7 +379,15 @@ export default function PluginsPage() {
             </p>
           </div>
         ) : null}
-        {plugins.map((plugin) => (
+        {plugins.length > 0 && visiblePlugins.length === 0 ? (
+          <div className="plugin-empty">
+            <h3>Keine Treffer</h3>
+            <p>Keine Erweiterung passt zur Suche.</p>
+          </div>
+        ) : null}
+        {visiblePlugins.map((plugin) => {
+          const permissions = describePermissions(plugin);
+          return (
           <article
             key={plugin.id}
             className={`plugin-card ${plugin.enabled ? 'is-enabled' : ''}`}
@@ -354,15 +425,19 @@ export default function PluginsPage() {
                 Alpha: Diese Erweiterung ist noch in Entwicklung und funktioniert möglicherweise nicht wie erwartet.
               </p>
             ) : null}
-            {debugMode ? (
-              <div className="plugin-card-caps">
-                {plugin.hasUi ? <span className="plugin-cap">UI</span> : null}
-                {plugin.hasMain ? <span className="plugin-cap">Main</span> : null}
-                {Array.isArray(plugin.manifest?.permissions)
-                  ? plugin.manifest.permissions.map((perm) => (
-                      <span key={perm} className="plugin-cap plugin-cap-perm">{perm}</span>
-                    ))
-                  : null}
+            {permissions.length || (debugMode && (plugin.hasUi || plugin.hasMain)) ? (
+              <div className="plugin-card-caps" aria-label="Berechtigungen">
+                {permissions.map((perm) => (
+                  <span
+                    key={perm.code}
+                    className="plugin-cap plugin-cap-perm"
+                    title={debugMode ? perm.code : undefined}
+                  >
+                    {perm.label}
+                  </span>
+                ))}
+                {debugMode && plugin.hasUi ? <span className="plugin-cap">UI</span> : null}
+                {debugMode && plugin.hasMain ? <span className="plugin-cap">Main</span> : null}
               </div>
             ) : null}
             {plugin.lastError ? (
@@ -374,8 +449,9 @@ export default function PluginsPage() {
               {debugMode ? (
                 <span className="plugin-card-id">{plugin.id}</span>
               ) : (
-                <span className={`plugin-status ${plugin.enabled ? 'plugin-status--on' : ''}`}>
-                  {plugin.enabled ? 'Aktiv' : 'Aus'}
+                <span className={`plugin-status ${plugin.enabled ? 'plugin-status--on' : 'plugin-status--off'}`}>
+                  <span className="plugin-status-dot" aria-hidden />
+                  {plugin.enabled ? 'Aktiv' : 'Inaktiv'}
                 </span>
               )}
               {debugMode ? (
@@ -391,7 +467,8 @@ export default function PluginsPage() {
               ) : null}
             </footer>
           </article>
-        ))}
+          );
+        })}
       </div>
 
       {menuPortal}

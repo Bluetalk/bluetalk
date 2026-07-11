@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-messages-get-meta"
+description = "Enables the messages_get_meta command without any pre-configured scope."
+commands.allow = ["messages_get_meta"]
+
+[[permission]]
+identifier = "deny-messages-get-meta"
+description = "Denies the messages_get_meta command without any pre-configured scope."
+commands.deny = ["messages_get_meta"]
