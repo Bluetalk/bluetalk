@@ -10,10 +10,14 @@
 # .../releases/latest/download/latest.json.
 name: Release Build
 
+# Auto-Build bei Tag-Push ist deaktiviert, bis die Signatur-Secrets gesetzt
+# sind (sonst schlaegt jeder Tag am Signieren fehl). Zum Aktivieren:
+#   1. Repo-Secrets TAURI_SIGNING_PRIVATE_KEY / _PASSWORD setzen.
+#   2. Den `push: tags: ['v*']`-Block unten wieder einkommentieren.
 on:
-  push:
-    tags:
-      - 'v*'
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
 
 permissions:
