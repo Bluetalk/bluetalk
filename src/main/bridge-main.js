@@ -123,9 +123,16 @@ function download(url, dest, onProgress, redirects = 0) {
 
 async function migrate() {
   try {
-    send('progress', { percent: 4, text: 'Suche nach der neuesten Version…' });
-    const release = await httpJson(`https://api.github.com/repos/${REPO}/releases/latest`);
-    const asset = (release.assets || []).find((a) => SETUP_ASSET_RE.test(a.name || ''));
+    send('progress', { percent: 4, text: 'Suche nach BlueTalk 2.0…' });
+    // Gezielt das neueste v2-Release suchen (unabhaengig davon, welches Release
+    // als „latest" markiert ist — das kann waehrend der Migration das
+    // electron-updater-Bruecken-Release sein).
+    const releases = await httpJson(`https://api.github.com/repos/${REPO}/releases?per_page=30`);
+    const v2 = (Array.isArray(releases) ? releases : [])
+      .filter((r) => !r.draft && /^v?2\./.test(String(r.tag_name || '')))
+      .find((r) => (r.assets || []).some((a) => SETUP_ASSET_RE.test(a.name || '')));
+    if (!v2) throw new Error('kein v2-Release mit Installer gefunden');
+    const asset = (v2.assets || []).find((a) => SETUP_ASSET_RE.test(a.name || ''));
     if (!asset) throw new Error('kein Installer im Release gefunden');
 
     const target = path.join(os.tmpdir(), asset.name);
