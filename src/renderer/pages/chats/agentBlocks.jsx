@@ -19,10 +19,10 @@ import {
   notificationMuteSelectValue,
   formatMuteExpiry,
   getImageUrl,
+  splitThinkingText,
 } from './messageHelpers.jsx';
 import {
   MarkdownBody,
-  splitThinkingText,
   MessageReplyQuote,
 } from './messageParts.jsx';
 

@@ -14,6 +14,7 @@ import {
   isBareMediaMessage,
   isChatEmbedMessage,
   selfDeliveryLabel,
+  splitThinkingText,
 } from './messageHelpers.jsx';
 import {
   ChessInviteMessage,
@@ -26,7 +27,6 @@ import {
   PokerInviteMessage,
   TicTacToeInviteMessage,
   UnoInviteMessage,
-  splitThinkingText,
 } from './messageParts.jsx';
 import { ChatMessage, MessageSegments } from './agentBlocks.jsx';
 

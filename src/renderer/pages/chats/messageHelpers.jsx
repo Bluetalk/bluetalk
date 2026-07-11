@@ -303,6 +303,49 @@ function getMessageCopyText(message, debugMode = false) {
   return String(split.content || message.content || '').trim();
 }
 
+// Reine Text-Helfer: liegen im Basis-Modul, damit sowohl Helfer (Copy-Text)
+// als auch die Präsentations-Komponenten sie ohne Zyklus nutzen können.
+function stripOrphanThinkingTags(text) {
+  return String(text || '')
+    .replace(/<\/?(?:redacted_thinking|think|redacted_reasoning)>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function splitThinkingText(rawText) {
+  const raw = String(rawText || '');
+  if (!raw) return { thinking: '', content: '' };
+
+  let content = '';
+  let thinking = '';
+  let cursor = 0;
+  const openRe = /<(?:redacted_thinking|think|redacted_reasoning)>/ig;
+  let match = openRe.exec(raw);
+
+  while (match) {
+    content += raw.slice(cursor, match.index);
+    const bodyStart = openRe.lastIndex;
+    const closeRe = /<\/(?:redacted_thinking|think|redacted_reasoning)>/ig;
+    closeRe.lastIndex = bodyStart;
+    const close = closeRe.exec(raw);
+    if (!close) {
+      thinking += `${thinking ? '\n\n' : ''}${raw.slice(bodyStart)}`;
+      cursor = raw.length;
+      break;
+    }
+    thinking += `${thinking ? '\n\n' : ''}${raw.slice(bodyStart, close.index)}`;
+    cursor = closeRe.lastIndex;
+    openRe.lastIndex = cursor;
+    match = openRe.exec(raw);
+  }
+
+  content += raw.slice(cursor);
+  return {
+    thinking: thinking.trim(),
+    content: stripOrphanThinkingTags(content),
+  };
+}
+
 function buildForwardPayload(message) {
   if (!message) return { kind: 'chat', content: '' };
   if (message.kind === 'sticker' && message.fileData) {
@@ -610,6 +653,8 @@ export {
   getComposerTextareaMaxHeight,
   getMessagePreviewText,
   getMessageCopyText,
+  stripOrphanThinkingTags,
+  splitThinkingText,
   buildForwardPayload,
   getLastPreview,
   formatUnreadBadgeCount,
