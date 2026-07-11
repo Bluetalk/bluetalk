@@ -108,8 +108,11 @@ const AUXILIARY_SPECS: [AuxiliarySpec; 6] = [
 
 static LAST_STATES: OnceLock<RwLock<HashMap<&'static str, Value>>> = OnceLock::new();
 
+/// MUSS async sein: Ein synchroner Command läuft auf dem Main-Thread, und
+/// WebviewWindow-Erstellung braucht den Event-Loop — auf Windows deadlockt das
+/// die ganze App (inkl. Asset-Auslieferung an alle Fenster).
 #[tauri::command(rename_all = "camelCase")]
-pub fn game_window_open(
+pub async fn game_window_open(
     window: WebviewWindow,
     app: AppHandle,
     game: String,
@@ -154,6 +157,18 @@ pub fn game_window_open(
             .build()?;
 
     install_auxiliary_window_event_forwarder(&created, spec);
+
+    // Sicherheitsnetz: Falls `PageLoadEvent::Finished` nie eintrifft (z. B.
+    // Ladefehler), darf das Fenster nicht unsichtbar hängen bleiben.
+    let fallback = created.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        if matches!(fallback.is_visible(), Ok(false)) {
+            let _ = fallback.show();
+            let _ = fallback.set_focus();
+        }
+    });
+
     Ok(true)
 }
 
