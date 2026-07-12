@@ -29,12 +29,19 @@ import {
   X,
 } from 'lucide-react';
 import { parseDocxHtml, buildDocxFromHtml } from '../../shared/docx-lite.js';
+import { applyTextOp } from '../../shared/plugin-realtime.mjs';
 import './DocsEditorPage.css';
 
 const SEND_DEBOUNCE_MS = 250;
-const IN_FLIGHT_TIMEOUT_MS = 3000;
+const ACK_TIMEOUT_MS = 4000;
 const CURSOR_THROTTLE_MS = 80;
 const CURSOR_STALE_MS = 12000;
+
+let opIdCounter = 0;
+function newOpId() {
+  opIdCounter += 1;
+  return `op-${Date.now().toString(36)}-${opIdCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 /**
  * Kleinster zusammenhängender Unterschied zwischen zwei Strings
@@ -242,7 +249,29 @@ function useDocsWindowMaximized() {
 
 const EMPTY_FMT = { bold: false, italic: false, underline: false, strike: false, block: 'p', ul: false, ol: false, align: 'left' };
 
+/**
+ * Das Docs-Fenster läuft außerhalb der Haupt-App und bekommt deshalb kein
+ * data-theme gesetzt — hier aus den gespeicherten Einstellungen nachziehen,
+ * damit die Design-Tokens (tokens.css) zum Rest der App passen.
+ */
+function useAppTheme() {
+  useEffect(() => {
+    let cancelled = false;
+    document.documentElement.setAttribute('data-theme', 'dark');
+    void (async () => {
+      try {
+        const settings = await window.bluetalk?.store?.get?.('settings');
+        if (!cancelled && (settings?.theme === 'light' || settings?.theme === 'dark')) {
+          document.documentElement.setAttribute('data-theme', settings.theme);
+        }
+      } catch { /* Standard-Theme behalten */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+}
+
 export default function DocsEditorPage() {
+  useAppTheme();
   const isMaximized = useDocsWindowMaximized();
   const [chrome, setChrome] = useState(null);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
@@ -257,7 +286,8 @@ export default function DocsEditorPage() {
   const fileInputRef = useRef(null);
   const payloadRef = useRef(null);
   const shadowRef = useRef({ html: '', revision: -1 });
-  const inFlightRef = useRef({ active: false, at: 0 });
+  /** Laufende, noch unbestätigte Sende-Runde: { opId, sig, at } | null */
+  const inFlightRef = useRef(null);
   const sendTimerRef = useRef(null);
   const chromeKeyRef = useRef('');
   const fileNameDraftRef = useRef(null);
@@ -387,25 +417,61 @@ export default function DocsEditorPage() {
 
   // ---------- Sync-Engine (Diff gegen den zuletzt bestätigten Stand) ----------
 
+  /**
+   * Editor-Inhalt ersetzen und den eigenen Cursor mitführen: die Verschiebung
+   * wird über den Diff des gerenderten Texts bestimmt, damit der Cursor auch
+   * dann stehen bleibt, wenn jemand VOR der eigenen Position schreibt.
+   */
+  const applyHtmlPreservingCaret = useCallback((ed, nextHtml) => {
+    const beforeText = ed.textContent ?? '';
+    const caret = captureCaret(ed);
+    ed.innerHTML = nextHtml;
+    if (!caret) return;
+    const dText = diffRegion(beforeText, ed.textContent ?? '');
+    if (dText) {
+      const delta = dText.ins.length - dText.del;
+      const shift = (idx) => (idx <= dText.pos ? idx : Math.max(dText.pos, idx + delta));
+      caret.start = shift(caret.start);
+      caret.end = shift(caret.end);
+    }
+    restoreCaret(ed, caret);
+  }, []);
+
   const sendTick = useCallback(() => {
     sendTimerRef.current = null;
     const shadow = shadowRef.current;
     if (!editorRef.current || shadow.revision < 0) return;
     const local = readLocalHtml();
-    if (local === shadow.html) return;
-    const now = Date.now();
-    if (inFlightRef.current.active && now - inFlightRef.current.at < IN_FLIGHT_TIMEOUT_MS) {
-      sendTimerRef.current = setTimeout(sendTick, 200);
+    if (local === shadow.html) {
+      inFlightRef.current = null; // konvergiert — nichts mehr offen
       return;
     }
     const d = diffRegion(shadow.html, local);
     if (!d) return;
     // Ein primitiver Op pro Runde; Ersetzen konvergiert über Delete + Insert.
-    let op;
-    if (d.del === 0) op = { type: 'insert', pos: d.pos, text: d.ins };
-    else op = { type: 'delete', pos: d.pos, len: d.del };
-    inFlightRef.current = { active: true, at: now };
-    send({ type: 'apply_op', op, baseRevision: shadow.revision });
+    const op = d.del === 0
+      ? { type: 'insert', pos: d.pos, text: d.ins }
+      : { type: 'delete', pos: d.pos, len: d.del };
+    const sig = `${shadow.revision}|${op.type}|${op.pos}|${op.type === 'insert' ? op.text : op.len}`;
+    const now = Date.now();
+    const inFlight = inFlightRef.current;
+    if (inFlight && now - inFlight.at < ACK_TIMEOUT_MS) {
+      // Vorige Runde noch unbestätigt: warten (verhindert doppelt angewendete Ops).
+      sendTimerRef.current = setTimeout(sendTick, 250);
+      return;
+    }
+    let opId;
+    let replacesOpId;
+    if (inFlight && inFlight.sig === sig) {
+      opId = inFlight.opId; // identische Wiederholung — Host dedupliziert über die opId
+    } else {
+      opId = newOpId();
+      replacesOpId = inFlight?.opId; // Ersatz für eine mutmaßlich verlorene Runde
+    }
+    inFlightRef.current = { opId, sig, at: now, op };
+    const payload = { type: 'apply_op', op, baseRevision: shadow.revision, opId };
+    if (replacesOpId) payload.replacesOpId = replacesOpId;
+    send(payload);
     sendTimerRef.current = setTimeout(sendTick, 350);
   }, [readLocalHtml, send]);
 
@@ -418,7 +484,7 @@ export default function DocsEditorPage() {
     const ed = editorRef.current;
     if (!docPayload) {
       shadowRef.current = { html: '', revision: -1 };
-      inFlightRef.current = { active: false, at: 0 };
+      inFlightRef.current = null;
       if (ed && ed.innerHTML !== '') {
         ed.innerHTML = '';
         updateCounts();
@@ -432,28 +498,78 @@ export default function DocsEditorPage() {
     if (revision === shadow.revision && state === shadow.html) return;
 
     const oldShadow = shadow.html;
+    const hadSession = shadow.revision >= 0;
     shadowRef.current = { html: state, revision };
-    inFlightRef.current = { active: false, at: 0 };
     if (!ed) return;
 
     const local = readLocalHtml();
     if (local === state) {
-      updateCounts();
-      return;
-    }
-    if (local === oldShadow) {
-      // Keine eigenen ungesendeten Änderungen: Remote-Stand übernehmen und
-      // Cursor über die gerenderte Textposition stabil halten.
-      const caret = captureCaret(ed);
-      ed.innerHTML = sanitizeHtml(state);
-      restoreCaret(ed, caret);
+      inFlightRef.current = null; // Stand deckt sich — alles bestätigt
       updateCounts();
       renderRemoteCursors();
       return;
     }
-    // Eigene Änderungen unterwegs: lokal behalten, in der nächsten Runde senden.
+    if (!hadSession || local === oldShadow) {
+      // Keine eigenen ungesendeten Änderungen: Remote-Stand übernehmen.
+      applyHtmlPreservingCaret(ed, sanitizeHtml(state));
+      updateCounts();
+      renderRemoteCursors();
+      return;
+    }
+
+    // Eigene Änderungen unterwegs UND jemand anderes hat geschrieben:
+    // 3-Wege-Merge über einen gemeinsamen Vorgänger. Liegen die Regionen
+    // getrennt, werden beide Änderungen kombiniert — so löscht der nächste
+    // Diff nicht mehr den Text der anderen Person (der alte Bug).
+    const tryMerge = (baseHtml) => {
+      const dRemote = diffRegion(baseHtml, state);
+      if (!dRemote) return null;
+      const dLocal = diffRegion(baseHtml, local);
+      // Lokal deckt sich mit der Basis: alles Eigene steckt schon im Host-Stand.
+      if (!dLocal) return state;
+      if (dRemote.pos + dRemote.del <= dLocal.pos) {
+        // Remote-Änderung liegt vor der eigenen: eigene Region verschiebt sich.
+        const delta = dRemote.ins.length - dRemote.del;
+        return state.slice(0, dLocal.pos + delta) + dLocal.ins + state.slice(dLocal.pos + dLocal.del + delta);
+      }
+      if (dLocal.pos + dLocal.del <= dRemote.pos) {
+        // Remote-Änderung liegt hinter der eigenen: Positionen bleiben gültig.
+        return state.slice(0, dLocal.pos) + dLocal.ins + state.slice(dLocal.pos + dLocal.del);
+      }
+      return null; // gleiche Region — kein sauberer Merge möglich
+    };
+    // Enthält der neue Stand schon den eigenen In-Flight-Op, ist „alter
+    // Shadow + eigener Op" die bessere Basis (sonst würde der Op doppelt
+    // eingemischt). Erkennbar daran, dass das Remote-Delta gegenüber dieser
+    // Basis kleiner ausfällt als gegenüber dem alten Shadow.
+    const inFlightOp = inFlightRef.current?.op;
+    const dRemoteOld = diffRegion(oldShadow, state);
+    let merged = null;
+    if (dRemoteOld && inFlightOp) {
+      const predicted = applyTextOp(oldShadow, inFlightOp);
+      const dRemotePred = diffRegion(predicted, state);
+      if (dRemotePred && dRemotePred.del + dRemotePred.ins.length < dRemoteOld.del + dRemoteOld.ins.length) {
+        merged = tryMerge(predicted);
+      }
+    }
+    if (dRemoteOld && merged === null) merged = tryMerge(oldShadow);
+    if (merged !== null) {
+      if (merged !== local) applyHtmlPreservingCaret(ed, sanitizeHtml(merged));
+      updateCounts();
+      renderRemoteCursors();
+      scheduleSend(); // eigene (gemergte) Änderung in der nächsten Runde senden
+      return;
+    }
+    if (dRemoteOld) {
+      // Beide haben dieselbe Stelle bearbeitet: Host-Stand gewinnt (Konvergenz).
+      applyHtmlPreservingCaret(ed, sanitizeHtml(state));
+      inFlightRef.current = null;
+      updateCounts();
+      renderRemoteCursors();
+      return;
+    }
     scheduleSend();
-  }, [readLocalHtml, renderRemoteCursors, scheduleSend, updateCounts]);
+  }, [applyHtmlPreservingCaret, readLocalHtml, renderRemoteCursors, scheduleSend, updateCounts]);
 
   // ---------- Editor-Eingabe ----------
 
@@ -487,9 +603,15 @@ export default function DocsEditorPage() {
 
   useEffect(() => {
     if (!window.bluetalk?.docs?.onState) return undefined;
-    const off = window.bluetalk.docs.onState((payload) => {
+    const handleState = (payload) => {
       payloadRef.current = payload || null;
       applyRemoteDoc(payload?.hasRoom ? payload?.doc : null);
+      // Bestätigung der eigenen Sende-Runde: erst das Ack schließt sie ab.
+      const ack = payload?.ack;
+      if (ack?.opId && inFlightRef.current && ack.opId === inFlightRef.current.opId) {
+        inFlightRef.current = null;
+        if (!ack.applied) scheduleSend(); // abgelehnt → gegen neuen Stand diffen
+      }
       const chromeData = payload
         ? {
           hasRoom: Boolean(payload.hasRoom),
@@ -506,7 +628,16 @@ export default function DocsEditorPage() {
         chromeKeyRef.current = key;
         setChrome(chromeData);
       }
-    });
+    };
+    const off = window.bluetalk.docs.onState(handleState);
+    // DEV-Hook: erlaubt UI-Arbeit im Browser ohne laufende Tauri-Sitzung
+    // (window.dispatchEvent(new CustomEvent('bluetalk-docs-debug', { detail: payload }))).
+    let offDebug;
+    if (import.meta.env.DEV) {
+      const onDebug = (e) => handleState(e.detail);
+      window.addEventListener('bluetalk-docs-debug', onDebug);
+      offDebug = () => window.removeEventListener('bluetalk-docs-debug', onDebug);
+    }
     window.bluetalk.docs.sendAction?.({ type: 'request_state' });
     const retry = setTimeout(() => {
       window.bluetalk?.docs?.sendAction?.({ type: 'request_state' });
@@ -514,9 +645,10 @@ export default function DocsEditorPage() {
     return () => {
       clearTimeout(retry);
       off?.();
+      offDebug?.();
       if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
     };
-  }, [applyRemoteDoc]);
+  }, [applyRemoteDoc, scheduleSend]);
 
   // Fremd-Cursor-Kanal (leichtgewichtig, kein React-Re-Render).
   useEffect(() => {

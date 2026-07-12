@@ -108,6 +108,9 @@ doc.applyOp({ type: 'replace', value: 'New content' });
 // Arbitrary set
 doc.applyOp({ type: 'set', value: { items: [1, 2, 3] } });
 
+// Optional: explicit base revision + op id for concurrent editing
+doc.applyOp({ type: 'insert', pos: 5, text: 'x' }, baseRevision, { opId: 'unique-id' });
+
 doc.getState();
 doc.getRevision();
 
@@ -115,9 +118,10 @@ doc.on('change', ({ state, revision, origin }) => {
   // origin: 'local' | 'remote'
 });
 doc.on('remote-op', ({ from, payload }) => { ... });
+doc.on('op-ack', ({ opId, applied }) => { ... }); // client: host confirmed/rejected an op
 ```
 
-Stale operations (wrong `baseRevision`) are rejected by the host. The host sends a fresh `doc-sync` to correct desynchronized clients.
+Stale `insert`/`delete` operations (older `baseRevision`) are rebased by the host via operational transform, so concurrent edits at different positions merge instead of being dropped. Only true conflicts (overlapping regions) or gaps in the op history are rejected — the host then sends a fresh `doc-sync` to correct the client. Ops that carry an `opId` are deduplicated per sender and acknowledged (`ackOpId`/`ackApplied` on the `doc-sync`, surfaced as the `op-ack` event).
 
 ## Wire protocol
 

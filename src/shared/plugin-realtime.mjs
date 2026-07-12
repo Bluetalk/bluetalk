@@ -138,6 +138,59 @@ function isPresenceStale({ timestamp, maxAgeMs = PRESENCE_STALE_MS } = {}) {
   return Date.now() - timestamp > maxAgeMs;
 }
 
+/** Insert-/Delete-Op auf ganzzahlige, nicht-negative Felder normalisieren. */
+function normalizeTextOp(op) {
+  if (!op || typeof op !== 'object') return null;
+  if (op.type === 'insert') {
+    return { type: 'insert', pos: Math.max(0, Math.floor(Number(op.pos) || 0)), text: String(op.text ?? '') };
+  }
+  if (op.type === 'delete') {
+    return {
+      type: 'delete',
+      pos: Math.max(0, Math.floor(Number(op.pos) || 0)),
+      len: Math.max(0, Math.floor(Number(op.len) || 0)),
+    };
+  }
+  return null;
+}
+
+/**
+ * Operational Transform für primitive Text-Ops: verschiebt `op` (basiert auf
+ * dem Zustand VOR `against`) so, dass es NACH `against` angewendet werden kann.
+ * Liefert null, wenn sich die Regionen überschneiden (echter Konflikt) —
+ * dann muss der Client gegen den aktuellen Stand neu diffen.
+ */
+function transformTextOp(op, against) {
+  const mine = normalizeTextOp(op);
+  const other = normalizeTextOp(against);
+  if (!mine || !other) return null;
+
+  if (other.type === 'insert') {
+    const shift = other.text.length;
+    if (mine.type === 'insert') {
+      // Gleiche Position: der bereits angewendete Op behält den Vortritt.
+      return mine.pos >= other.pos ? { ...mine, pos: mine.pos + shift } : mine;
+    }
+    if (other.pos <= mine.pos) return { ...mine, pos: mine.pos + shift };
+    if (other.pos >= mine.pos + mine.len) return mine;
+    return null; // Insert mitten im zu löschenden Bereich
+  }
+
+  // other.type === 'delete'
+  const otherEnd = other.pos + other.len;
+  if (mine.type === 'insert') {
+    if (mine.pos <= other.pos) return mine;
+    if (mine.pos >= otherEnd) return { ...mine, pos: mine.pos - other.len };
+    return null; // Einfügeposition wurde gelöscht
+  }
+  if (mine.pos + mine.len <= other.pos) return mine;
+  if (mine.pos >= otherEnd) return { ...mine, pos: mine.pos - other.len };
+  return null; // überlappende Löschbereiche
+}
+
+const OP_LOG_LIMIT = 128;
+const SEEN_OPS_PER_PEER = 16;
+
 class SharedDocument {
   /**
    * @param {{
@@ -158,6 +211,10 @@ class SharedDocument {
     this.state = initial;
     this.revision = 0;
     this.emitter = createEmitter();
+    /** @type {Array<{ revision: number, op: Record<string, unknown> }>} rev N entstand durch op[N] */
+    this._opLog = [];
+    /** @type {Map<string, Map<string, boolean>>} Absender -> (opId -> wurde angewendet) */
+    this._seenOps = new Map();
     this._off = room.on('internal', (evt) => this._handleWire(evt));
   }
 
@@ -181,6 +238,8 @@ class SharedDocument {
     }
     this.state = nextState;
     this.revision += 1;
+    // Vollersatz bricht die Op-Historie: Rebase über diesen Punkt hinweg ist unmöglich.
+    this._logOp({ type: 'replace' });
     this.emitter.emit('change', { state: this.state, revision: this.revision, origin: 'local' });
     this._broadcastSync();
     return true;
@@ -189,34 +248,101 @@ class SharedDocument {
   /**
    * Apply an operation. Host applies locally; clients forward to host.
    * @param {Record<string, unknown>} op
+   * @param {number} [baseRevision] Revision, auf der der Op basiert (Default: aktuelle)
+   * @param {{ opId?: string, replacesOpId?: string }} [meta] Dedupe-Infos für Wiederholungen
    */
-  applyOp(op) {
+  applyOp(op, baseRevision, meta = {}) {
+    const base = Number.isFinite(Number(baseRevision)) ? Number(baseRevision) : this.revision;
     if (this.isHost) {
-      return this._applyOpAsHost(op, this.revision);
+      return this._applyOpAsHost(op, base, { ...meta, from: this.room.selfPeerId || '(self)' });
     }
     this.room._sendWire(this.hostPeerId, WIRE.DOC_OP, {
       docId: this.docId,
-      baseRevision: this.revision,
+      baseRevision: base,
       op,
+      ...(meta.opId ? { opId: meta.opId } : {}),
+      ...(meta.replacesOpId ? { replacesOpId: meta.replacesOpId } : {}),
     });
     return true;
   }
 
   /** @private */
-  _applyOpAsHost(op, baseRevision) {
-    if (baseRevision !== this.revision) {
-      this.log.warn?.('[SharedDocument] stale op rejected', { expected: this.revision, got: baseRevision });
-      return false;
+  _logOp(op) {
+    this._opLog.push({ revision: this.revision, op });
+    if (this._opLog.length > OP_LOG_LIMIT) {
+      this._opLog.splice(0, this._opLog.length - OP_LOG_LIMIT);
     }
-    if (typeof this.state === 'string' && op && typeof op === 'object' && op.type) {
-      this.state = applyTextOp(this.state, op);
-    } else if (op && typeof op === 'object' && op.type === 'set') {
-      this.state = op.value;
+  }
+
+  /** @private */
+  _rememberOp(from, opId, applied) {
+    if (!opId) return;
+    let seen = this._seenOps.get(from);
+    if (!seen) {
+      seen = new Map();
+      this._seenOps.set(from, seen);
+    }
+    if (!seen.has(opId) && seen.size >= SEEN_OPS_PER_PEER) {
+      seen.delete(seen.keys().next().value);
+    }
+    seen.set(opId, applied);
+  }
+
+  /** @private — Op von baseRevision auf die aktuelle Revision heben. */
+  _rebaseOp(op, baseRevision) {
+    if (baseRevision > this.revision) return null;
+    const pending = this._opLog.filter((e) => e.revision > baseRevision);
+    // Lücke im Log (getrimmt oder setState dazwischen) → kein sicherer Rebase.
+    if (pending.length !== this.revision - baseRevision) return null;
+    let current = normalizeTextOp(op);
+    for (const entry of pending) {
+      if (!current) return null;
+      current = transformTextOp(current, entry.op);
+    }
+    return current;
+  }
+
+  /** @private */
+  _applyOpAsHost(op, baseRevision, meta = {}) {
+    const from = meta.from || '(self)';
+    const seen = this._seenOps.get(from);
+    if (meta.opId && seen?.has(meta.opId)) {
+      // Wiederholung (Ack ging verloren): nicht erneut anwenden.
+      return seen.get(meta.opId) === true;
+    }
+    if (meta.replacesOpId) {
+      if (seen?.get(meta.replacesOpId) === true) {
+        // Der Vorgänger kam doch noch an — dieser Ersatz-Op basiert auf einem
+        // veralteten Bild. Ablehnen, der Editor difft dann gegen den neuen Stand.
+        this._rememberOp(from, meta.opId, false);
+        return false;
+      }
+      // Falls der Vorgänger noch irgendwo unterwegs ist: bei Ankunft verwerfen.
+      if (!seen?.has(meta.replacesOpId)) this._rememberOp(from, meta.replacesOpId, false);
+    }
+
+    let effective = op;
+    if (baseRevision !== this.revision) {
+      effective = typeof this.state === 'string' ? this._rebaseOp(op, baseRevision) : null;
+      if (!effective) {
+        this.log.warn?.('[SharedDocument] stale op rejected', { expected: this.revision, got: baseRevision });
+        this._rememberOp(from, meta.opId, false);
+        return false;
+      }
+    }
+
+    if (typeof this.state === 'string' && effective && typeof effective === 'object' && effective.type) {
+      this.state = applyTextOp(this.state, effective);
+    } else if (effective && typeof effective === 'object' && effective.type === 'set') {
+      this.state = effective.value;
     } else {
-      this.log.warn?.('[SharedDocument] unsupported op', op);
+      this.log.warn?.('[SharedDocument] unsupported op', effective);
+      this._rememberOp(from, meta.opId, false);
       return false;
     }
     this.revision += 1;
+    this._logOp(normalizeTextOp(effective) || { type: 'replace' });
+    this._rememberOp(from, meta.opId, true);
     this.emitter.emit('change', { state: this.state, revision: this.revision, origin: 'local' });
     this._broadcastSync();
     return true;
@@ -243,19 +369,27 @@ class SharedDocument {
         this.emitter.emit('change', { state: this.state, revision: this.revision, origin: 'remote' });
         this.emitter.emit('remote-op', { from, payload });
       }
+      if (payload.ackOpId) {
+        this.emitter.emit('op-ack', { opId: String(payload.ackOpId), applied: payload.ackApplied === true });
+      }
       return;
     }
 
     if (wire === WIRE.DOC_OP && this.isHost && from) {
       const baseRevision = Number(payload.baseRevision) || 0;
-      const ok = this._applyOpAsHost(payload.op, baseRevision);
-      if (!ok) {
-        this.room._sendWire(from, WIRE.DOC_SYNC, {
-          docId: this.docId,
-          state: this.state,
-          revision: this.revision,
-        });
-      }
+      const ok = this._applyOpAsHost(payload.op, baseRevision, {
+        opId: payload.opId ? String(payload.opId) : undefined,
+        replacesOpId: payload.replacesOpId ? String(payload.replacesOpId) : undefined,
+        from,
+      });
+      // Gezieltes Ack mit aktuellem Stand an den Absender — auch bei Erfolg,
+      // damit dessen Editor die Runde sicher abschließen kann.
+      this.room._sendWire(from, WIRE.DOC_SYNC, {
+        docId: this.docId,
+        state: this.state,
+        revision: this.revision,
+        ...(payload.opId ? { ackOpId: String(payload.opId), ackApplied: ok === true } : {}),
+      });
     }
   }
 
@@ -800,6 +934,8 @@ export {
   parseRealtimeMessage,
   buildRealtimeEnvelope,
   applyTextOp,
+  normalizeTextOp,
+  transformTextOp,
   isPresenceStale,
   SharedDocument,
   RealtimeRoom,

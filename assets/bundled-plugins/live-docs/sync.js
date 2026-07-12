@@ -24,8 +24,10 @@ export function createDocsSession({ api, bridge, recents }) {
   let selfPeerId = '';
   let selfName = '';
   let offDocChange = null;
+  let offDocAck = null;
   let sessionDocId = '';
   let recentTimer = null;
+  let lastAck = null; // { opId, applied } — Bestätigung der letzten Editor-Runde
 
   const contactName = (peerId) => resolveContactName(api, peerId);
   const me = async () => api.peer.info?.().catch(() => null);
@@ -69,6 +71,7 @@ export function createDocsSession({ api, bridge, recents }) {
       selfPeerId: room?.selfPeerId || selfPeerId || '',
       fileName,
       doc: doc ? { state: String(doc.getState() ?? ''), revision: doc.getRevision() } : null,
+      ack: lastAck,
       participants: listParticipants({ room, selfPeerId, selfName, resolveName: contactName }),
       contacts: listContacts(api),
       pendingInvite: pendingInvite
@@ -85,9 +88,15 @@ export function createDocsSession({ api, bridge, recents }) {
 
   function wireDoc() {
     offDocChange?.();
+    offDocAck?.();
     offDocChange = doc?.on('change', () => {
       pushToChild();
       scheduleRecent();
+    }) || null;
+    // Als Client: Bestätigungen des Hosts (angewendet/abgelehnt) an den Editor melden.
+    offDocAck = doc?.on('op-ack', ({ opId, applied }) => {
+      lastAck = { opId, applied: applied === true };
+      pushToChild();
     }) || null;
   }
 
@@ -145,9 +154,12 @@ export function createDocsSession({ api, bridge, recents }) {
     flushRecent();
     offDocChange?.();
     offDocChange = null;
+    offDocAck?.();
+    offDocAck = null;
     doc = null;
     room = null;
     sessionDocId = '';
+    lastAck = null;
     pushToChild();
   }
 
@@ -225,20 +237,34 @@ export function createDocsSession({ api, bridge, recents }) {
         }
         break;
       }
-      case 'apply_op':
-        if (doc && payload.op && typeof payload.op === 'object'
-          && Number(payload.baseRevision) === doc.getRevision()) {
-          const next = payload.op.type === 'insert' || payload.op.type === 'replace'
-            ? (payload.op.text?.length || payload.op.value?.length || 0)
-            : 0;
-          if (String(doc.getState() ?? '').length + next <= MAX_DOC_CHARS) {
-            doc.applyOp(payload.op);
-          }
-        } else {
-          // Revision passt nicht mehr — Editor bekommt den aktuellen Stand.
+      case 'apply_op': {
+        if (!doc || !payload.op || typeof payload.op !== 'object') {
+          pushToChild();
+          break;
+        }
+        const growth = payload.op.type === 'insert' || payload.op.type === 'replace'
+          ? (payload.op.text?.length || payload.op.value?.length || 0)
+          : 0;
+        if (String(doc.getState() ?? '').length + growth > MAX_DOC_CHARS) {
+          if (payload.opId) lastAck = { opId: String(payload.opId), applied: false };
+          pushToChild();
+          break;
+        }
+        // Basis-Revision des Editors mitgeben: veraltete Ops werden host-seitig
+        // per Operational Transform auf den aktuellen Stand gehoben statt verworfen.
+        const base = Number(payload.baseRevision);
+        const meta = {
+          opId: payload.opId ? String(payload.opId) : undefined,
+          replacesOpId: payload.replacesOpId ? String(payload.replacesOpId) : undefined,
+        };
+        const ok = doc.applyOp(payload.op, Number.isFinite(base) ? base : undefined, meta);
+        if (room?.isHost && meta.opId) {
+          // Host-Editor: Ergebnis liegt sofort vor — direkt bestätigen.
+          lastAck = { opId: meta.opId, applied: ok === true };
           pushToChild();
         }
         break;
+      }
       case 'cursor':
         // Eigene Cursor-/Auswahlposition an alle Mit-Bearbeiter (ephemer).
         room?.broadcast({ type: 'cursor', caret: payload.caret || null, name: selfName || '' });
