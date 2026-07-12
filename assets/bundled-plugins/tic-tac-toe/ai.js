@@ -7,7 +7,6 @@
  */
 
 import {
-  createEmptyBoard,
   applyMove,
   isBoardFull,
   listEmptyCells,
@@ -176,9 +175,10 @@ export function chooseAiMove(board, winLength, aiDisc, humanDisc, difficulty, mo
 // Das Modell speichert Zustandswerte V[key] aus Sicht des Spielers am Zug
 // (eigene Steine = '2', gegnerische = '1', leer = '0'). Gelernt wird per
 // Monte-Carlo-Rückführung des Partieergebnisses (+1 Sieg, −1 Niederlage,
-// 0 Remis). Die Zugwahl erfolgt negamax-artig: mein Wert eines Zuges ist der
+// 0 Remis) — ausschließlich aus Partien, die der Spieler selbst gegen das
+// Modell spielt (learnFromGame); ein Selbstspiel-Training gibt es nicht.
+// Die Zugwahl erfolgt negamax-artig: mein Wert eines Zuges ist der
 // negierte Wert der Folgestellung aus Gegnersicht.
-export const TRAIN_MAX_GAMES = 20000;
 
 export function emptyModel() {
   return { version: 1, V: {}, games: 0, wins: 0, losses: 0, draws: 0, updatedAt: 0 };
@@ -237,58 +237,6 @@ export function chooseTrainedMove(board, winLength, aiDisc, humanDisc, model, ep
   // Aufrufer die Heuristik statt blind das erste Feld zu nehmen.
   if (!known) return null;
   return best;
-}
-
-export function trainingFallbackMove(board, winLength, moverDisc, oppDisc) {
-  const winMove = findWinningMove(board, winLength, moverDisc);
-  if (winMove) return winMove;
-  const blockMove = findWinningMove(board, winLength, oppDisc);
-  if (blockMove && Math.random() < 0.7) return blockMove;
-  return randomCell(listEmptyCells(board));
-}
-
-// Trainiert das Modell per Selbstspiel. Läuft rein synchron; der Aufrufer
-// stückelt größere Läufe in Häppchen, damit die UI reagierbar bleibt.
-export function trainSelfPlay(model, games, opts = {}) {
-  const m = model && model.V ? model : emptyModel();
-  const alpha = typeof opts.alpha === 'number' ? opts.alpha : 0.1;
-  const epsilon = typeof opts.epsilon === 'number' ? opts.epsilon : 0.25;
-  const rounds = Math.max(0, Math.round(Number(games) || 0));
-  const P1 = 1;
-  const P2 = 2;
-  for (let g = 0; g < rounds; g += 1) {
-    let board = createEmptyBoard(3);
-    let mover = P1;
-    const visited = [];
-    let winnerDisc = null;
-    for (let ply = 0; ply < 9; ply += 1) {
-      const opp = mover === P1 ? P2 : P1;
-      // Zustand vor dem Zug aus Sicht des Ziehenden merken.
-      visited.push({ key: modelKey(board, mover, opp), disc: mover });
-      const move = chooseTrainedMove(board, 3, mover, opp, m, epsilon)
-        || trainingFallbackMove(board, 3, mover, opp);
-      const next = applyMove(board, move.row, move.col, mover);
-      if (!next) break;
-      board = next;
-      if (checkWin(board, 3, move)) {
-        winnerDisc = mover;
-        break;
-      }
-      if (isBoardFull(board)) break;
-      mover = opp;
-    }
-    for (const step of visited) {
-      const z = winnerDisc == null ? 0 : (step.disc === winnerDisc ? 1 : -1);
-      const cur = typeof m.V[step.key] === 'number' ? m.V[step.key] : 0;
-      m.V[step.key] = cur + alpha * (z - cur);
-    }
-    m.games += 1;
-    if (winnerDisc == null) m.draws += 1;
-    else if (winnerDisc === P1) m.wins += 1;
-    else m.losses += 1;
-  }
-  m.updatedAt = 0;
-  return m;
 }
 
 // Rückführung einer real gespielten Partie (Mensch gegen trainierte KI).

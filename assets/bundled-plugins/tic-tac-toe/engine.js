@@ -22,9 +22,7 @@ import {
   emptyModel,
   modelKey,
   isTrainableBoard,
-  trainSelfPlay,
   learnFromGame,
-  TRAIN_MAX_GAMES,
 } from './ai.js';
 import {
   loadModelStore,
@@ -124,16 +122,14 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
   let savedAt = Number(restoredGame?.savedAt) || 0;
   const invitedPeers = new Set(Array.isArray(restoredGame?.invitedPeers) ? restoredGame.invitedPeers : []);
 
-  // Trainierbare KI: benannte Modelle im Store, das aktive wird trainiert
-  // und eingesetzt (siehe models.js). aiModel zeigt auf die Daten des aktiven
-  // Modells; aiModelRowId erlaubt das Zurückschreiben in den Store.
+  // Trainierbare KI: benannte Modelle im Store (siehe models.js). Gelernt
+  // wird ausschließlich aus Solo-Partien, die der Spieler selbst gegen das
+  // aktive Modell spielt — es gibt kein Selbstspiel-Training. aiModel zeigt
+  // auf die Daten des aktiven Modells; aiModelRowId erlaubt das
+  // Zurückschreiben in den Store.
   let aiModel = null;
   let aiModelRowId = '';
   let moveHistory = [];
-  let training = false;
-  let trainingTarget = 0;
-  let trainingDone = 0;
-  let trainingTimer = null;
 
   function ensureModel() {
     const store = loadModelStore(api);
@@ -182,21 +178,12 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
       wins: m?.wins || 0,
       losses: m?.losses || 0,
       draws: m?.draws || 0,
-      training,
-      progress: trainingTarget > 0 ? Math.min(1, trainingDone / trainingTarget) : 0,
       ...summarizeModels(store),
     };
   }
 
-  // Modellverwaltung (anlegen/umbenennen/löschen/aktivieren). Während eines
-  // laufenden Trainings gesperrt, damit der Trainingslauf nicht ins falsche
-  // Modell schreibt.
+  // Modellverwaltung (anlegen/umbenennen/löschen/aktivieren).
   function manageAiModels(op) {
-    if (training) {
-      message = 'Bitte warte, bis das laufende Training abgeschlossen ist.';
-      pushState();
-      return false;
-    }
     const store = loadModelStore(api);
     let ok = false;
     if (op.type === 'create') {
@@ -564,52 +551,7 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
     });
   }
 
-  function trainingEpsilon() {
-    if (trainingTarget <= 0) return 0.25;
-    const frac = trainingDone / trainingTarget;
-    return Math.max(0.08, 0.35 - 0.27 * frac);
-  }
-
-  function runTrainingChunk() {
-    trainingTimer = null;
-    if (!training) return;
-    const CHUNK = 400;
-    const batch = Math.min(CHUNK, trainingTarget - trainingDone);
-    trainSelfPlay(aiModel, batch, { epsilon: trainingEpsilon() });
-    trainingDone += batch;
-    if (trainingDone >= trainingTarget) {
-      training = false;
-      saveModel();
-      message = `KI-Training abgeschlossen — ${aiModel.games} Partien gespielt, ${Object.keys(aiModel.V).length} Stellungen gelernt.`;
-      checkpoint('train_done');
-      pushState();
-      return;
-    }
-    saveModel();
-    pushState();
-    trainingTimer = api.timer.setTimeout(runTrainingChunk, 0);
-  }
-
-  function trainAi(gamesRequested) {
-    if (phase === 'playing') {
-      message = 'KI-Training nur in der Lobby oder nach der Partie möglich.';
-      pushState();
-      return false;
-    }
-    if (training) return false;
-    const games = Math.max(1, Math.min(TRAIN_MAX_GAMES, Math.round(Number(gamesRequested) || 0)));
-    ensureModel();
-    training = true;
-    trainingTarget = games;
-    trainingDone = 0;
-    message = `KI-Training läuft (${games} Partien Selbstspiel)…`;
-    pushState();
-    trainingTimer = api.timer.setTimeout(runTrainingChunk, 0);
-    return true;
-  }
-
   function resetAiModel() {
-    if (training) return false;
     ensureModel();
     aiModel = emptyModel();
     moveHistory = [];
@@ -738,7 +680,6 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
     },
     startGame,
     rematch,
-    trainAi,
     resetAiModel,
     manageAiModels,
     onWire,
@@ -747,12 +688,6 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
     publicState,
     pushState,
     applyAction: (pid, a) => applyAction(pid, a),
-    destroy() {
-      training = false;
-      if (trainingTimer != null) {
-        api.timer.clearTimeout(trainingTimer);
-        trainingTimer = null;
-      }
-    },
+    destroy() {},
   };
 }

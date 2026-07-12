@@ -875,40 +875,6 @@ body:has(.ttt-game-root) {
   color: var(--ttt-muted);
 }
 
-.ttt-training-presets {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-
-.ttt-training-preset {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--ttt-line);
-  color: var(--ttt-ink);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.ttt-training-preset:hover { border-color: rgba(34, 211, 238, 0.4); }
-
-.ttt-training-preset.active {
-  border-color: rgba(34, 211, 238, 0.6);
-  background: rgba(34, 211, 238, 0.1);
-  box-shadow: 0 0 14px rgba(34, 211, 238, 0.12);
-}
-
-.ttt-training-preset-label { font-size: 13px; font-weight: 700; }
-.ttt-training-preset-note {
-  font-size: 11px;
-  color: var(--ttt-muted);
-  font-variant-numeric: tabular-nums;
-}
-
 .ttt-training-actions {
   display: flex;
   gap: 10px;
@@ -926,29 +892,6 @@ body:has(.ttt-game-root) {
   margin: 0;
   font-size: 12px;
   color: var(--ttt-tri);
-}
-
-.ttt-training-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--ttt-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.ttt-training-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.ttt-training-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--ttt-x), var(--ttt-o));
-  transition: width 0.3s ease;
 }
 
 .ttt-settings-check {

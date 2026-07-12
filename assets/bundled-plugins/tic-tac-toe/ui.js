@@ -27,7 +27,6 @@ import {
   emptyModel,
   modelKey,
   chooseTrainedMove,
-  trainSelfPlay,
   learnFromGame,
 } from './ai.js';
 import {
@@ -97,7 +96,6 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
     emptyModel,
     modelKey,
     chooseTrainedMove,
-    trainSelfPlay,
     learnFromGame,
   });
 
@@ -491,8 +489,6 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
         hostRef?.saveNow();
       } else if (payload.type === 'kick_player' && payload.peerId) {
         hostRef?.kickPlayer(payload.peerId);
-      } else if (payload.type === 'train_ai') {
-        hostRef?.trainAi(payload.games);
       } else if (payload.type === 'reset_ai_model') {
         hostRef?.resetAiModel();
       } else if (payload.type === 'create_ai_model') {

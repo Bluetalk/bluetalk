@@ -535,15 +535,8 @@ function PlayerManagement({ snapshot, isHost, selfId, onInvite, onKickPlayer }) 
   );
 }
 
-const TRAIN_PRESETS = [
-  { games: 500, label: 'Schnell', note: '500 Partien' },
-  { games: 2000, label: 'Solide', note: '2 000 Partien' },
-  { games: 5000, label: 'Stark', note: '5 000 Partien' },
-  { games: 12000, label: 'Meister', note: '12 000 Partien' },
-];
-
 /** Liste der eigenen Modelle: anlegen, umbenennen, löschen, aktivieren. */
-function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDeleteModel, onSelectModel }) {
+function ModelManager({ myAiModels, onCreateModel, onRenameModel, onDeleteModel, onSelectModel }) {
   const models = myAiModels?.models || [];
   const activeId = myAiModels?.activeId || '';
   const [newName, setNewName] = useState('');
@@ -563,7 +556,6 @@ function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDe
               <button
                 type="button"
                 className="ttt-model-select"
-                disabled={training}
                 onClick={() => onSelectModel(m.id)}
                 title={m.id === activeId ? 'Aktives Modell' : 'Als aktives Modell verwenden'}
               >
@@ -580,7 +572,6 @@ function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDe
                 className="ttt-game-btn-icon ttt-model-action"
                 title="Umbenennen"
                 aria-label={`${m.name} umbenennen`}
-                disabled={training}
                 onClick={() => {
                   const name = window.prompt('Neuer Name für das Modell:', m.name);
                   if (name && name.trim()) onRenameModel(m.id, name.trim());
@@ -593,7 +584,6 @@ function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDe
                 className="ttt-game-btn-icon ttt-model-action"
                 title="Löschen"
                 aria-label={`${m.name} löschen`}
-                disabled={training}
                 onClick={() => {
                   if (window.confirm(`Modell „${m.name}" endgültig löschen?`)) onDeleteModel(m.id);
                 }}
@@ -614,7 +604,7 @@ function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDe
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } }}
         />
-        <button type="button" className="ttt-btn-ghost" disabled={training} onClick={create}>
+        <button type="button" className="ttt-btn-ghost" onClick={create}>
           <Plus size={14} /> Anlegen
         </button>
       </div>
@@ -626,7 +616,6 @@ function TrainingPanel({
   snapshot,
   isHost,
   myAiModels,
-  onTrain,
   onReset,
   onSelectTrained,
   onPlayOnline,
@@ -639,8 +628,6 @@ function TrainingPanel({
   const model = pub?.aiModel || {};
   const settings = pub?.settings || {};
   const inLobby = !pub?.phase || pub.phase === 'lobby' || pub.phase === 'finished';
-  const training = Boolean(model.training);
-  const [games, setGames] = useState(2000);
   const isSolo = settings.playMode !== 'online';
   const usingTrained = isSolo && settings.aiDifficulty === 'trained';
   const onlineAutopilot = settings.playMode === 'online' && settings.aiAutoplay === true;
@@ -649,7 +636,6 @@ function TrainingPanel({
   const manager = (
     <ModelManager
       myAiModels={myAiModels}
-      training={training}
       onCreateModel={onCreateModel}
       onRenameModel={onRenameModel}
       onDeleteModel={onDeleteModel}
@@ -661,9 +647,10 @@ function TrainingPanel({
     return (
       <div className="ttt-training">
         <p className="ttt-training-intro">
-          Verwalte hier deine eigenen Modelle. Trainiert wird nur beim Selberspielen —
-          starte dazu ein eigenes Solo-Spiel. Im laufenden Spiel kannst du jederzeit
-          eines deiner Modelle per <Brain size={13} /> Autopilot für dich spielen lassen.
+          Verwalte hier deine eigenen Modelle. Trainiert wird nur, indem du
+          <strong> selbst gegen ein Modell spielst</strong> — starte dazu ein eigenes
+          Solo-Spiel. Im laufenden Spiel kannst du jederzeit eines deiner Modelle per{' '}
+          <Brain size={13} /> Autopilot für dich spielen lassen.
         </p>
         {manager}
       </div>
@@ -673,21 +660,21 @@ function TrainingPanel({
   return (
     <div className="ttt-training">
       <p className="ttt-training-intro">
-        Trainiere eigene Tic-Tac-Toe-Modelle: durch Selbstspiel-Training und aus
-        <strong> Solo-Partien</strong>, die du selbst gegen das aktive Modell spielst.
-        Im Spiel — auch online oder gegen den Algorithmus — kannst du dann live per
-        Button eines deiner Modelle für dich spielen lassen; dabei lernt es nicht weiter.
+        Deine Modelle lernen ausschließlich, wenn du <strong>selbst gegen sie
+        spielst</strong>: wähle das aktive Modell als Solo-Gegner (3×3) — jede Partie
+        gegen dich fließt in sein Gedächtnis ein. Im Spiel kannst du per Autopilot ein
+        Modell für dich antreten lassen; dabei lernt es nicht weiter.
       </p>
 
       {manager}
 
       <p className="ttt-training-subhead">
-        Training{activeName ? ` — aktives Modell: ${activeName}` : ''}
+        Aktives Modell{activeName ? `: ${activeName}` : ''}
       </p>
       <div className="ttt-training-stats">
         <div className="ttt-training-stat">
           <span className="ttt-training-stat-value">{model.games || 0}</span>
-          <span className="ttt-training-stat-label">Partien trainiert</span>
+          <span className="ttt-training-stat-label">Partien gelernt</span>
         </div>
         <div className="ttt-training-stat">
           <span className="ttt-training-stat-value">{model.states || 0}</span>
@@ -701,65 +688,44 @@ function TrainingPanel({
         </div>
       </div>
 
-      {training ? (
-        <div className="ttt-training-progress">
-          <div className="ttt-training-bar">
-            <div className="ttt-training-bar-fill" style={{ width: `${Math.round((model.progress || 0) * 100)}%` }} />
-          </div>
-          <span>Training läuft… {Math.round((model.progress || 0) * 100)}%</span>
-        </div>
-      ) : (
-        <>
-          <p className="ttt-training-subhead">Trainingsumfang</p>
-          <div className="ttt-training-presets">
-            {TRAIN_PRESETS.map((preset) => (
-              <button
-                key={preset.games}
-                type="button"
-                className={`ttt-training-preset${games === preset.games ? ' active' : ''}`}
-                onClick={() => setGames(preset.games)}
-              >
-                <span className="ttt-training-preset-label">{preset.label}</span>
-                <span className="ttt-training-preset-note">{preset.note}</span>
-              </button>
-            ))}
-          </div>
-          {!inLobby ? (
-            <p className="ttt-panel-note">Training ist in der Lobby oder nach einer Partie möglich.</p>
-          ) : null}
-          <div className="ttt-training-actions">
-            <button type="button" className="ttt-btn-primary" onClick={() => onTrain(games)} disabled={!inLobby}>
-              <Brain size={16} /> {model.available ? 'Weiter trainieren' : 'Training starten'}
-            </button>
-            <button type="button" className="ttt-btn-ghost" onClick={onReset} disabled={!inLobby || !model.available}>
-              <RotateCcw size={14} /> Zurücksetzen
-            </button>
-          </div>
-          {model.available ? (
-            <div className="ttt-training-deploy">
-              <p className="ttt-training-subhead">Einsetzen</p>
-              {isSolo && !usingTrained ? (
-                <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onSelectTrained}>
-                  <Brain size={14} /> Solo als Gegner auswählen
-                </button>
-              ) : null}
-              {usingTrained ? (
-                <p className="ttt-training-active-note"><Brain size={13} /> Deine trainierte KI ist als Solo-Gegner aktiv.</p>
-              ) : null}
-              {!onlineAutopilot ? (
-                <button type="button" className="ttt-btn-ghost ttt-training-select" onClick={onPlayOnline}>
-                  <Brain size={14} /> Online gegen andere spielen lassen
-                </button>
-              ) : (
-                <p className="ttt-training-active-note">
-                  <Brain size={13} /> Autopilot aktiv: Deine KI spielt online für dich. Lade
-                  einen Kontakt ein — er tritt direkt gegen deine KI an.
-                </p>
-              )}
-            </div>
-          ) : null}
-        </>
-      )}
+      <div className="ttt-training-actions">
+        {isSolo && !usingTrained ? (
+          <button type="button" className="ttt-btn-primary" onClick={onSelectTrained} disabled={!inLobby}>
+            <Brain size={16} /> Gegen dieses Modell spielen (trainiert es)
+          </button>
+        ) : null}
+        <button type="button" className="ttt-btn-ghost" onClick={onReset} disabled={!inLobby || !model.available}>
+          <RotateCcw size={14} /> Zurücksetzen
+        </button>
+      </div>
+      {usingTrained ? (
+        <p className="ttt-training-active-note">
+          <Brain size={13} /> Dein Modell ist als Solo-Gegner aktiv — jede Partie gegen dich trainiert es.
+        </p>
+      ) : null}
+      {!inLobby ? (
+        <p className="ttt-panel-note">Gegner wechseln geht in der Lobby oder nach einer Partie.</p>
+      ) : null}
+
+      <div className="ttt-training-deploy">
+        <p className="ttt-training-subhead">Einsetzen</p>
+        {!onlineAutopilot ? (
+          <button
+            type="button"
+            className="ttt-btn-ghost ttt-training-select"
+            onClick={onPlayOnline}
+            disabled={!model.available}
+            title={model.available ? undefined : 'Erst trainieren — spiele Solo-Partien gegen das Modell.'}
+          >
+            <Brain size={14} /> Online gegen andere spielen lassen
+          </button>
+        ) : (
+          <p className="ttt-training-active-note">
+            <Brain size={13} /> Autopilot aktiv: Dein Modell spielt online für dich. Lade
+            einen Kontakt ein — er tritt direkt gegen dein Modell an.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -773,7 +739,7 @@ function TicTacToeGuide() {
         <li><strong>Erweitert:</strong> 5×5 oder 7×7 mit 3–5 in einer Reihe — auch diagonal.</li>
         <li><strong>Online:</strong> 2–4 Spieler mit Symbolen X, O, △, □.</li>
         <li><strong>Solo:</strong> Du spielst gegen einen lokalen Algorithmus (Leicht/Mittel/Schwer).</li>
-        <li><strong>Eigene Modelle:</strong> Über <Brain size={12} /> KI-Modelle legst du mehrere benannte Modelle an. Trainiert wird nur beim Selberspielen (Selbstspiel-Training und Solo-Partien gegen das aktive Modell, 3×3).</li>
+        <li><strong>Eigene Modelle:</strong> Über <Brain size={12} /> KI-Modelle legst du mehrere benannte Modelle an. Trainiert wird nur, indem du selbst Solo-Partien gegen das aktive Modell spielst (3×3).</li>
         <li><strong>Autopilot:</strong> Im laufenden Spiel — online oder gegen den Algorithmus — lässt du per Button jederzeit eines deiner Modelle für dich spielen.</li>
       </ul>
     </div>
@@ -811,7 +777,6 @@ export default function TicTacToeGamePage() {
   const leave = useCallback(() => { send({ type: 'leave' }); closeWindow(); }, [closeWindow, send]);
   const place = useCallback((row, col) => send({ type: 'action', action: { type: 'place', row, col } }), [send]);
   const rematch = useCallback(() => send({ type: 'action', action: { type: 'rematch' } }), [send]);
-  const trainAi = useCallback((games) => send({ type: 'train_ai', games }), [send]);
   const resetAiModel = useCallback(() => send({ type: 'reset_ai_model' }), [send]);
   const createAiModel = useCallback((name) => send({ type: 'create_ai_model', name }), [send]);
   const renameAiModel = useCallback((id, name) => send({ type: 'rename_ai_model', id, name }), [send]);
@@ -929,7 +894,6 @@ export default function TicTacToeGamePage() {
             snapshot={snapshot}
             isHost={isHost}
             myAiModels={myAiModels}
-            onTrain={trainAi}
             onReset={resetAiModel}
             onSelectTrained={selectTrainedAi}
             onPlayOnline={enableOnlineAi}
