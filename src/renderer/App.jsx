@@ -35,6 +35,7 @@ export default function App() {
   const [peerGamePresence, setPeerGamePresence] = useState({});
   const [peerUserPresence, setPeerUserPresence] = useState({});
   const [gameInviteKeys, setGameInviteKeys] = useState(() => new Set());
+  const [docInvites, setDocInvites] = useState([]);
   const [theme, setTheme] = useState('dark');
   const [settings, setSettings] = useState({ ...DEFAULT_APP_SETTINGS });
   const messageCacheRef = useRef({});
@@ -164,6 +165,7 @@ export default function App() {
     setPeerGamePresence,
     setPeerUserPresence,
     setGameInviteKeys,
+    setDocInvites,
     setSettings,
     setTheme,
     setLoadError,
@@ -255,6 +257,15 @@ export default function App() {
     gameInviteKeys,
   });
 
+  /** Entfernt eine Dokument-Einladung aus der Liste im Dokumente-Tab. */
+  const dismissDocInvite = useCallback((roomId) => {
+    setDocInvites((prev) => {
+      const next = (Array.isArray(prev) ? prev : []).filter((entry) => entry?.roomId !== roomId);
+      void window.bluetalk?.store?.set?.('liveDocsInvites', next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (!window.bluetalk || loadError || !usernameOnboardingGateReady || showUsernameOnboarding) return undefined;
     let cancelled = false;
@@ -306,6 +317,8 @@ export default function App() {
     peerGamePresence,
     peerUserPresence,
     gameInviteKeys,
+    docInvites,
+    dismissDocInvite,
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
@@ -348,6 +361,8 @@ export default function App() {
     peerGamePresence,
     peerUserPresence,
     gameInviteKeys,
+    docInvites,
+    dismissDocInvite,
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,

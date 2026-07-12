@@ -16,20 +16,24 @@ import {
   splitThinkingText,
 } from './messageHelpers.jsx';
 import {
-  ChessInviteMessage,
-  ConnectFourInviteMessage,
   ContactShareMessage,
   FileMessage,
   GamePresenceBanner,
-  LiveDocsInviteMessage,
   MessageReplyQuote,
-  PokerInviteMessage,
-  TicTacToeInviteMessage,
-  UnoInviteMessage,
 } from './messageParts.jsx';
 import { ChatMessage, MessageSegments } from './agentBlocks.jsx';
 
 const { getGroupMember } = groupChat;
+
+// Einladungen erscheinen im Spiele-/Dokumente-Tab, nicht im Verlauf.
+const INVITE_MESSAGE_KINDS = new Set([
+  'poker-invite',
+  'uno-invite',
+  'connect-four-invite',
+  'chess-invite',
+  'tic-tac-toe-invite',
+  'live-docs-invite',
+]);
 
 /**
  * Nachrichten-Container des aktiven Chats: Warn-/Hinweisbanner, Load-older,
@@ -174,6 +178,9 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
       )}
 
       {msgs.map((m, i) => {
+        // Spiel-/Dokument-Einladungen leben im Spiele- bzw. Dokumente-Tab;
+        // Alt-Einträge im Verlauf werden nicht mehr als Karten gerendert.
+        if (INVITE_MESSAGE_KINDS.has(m.kind)) return null;
         const isSelf = m.from === 'self';
         const bubbleName = isSelf ? (settings.displayName || 'You') : (m.sender || selectedPeer.displayName);
         const senderContact = isGroupSelected && !isSelf ? contactById.get(m.senderPeerId || m.from) : null;
@@ -242,24 +249,6 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 />
               ) : m.kind === 'sticker' ? (
                 <StickerMessage message={m} onExpandImage={actions.onExpandImage} />
-              ) : m.kind === 'poker-invite' ? (
-                <PokerInviteMessage message={m} />
-              ) : m.kind === 'connect-four-invite' ? (
-                <ConnectFourInviteMessage message={m} />
-              ) : m.kind === 'chess-invite' ? (
-                <ChessInviteMessage message={m} />
-              ) : m.kind === 'tic-tac-toe-invite' ? (
-                <TicTacToeInviteMessage message={m} />
-              ) : m.kind === 'live-docs-invite' ? (
-                <LiveDocsInviteMessage message={m} />
-              ) : m.kind === 'uno-invite' && debugMode ? (
-                <UnoInviteMessage message={m} />
-              ) : m.kind === 'uno-invite' ? (
-                <ChatMessage
-                  message={m}
-                  onExpandImage={actions.onExpandImage}
-                  onOpenSubagent={isAiChatSelected ? actions.openSubagentForSelectedChat : undefined}
-                />
               ) : m.kind === 'contact-share' ? (
                 <ContactShareMessage
                   message={m}

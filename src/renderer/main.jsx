@@ -12,6 +12,10 @@ const GAME_WINDOW_ROUTES = new Set([
   '/docs-editor',
 ]);
 
+// Natives WebView2-Rechtsklickmenü überall unterdrücken. Eigene Kontextmenüs
+// öffnen über React-Handler und sind von preventDefault nicht betroffen.
+window.addEventListener('contextmenu', (event) => event.preventDefault());
+
 const hashPath = window.location.hash.slice(1).split(/[?#]/, 1)[0] || '/';
 const RootApp = React.lazy(() => (
   GAME_WINDOW_ROUTES.has(hashPath)

@@ -36,6 +36,17 @@ import {
   settingsSummary,
   createHost,
 } from './engine.js';
+import {
+  loadModelStore,
+  saveModelStore,
+  getActiveModelRow,
+  getModelRow,
+  createModel,
+  renameModel,
+  deleteModel,
+  selectModel,
+  summarizeModels,
+} from './models.js';
 
 export default function activateTicTacToePlugin(BlueTalkPlugin) {
   const api = BlueTalkPlugin;
@@ -96,6 +107,72 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
   let tttSelfPeerName = '';
   let clientState = null;
   let lastPresenceSession = null;
+
+  // Live-Autopilot: ein gewähltes eigenes Modell zieht für den eigenen
+  // Sitzplatz — funktioniert als Host wie als Gast, solo wie online.
+  let autopilot = { enabled: false, modelId: '' };
+  let lastAutopilotKey = '';
+
+  function boardSignature(board) {
+    return (board || []).map((row) => row.join('')).join('|');
+  }
+
+  function maybeAutopilotMove() {
+    if (!autopilot.enabled || !tttSelfPeerId) return;
+    const pub = hostRef ? hostRef.publicState() : clientState;
+    if (!pub || pub.phase !== 'playing') return;
+    if (pub.toAct !== tttSelfPeerId) return;
+    const me = (pub.players || []).find((p) => p.peerId === tttSelfPeerId);
+    if (!me) return;
+    // Pro Stellung nur ein automatischer Zug — die Pump-Retries dürfen
+    // nicht mehrfach feuern.
+    const key = `${pub.gameId}:${boardSignature(pub.board)}:${pub.toAct}`;
+    if (key === lastAutopilotKey) return;
+    lastAutopilotKey = key;
+
+    const store = loadModelStore(api);
+    const row = getModelRow(store, autopilot.modelId) || getActiveModelRow(store);
+    const opponent = (pub.players || []).find((p) => p.disc !== me.disc);
+    const move = chooseAiMove(
+      pub.board,
+      pub.settings?.winLength || 3,
+      me.disc,
+      opponent?.disc || (me.disc === 1 ? 2 : 1),
+      'trained',
+      row?.model || null
+    );
+    if (!move) return;
+    // Kurze Denkpause, damit der Zug für Mitspieler natürlich wirkt.
+    setTimeout(() => {
+      if (hostRef) {
+        hostRef.applyAction(tttSelfPeerId, { type: 'place', row: move.row, col: move.col });
+      } else if (clientState?.hostPeerId && clientState?.gameId) {
+        sendWire(clientState.hostPeerId, {
+          wire: 'action',
+          gameId: clientState.gameId,
+          action: { type: 'place', row: move.row, col: move.col },
+        });
+      }
+    }, 350);
+  }
+
+  // Eigene Modelle verwalten — als Host über die Engine (hält deren
+  // Modell-Cache konsistent und blockt laufendes Training), sonst direkt
+  // auf dem Storage.
+  function manageOwnModels(op) {
+    if (hostRef) {
+      hostRef.manageAiModels(op);
+      tryPump();
+      return;
+    }
+    const store = loadModelStore(api);
+    if (op.type === 'create') createModel(store, op.name);
+    else if (op.type === 'rename') renameModel(store, op.id, op.name);
+    else if (op.type === 'delete') deleteModel(store, op.id);
+    else if (op.type === 'select') selectModel(store, op.id);
+    saveModelStore(api, store);
+    tryPump();
+  }
 
   function clearGamePresence() {
     if (!lastPresenceSession) return;
@@ -167,8 +244,16 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
           peerId: contact.id,
           name: contact.nickname || contact.name || connected.get(contact.id)?.name || contact.id,
         }));
-    window.bluetalk.ticTacToe.pushState({ public: pub, inviteCandidates });
+    window.bluetalk.ticTacToe.pushState({
+      public: pub,
+      inviteCandidates,
+      // Eigene Modelle + Autopilot-Zustand des LOKALEN Nutzers — unabhängig
+      // davon, ob wir Host oder Gast sind (pub.aiModel gehört dem Host).
+      myAiModels: summarizeModels(loadModelStore(api)),
+      autopilot: { ...autopilot },
+    });
     syncGamePresence();
+    maybeAutopilotMove();
   }
 
   async function pumpStateToWindow() {
@@ -394,6 +479,8 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
         }
         clearGamePresence();
         clientState = null;
+        autopilot = { enabled: false, modelId: '' };
+        lastAutopilotKey = '';
         tryPump();
         notifyLauncherRefresh();
       } else if (payload.type === 'update_settings' && payload.settings) {
@@ -408,6 +495,21 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
         hostRef?.trainAi(payload.games);
       } else if (payload.type === 'reset_ai_model') {
         hostRef?.resetAiModel();
+      } else if (payload.type === 'create_ai_model') {
+        manageOwnModels({ type: 'create', name: payload.name });
+      } else if (payload.type === 'rename_ai_model') {
+        manageOwnModels({ type: 'rename', id: payload.id, name: payload.name });
+      } else if (payload.type === 'delete_ai_model') {
+        manageOwnModels({ type: 'delete', id: payload.id });
+      } else if (payload.type === 'select_ai_model') {
+        manageOwnModels({ type: 'select', id: payload.id });
+      } else if (payload.type === 'set_autopilot') {
+        autopilot = {
+          enabled: payload.enabled === true,
+          modelId: typeof payload.modelId === 'string' ? payload.modelId : '',
+        };
+        lastAutopilotKey = '';
+        tryPump();
       }
     });
   }

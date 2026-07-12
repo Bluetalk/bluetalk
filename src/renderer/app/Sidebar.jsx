@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { MessageCircle, Settings as SettingsIcon, UserPlus, Blocks, Plug, FolderOpen, FileText, Palette, Sparkles, Spade } from 'lucide-react';
-import NotificationCenter from '../components/NotificationCenter';
 import ProfileMenu from '../components/ProfileMenu';
 import PresenceStatusToggle from '../components/PresenceStatusToggle';
 import VerticalResizeHandle from '../components/VerticalResizeHandle';
@@ -19,7 +18,8 @@ const SIDEBAR_WIDTH_MIN = 56;
 const SIDEBAR_WIDTH_MAX = 280;
 
 export default function Sidebar() {
-  const { settings, updateSettings } = useApp();
+  const { settings, updateSettings, contacts } = useApp();
+  const pendingRequestCount = contacts.filter((c) => c?.pendingMessageRequest === true).length;
   const sidebarCollapsed = settings.uiCollapse?.sidebar === true;
   const storedSidebar = settings.uiResize?.sidebar;
   const sidebarCommitted =
@@ -94,10 +94,17 @@ export default function Sidebar() {
               key={to}
               to={to}
               className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-              title={label}
+              title={to === '/new' && pendingRequestCount > 0
+                ? `${label} — ${pendingRequestCount} Anfrage${pendingRequestCount === 1 ? '' : 'n'}`
+                : label}
             >
               <Icon size={15} strokeWidth={2} />
               <span>{label}</span>
+              {to === '/new' && pendingRequestCount > 0 ? (
+                <span className="sidebar-link-badge" aria-hidden>
+                  {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                </span>
+              ) : null}
             </NavLink>
           ))}
           {pluginTabs.length > 0 ? <div className="sidebar-nav-divider" role="separator" aria-hidden="true" /> : null}
@@ -120,14 +127,9 @@ export default function Sidebar() {
           })}
         </div>
         <div className="sidebar-footer">
-          <div className="sidebar-notif">
-            <NotificationCenter />
-          </div>
-          <div className="sidebar-presence">
-            <PresenceStatusToggle />
-          </div>
-          <div className="sidebar-profile">
+          <div className="sidebar-profile-cluster">
             <ProfileMenu variant="sidebar" />
+            <PresenceStatusToggle compact />
           </div>
         </div>
       </nav>

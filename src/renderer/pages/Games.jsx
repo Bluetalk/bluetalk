@@ -1,10 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Mail, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import { pluginRuntime } from '../plugins/pluginRuntime';
+import { useApp } from '../App';
+import {
+  canJoinGameViaPresence,
+  formatGamePresenceLabel,
+  isPresenceStale,
+} from '../../shared/game-presence.js';
 
 const ICON_STROKE = 1.75;
+
+const GAME_LABELS = {
+  poker: 'Poker',
+  uno: 'UNO',
+  'connect-four': 'Vier gewinnt',
+  chess: 'Schach',
+  'tic-tac-toe': 'Tic-Tac-Toe',
+};
 
 const DEFAULT_LABELS = {
   launchNew: 'Neues Spiel',
@@ -30,8 +44,30 @@ function labelsForGame(game) {
 
 export default function GamesPage() {
   const { toast } = useToast();
+  const { peers, contacts, peerGamePresence, gameInviteKeys, joinGameFromPresence } = useApp();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Beitretbare Lobbys anderer Peers (per Einladung oder öffentlich).
+  // Quelle ist die Live-Präsenz, nicht der Chatverlauf — abgelaufene oder
+  // volle Sitzungen verschwinden hier automatisch.
+  const openInvites = useMemo(() => {
+    const rows = [];
+    for (const [hostPeerId, presence] of Object.entries(peerGamePresence || {})) {
+      if (!presence || isPresenceStale(presence)) continue;
+      if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) continue;
+      const contact = contacts.find((c) => c?.id === hostPeerId);
+      const peer = peers.find((p) => p?.id === hostPeerId);
+      const hostName = contact?.nickname || contact?.name || peer?.name || hostPeerId;
+      rows.push({
+        hostPeerId,
+        presence,
+        hostName,
+        gameLabel: GAME_LABELS[presence.game] || presence.game,
+      });
+    }
+    return rows.sort((a, b) => a.hostName.localeCompare(b.hostName, undefined, { sensitivity: 'base' }));
+  }, [peerGamePresence, gameInviteKeys, contacts, peers]);
 
   const refresh = useCallback(async () => {
     const games = pluginRuntime.listGames();
@@ -124,6 +160,45 @@ export default function GamesPage() {
           </p>
         </div>
       </div>
+
+      <div className="page-body games-page-body">
+      {openInvites.length > 0 ? (
+        <section className="games-invites" aria-label="Offene Spiel-Einladungen">
+          <div className="section-title">
+            <h3>
+              <span className="section-title-icon" aria-hidden>
+                <Mail size={15} strokeWidth={ICON_STROKE} />
+              </span>
+              Einladungen &amp; offene Lobbys
+              <span className="badge badge-muted">{openInvites.length}</span>
+            </h3>
+          </div>
+          <div className="flex flex-col gap-2">
+            {openInvites.map(({ hostPeerId, presence, hostName, gameLabel }) => (
+              <div key={`${hostPeerId}:${presence.sessionId}`} className="card card-row">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="list-item-avatar">{(hostName || '?')[0].toUpperCase()}</div>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">
+                      {gameLabel} · {presence.tableName || gameLabel}
+                    </div>
+                    <div className="text-xs text-muted truncate">
+                      {hostName} · {formatGamePresenceLabel(presence)} · {presence.playerCount}/{presence.maxPlayers} Spieler
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm flex-shrink-0"
+                  onClick={() => void joinGameFromPresence(presence, hostPeerId)}
+                >
+                  Beitreten
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {loading ? (
         <div className="games-empty">
@@ -239,6 +314,7 @@ export default function GamesPage() {
           })}
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

@@ -2,14 +2,14 @@ import React from 'react';
 import { Bell, BellOff } from 'lucide-react';
 import { useApp } from '../App';
 
-export default function PresenceStatusToggle() {
+export default function PresenceStatusToggle({ compact = false }) {
   const { settings, updateSettings } = useApp();
   const active = settings.doNotDisturb === true;
 
   return (
     <button
       type="button"
-      className={`presence-toggle${active ? ' presence-toggle--dnd' : ''}`}
+      className={`presence-toggle${active ? ' presence-toggle--dnd' : ''}${compact ? ' presence-toggle--compact' : ''}`}
       onClick={() => updateSettings({ doNotDisturb: !active })}
       title={
         active
@@ -24,9 +24,11 @@ export default function PresenceStatusToggle() {
       ) : (
         <Bell size={18} strokeWidth={1.75} aria-hidden />
       )}
-      <span className="presence-toggle-label">
-        {active ? 'Nicht stören' : 'Verfügbar'}
-      </span>
+      {!compact ? (
+        <span className="presence-toggle-label">
+          {active ? 'Nicht stören' : 'Verfügbar'}
+        </span>
+      ) : null}
     </button>
   );
 }

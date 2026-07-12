@@ -65,21 +65,28 @@
   max-width: 560px;
 }
 
+/* Die Spiele-/Dokumente-Seiten scrollen wie alle anderen Seiten über
+   .page-body; der Grid ist ein normales Kind ohne eigenen Scrollbalken. */
+.games-page-body {
+  padding: 22px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .games-grid {
-  flex: 1;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: 16px;
-  padding: 22px 24px 32px;
   align-content: start;
 }
 
+.games-invites .card-row {
+  gap: 12px;
+}
+
 .games-empty {
-  margin: 24px;
   padding: 32px 24px;
   border-radius: 12px;
   border: 1px dashed var(--border-strong);
@@ -190,7 +197,7 @@
 /* ---------- Dokumente: Zuletzt bearbeitet ---------- */
 
 .docs-recent {
-  margin-top: 24px;
+  margin-top: 4px;
 }
 
 .docs-recent-title {

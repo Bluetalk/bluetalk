@@ -28,6 +28,10 @@ const NOTIFYABLE_KINDS = new Set([
   'file',
   'sticker',
   'contact-share',
+]);
+
+// Einladungen laufen an Chatverlauf vorbei in den Spiele- bzw. Dokumente-Tab.
+const INVITE_KINDS = new Set([
   'poker-invite',
   'uno-invite',
   'connect-four-invite',
@@ -55,6 +59,7 @@ export function createPeerMessageHandler(deps) {
     setPeerUserPresence,
     setPeerGamePresence,
     setGameInviteKeys,
+    setDocInvites,
     setChatMeta,
     setMessages,
     setContacts,
@@ -338,6 +343,64 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
+    // Spiel- und Dokument-Einladungen landen nicht mehr im Chatverlauf:
+    // sie werden registriert (Spiele-Tab bzw. Dokumente-Tab zeigen sie an),
+    // lösen eine Benachrichtigung aus und sind damit abgehandelt.
+    if (INVITE_KINDS.has(normalized.kind) && fromId) {
+      if (normalized.kind === 'live-docs-invite') {
+        const roomId = String(normalized.roomId || '');
+        const hostPeerId = normalized.hostPeerId || fromId;
+        if (roomId && hostPeerId) {
+          setDocInvites?.((prev) => {
+            const list = Array.isArray(prev) ? prev : [];
+            if (list.some((entry) => entry?.roomId === roomId)) return list;
+            const next = [
+              {
+                roomId,
+                hostPeerId,
+                fileName: String(normalized.fileName || ''),
+                sender: String(normalized.sender || ''),
+                receivedAt: Date.now(),
+              },
+              ...list,
+            ].slice(0, 20);
+            void window.bluetalk?.store?.set?.('liveDocsInvites', next);
+            return next;
+          });
+        }
+      } else {
+        const game = normalized.kind === 'poker-invite'
+          ? 'poker'
+          : normalized.kind === 'uno-invite'
+            ? 'uno'
+            : normalized.kind === 'chess-invite'
+              ? 'chess'
+              : normalized.kind === 'tic-tac-toe-invite'
+                ? 'tic-tac-toe'
+                : 'connect-four';
+        const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
+        const hostPeerId = normalized.hostPeerId || fromId;
+        if (sessionId && hostPeerId) {
+          const key = gameInviteKey(game, hostPeerId, sessionId);
+          setGameInviteKeys((prev) => {
+            if (prev.has(key)) return prev;
+            const next = new Set(prev);
+            next.add(key);
+            void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
+            return next;
+          });
+        }
+      }
+      const inviteContact = contactsRef.current.find((entry) => entry?.id === fromId);
+      if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(inviteContact)) {
+        void window.bluetalk?.notify?.show?.({
+          title: inviteContact?.nickname || inviteContact?.name || normalized.sender || fromId,
+          body: buildMessageNotificationPreview(normalized),
+        });
+      }
+      return;
+    }
+
     if ((normalized.kind === 'chat' || normalized.kind === 'file' || normalized.kind === 'sticker' || normalized.kind === 'contact-share') && normalized.messageId && fromId) {
       void window.bluetalk.peer.send(fromId, {
         kind: 'delivery-receipt',
@@ -358,30 +421,6 @@ export function createPeerMessageHandler(deps) {
         void window.bluetalk?.notify?.show?.({
           title: notifyContact?.nickname || notifyContact?.name || normalized.sender || fromId,
           body: buildMessageNotificationPreview(normalized),
-        });
-      }
-    }
-
-    if ((normalized.kind === 'poker-invite' || normalized.kind === 'uno-invite' || normalized.kind === 'connect-four-invite' || normalized.kind === 'chess-invite' || normalized.kind === 'tic-tac-toe-invite') && fromId) {
-      const game = normalized.kind === 'poker-invite'
-        ? 'poker'
-        : normalized.kind === 'uno-invite'
-          ? 'uno'
-          : normalized.kind === 'chess-invite'
-            ? 'chess'
-            : normalized.kind === 'tic-tac-toe-invite'
-              ? 'tic-tac-toe'
-              : 'connect-four';
-      const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
-      const hostPeerId = normalized.hostPeerId || fromId;
-      if (sessionId && hostPeerId) {
-        const key = gameInviteKey(game, hostPeerId, sessionId);
-        setGameInviteKeys((prev) => {
-          if (prev.has(key)) return prev;
-          const next = new Set(prev);
-          next.add(key);
-          void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
-          return next;
         });
       }
     }

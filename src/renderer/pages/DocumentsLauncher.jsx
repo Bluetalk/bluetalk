@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FileText, FolderOpen, Users, X } from 'lucide-react';
+import { FileText, FolderOpen, Mail, Users, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
 import { pluginRuntime } from '../plugins/pluginRuntime';
 
@@ -28,6 +29,7 @@ function formatWhen(ts) {
  */
 export default function DocumentsLauncherPage() {
   const { toast } = useToast();
+  const { peers, docInvites, dismissDocInvite } = useApp();
   const [entry, setEntry] = useState(null);
   const [state, setState] = useState({ active: false, tableName: null, docId: '' });
   const [recent, setRecent] = useState([]);
@@ -107,6 +109,63 @@ export default function DocumentsLauncherPage() {
           </p>
         </div>
       </div>
+
+      <div className="page-body games-page-body">
+      {docInvites.length > 0 ? (
+        <section aria-label="Dokument-Einladungen">
+          <div className="section-title">
+            <h3>
+              <span className="section-title-icon" aria-hidden>
+                <Mail size={15} strokeWidth={ICON_STROKE} />
+              </span>
+              Einladungen
+              <span className="badge badge-muted">{docInvites.length}</span>
+            </h3>
+          </div>
+          <div className="flex flex-col gap-2">
+            {docInvites.map((invite) => {
+              const hostOnline = peers.some((p) => p?.id === invite.hostPeerId);
+              return (
+                <div key={invite.roomId} className="card card-row">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="docs-recent-icon" aria-hidden>📄</span>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{invite.fileName || 'Unbenanntes Dokument'}</div>
+                      <div className="text-xs text-muted truncate">
+                        von {invite.sender || invite.hostPeerId} · {hostOnline ? 'Host online' : 'Host offline'} · {formatWhen(invite.receivedAt)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!hostOnline || !entry?.enabled}
+                      title={!hostOnline ? 'Der Host ist gerade offline.' : undefined}
+                      onClick={() => void invoke('joinInvite', {
+                        roomId: invite.roomId,
+                        hostPeerId: invite.hostPeerId,
+                        fileName: invite.fileName,
+                      })}
+                    >
+                      Mitschreiben
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon"
+                      title="Einladung entfernen"
+                      aria-label="Einladung entfernen"
+                      onClick={() => dismissDocInvite(invite.roomId)}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {loading ? (
         <div className="games-empty"><p className="text-muted">Wird geladen…</p></div>
@@ -219,6 +278,7 @@ export default function DocumentsLauncherPage() {
           ) : null}
         </>
       )}
+      </div>
     </div>
   );
 }

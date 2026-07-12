@@ -16,8 +16,9 @@ body:has(.ttt-game-root) {
   --ttt-muted: rgba(190, 214, 224, 0.55);
   --ttt-glass: rgba(10, 16, 26, 0.55);
   --ttt-line: rgba(255, 255, 255, 0.08);
+  /* Nur 100dvh: zusammen mit min-height:100vh konnte die Wurzel höher als der
+     Viewport werden und dem Fenster einen äußeren Scrollbalken geben. */
   height: 100dvh;
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
   background:
@@ -989,4 +990,125 @@ body:has(.ttt-game-root) {
 
 .ttt-training-deploy .ttt-training-select {
   align-self: flex-start;
+}
+
+/* ---------- Eigene Modelle (Verwaltung im KI-Panel) ---------- */
+.ttt-models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ttt-model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ttt-model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--ttt-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ttt-model-row.active {
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.ttt-model-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ttt-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ttt-model-select:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ttt-model-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ttt-model-meta {
+  font-size: 11px;
+  color: var(--ttt-muted);
+}
+
+.ttt-model-action {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.ttt-model-create {
+  display: flex;
+  gap: 6px;
+}
+
+.ttt-model-create input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--ttt-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ttt-ink);
+  font-size: 12px;
+}
+
+/* ---------- Autopilot-Leiste im laufenden Spiel ---------- */
+.ttt-autopilot-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 1px solid var(--ttt-line);
+  border-radius: 12px;
+  background: var(--ttt-glass);
+  color: var(--ttt-muted);
+  font-size: 12px;
+}
+
+.ttt-autopilot-bar.active {
+  border-color: rgba(74, 222, 128, 0.4);
+  color: var(--ttt-ink);
+}
+
+.ttt-autopilot-bar select {
+  padding: 6px 8px;
+  border: 1px solid var(--ttt-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ttt-ink);
+  font-size: 12px;
+}
+
+.ttt-autopilot-note {
+  color: var(--ttt-tri);
 }

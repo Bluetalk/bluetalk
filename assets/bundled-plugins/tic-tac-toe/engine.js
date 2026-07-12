@@ -21,12 +21,22 @@ import {
   chooseAiMove,
   emptyModel,
   modelKey,
-  chooseTrainedMove,
   isTrainableBoard,
   trainSelfPlay,
   learnFromGame,
   TRAIN_MAX_GAMES,
 } from './ai.js';
+import {
+  loadModelStore,
+  saveModelStore,
+  getActiveModelRow,
+  getModelRow,
+  createModel,
+  renameModel,
+  deleteModel,
+  selectModel,
+  summarizeModels,
+} from './models.js';
 
 const BOARD_SIZES = [3, 5, 7];
 const WIN_LENGTHS = [3, 4, 5];
@@ -114,8 +124,11 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
   let savedAt = Number(restoredGame?.savedAt) || 0;
   const invitedPeers = new Set(Array.isArray(restoredGame?.invitedPeers) ? restoredGame.invitedPeers : []);
 
-  // Trainierbare KI: gelerntes Modell + Trainings-/Lernzustand.
+  // Trainierbare KI: benannte Modelle im Store, das aktive wird trainiert
+  // und eingesetzt (siehe models.js). aiModel zeigt auf die Daten des aktiven
+  // Modells; aiModelRowId erlaubt das Zurückschreiben in den Store.
   let aiModel = null;
+  let aiModelRowId = '';
   let moveHistory = [];
   let training = false;
   let trainingTarget = 0;
@@ -123,34 +136,47 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
   let trainingTimer = null;
 
   function ensureModel() {
-    if (!aiModel || !aiModel.V) {
-      const stored = api.storage.get('savedTicTacToeModel', null);
-      aiModel = stored && stored.V ? stored : emptyModel();
+    const store = loadModelStore(api);
+    let row = getActiveModelRow(store);
+    if (!row) {
+      row = createModel(store, 'Modell 1');
+      saveModelStore(api, store);
+    }
+    if (!aiModel || aiModelRowId !== row.id) {
+      aiModel = row.model;
+      aiModelRowId = row.id;
     }
     return aiModel;
   }
 
   function saveModel() {
-    if (!aiModel) return;
+    if (!aiModel || !aiModelRowId) return;
     aiModel.updatedAt = Date.now();
-    api.storage.set('savedTicTacToeModel', aiModel);
+    const store = loadModelStore(api);
+    const row = getModelRow(store, aiModelRowId);
+    if (row) {
+      row.model = aiModel;
+      saveModelStore(api, store);
+    }
   }
 
-  // Eine „Lernpartie" ist ein 2-Spieler-3×3-Spiel, in dem die trainierte KI
-  // beteiligt ist — solo als Gegner oder online als Autopilot des Hosts.
+  // Eine „Lernpartie" ist ein Solo-2-Spieler-3×3-Spiel gegen die trainierte
+  // KI — nur beim Selberspielen lernt das Modell aus echten Partien. Online
+  // (Autopilot) setzt es sein Wissen nur ein, ohne weiterzulernen.
   function isLearningGame() {
     if (cfg.boardSize !== 3 || cfg.winLength !== 3) return false;
     if (players.length !== 2) return false;
-    if (cfg.playMode === 'solo') return cfg.aiDifficulty === 'trained';
-    if (cfg.playMode === 'online') return cfg.aiAutoplay === true;
-    return false;
+    return cfg.playMode === 'solo' && cfg.aiDifficulty === 'trained';
   }
 
   function aiModelSummary() {
-    const m = aiModel || api.storage.get('savedTicTacToeModel', null);
+    const store = loadModelStore(api);
+    const active = getActiveModelRow(store);
+    const m = aiModelRowId && active?.id === aiModelRowId ? aiModel : active?.model;
     const states = m && m.V ? Object.keys(m.V).length : 0;
     return {
       available: states > 0,
+      name: active?.name || '',
       games: m?.games || 0,
       states,
       wins: m?.wins || 0,
@@ -158,7 +184,44 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
       draws: m?.draws || 0,
       training,
       progress: trainingTarget > 0 ? Math.min(1, trainingDone / trainingTarget) : 0,
+      ...summarizeModels(store),
     };
+  }
+
+  // Modellverwaltung (anlegen/umbenennen/löschen/aktivieren). Während eines
+  // laufenden Trainings gesperrt, damit der Trainingslauf nicht ins falsche
+  // Modell schreibt.
+  function manageAiModels(op) {
+    if (training) {
+      message = 'Bitte warte, bis das laufende Training abgeschlossen ist.';
+      pushState();
+      return false;
+    }
+    const store = loadModelStore(api);
+    let ok = false;
+    if (op.type === 'create') {
+      ok = Boolean(createModel(store, op.name));
+      if (!ok) message = 'Maximale Anzahl an Modellen erreicht.';
+    } else if (op.type === 'rename') {
+      ok = renameModel(store, op.id, op.name);
+    } else if (op.type === 'delete') {
+      ok = deleteModel(store, op.id);
+    } else if (op.type === 'select') {
+      ok = selectModel(store, op.id);
+    }
+    if (ok) {
+      saveModelStore(api, store);
+      // Cache invalidieren — das aktive Modell kann gewechselt haben.
+      aiModel = null;
+      aiModelRowId = '';
+      ensureModel();
+      if (op.type === 'create') message = 'Neues Modell angelegt und aktiviert.';
+      else if (op.type === 'select') message = 'Modell aktiviert.';
+      else if (op.type === 'delete') message = 'Modell gelöscht.';
+      else message = 'Modell umbenannt.';
+    }
+    pushState();
+    return ok;
   }
 
   for (const row of restoredPlayers) {
@@ -547,10 +610,11 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
 
   function resetAiModel() {
     if (training) return false;
+    ensureModel();
     aiModel = emptyModel();
     moveHistory = [];
     saveModel();
-    message = 'KI-Modell wurde zurückgesetzt.';
+    message = 'Aktives KI-Modell wurde zurückgesetzt.';
     pushState();
     return true;
   }
@@ -676,6 +740,7 @@ export function createHost(settings, onTick, me, restoredGame = null, deps = {})
     rematch,
     trainAi,
     resetAiModel,
+    manageAiModels,
     onWire,
     removePlayer,
     kickPlayer,

@@ -1,16 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Brain,
+  Check,
   Crown,
   HelpCircle,
   LogOut,
   Maximize2,
   Minus,
+  Pencil,
   Play,
+  Plus,
   RotateCcw,
   Save,
   Settings,
   SquareStack,
+  Trash2,
   Users,
   UserX,
   X,
@@ -169,7 +173,45 @@ function LobbyView({ snapshot, selfId, isHost, onStart, onLeave }) {
   );
 }
 
-function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
+/**
+ * Leiste im laufenden Spiel: ein eigenes Modell live für sich spielen lassen
+ * (Autopilot) — für Host und Gäste, solo wie online.
+ */
+function AutopilotBar({ myAiModels, autopilot, seated, onSetAutopilot }) {
+  const models = myAiModels?.models || [];
+  const usable = models.filter((m) => m.available);
+  const currentId = autopilot?.modelId || myAiModels?.activeId || usable[0]?.id || '';
+
+  if (!seated || !models.length) return null;
+
+  return (
+    <div className={`ttt-autopilot-bar${autopilot?.enabled ? ' active' : ''}`}>
+      <Brain size={14} aria-hidden />
+      <select
+        value={currentId}
+        onChange={(e) => onSetAutopilot(Boolean(autopilot?.enabled), e.target.value)}
+        aria-label="Modell für den Autopiloten wählen"
+      >
+        {models.map((m) => (
+          <option key={m.id} value={m.id} disabled={!m.available}>
+            {m.name}{m.available ? '' : ' (untrainiert)'}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className={autopilot?.enabled ? 'ttt-btn-ghost' : 'ttt-btn-primary'}
+        disabled={!autopilot?.enabled && !usable.length}
+        onClick={() => onSetAutopilot(!autopilot?.enabled, currentId)}
+      >
+        {autopilot?.enabled ? 'KI stoppen' : 'Modell spielt für mich'}
+      </button>
+      {autopilot?.enabled ? <span className="ttt-autopilot-note">Deine Züge macht gerade dein Modell.</span> : null}
+    </div>
+  );
+}
+
+function BoardView({ snapshot, selfId, onPlace, onRematch, isHost, myAiModels, autopilot, onSetAutopilot }) {
   const pub = snapshot?.public;
   const board = pub?.board || [];
   const players = pub?.players || [];
@@ -284,6 +326,15 @@ function BoardView({ snapshot, selfId, onPlace, onRematch, isHost }) {
           ) : null}
           <span>{canAct ? 'Du bist am Zug' : `${actor?.name || 'Ein Spieler'} ist am Zug`}</span>
         </div>
+      ) : null}
+
+      {pub?.phase === 'playing' ? (
+        <AutopilotBar
+          myAiModels={myAiModels}
+          autopilot={autopilot}
+          seated={players.some((p) => p.peerId === selfId)}
+          onSetAutopilot={onSetAutopilot}
+        />
       ) : null}
     </div>
   );
@@ -491,7 +542,99 @@ const TRAIN_PRESETS = [
   { games: 12000, label: 'Meister', note: '12 000 Partien' },
 ];
 
-function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained, onPlayOnline }) {
+/** Liste der eigenen Modelle: anlegen, umbenennen, löschen, aktivieren. */
+function ModelManager({ myAiModels, training, onCreateModel, onRenameModel, onDeleteModel, onSelectModel }) {
+  const models = myAiModels?.models || [];
+  const activeId = myAiModels?.activeId || '';
+  const [newName, setNewName] = useState('');
+
+  const create = () => {
+    onCreateModel(newName.trim() || undefined);
+    setNewName('');
+  };
+
+  return (
+    <section className="ttt-models">
+      <p className="ttt-training-subhead">Meine Modelle</p>
+      {models.length ? (
+        <ul className="ttt-model-list">
+          {models.map((m) => (
+            <li key={m.id} className={`ttt-model-row${m.id === activeId ? ' active' : ''}`}>
+              <button
+                type="button"
+                className="ttt-model-select"
+                disabled={training}
+                onClick={() => onSelectModel(m.id)}
+                title={m.id === activeId ? 'Aktives Modell' : 'Als aktives Modell verwenden'}
+              >
+                <span className="ttt-model-name">
+                  {m.id === activeId ? <Check size={13} aria-hidden /> : null}
+                  {m.name}
+                </span>
+                <span className="ttt-model-meta">
+                  {m.games} Partien · {m.states} Stellungen{m.available ? '' : ' · untrainiert'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="ttt-game-btn-icon ttt-model-action"
+                title="Umbenennen"
+                aria-label={`${m.name} umbenennen`}
+                disabled={training}
+                onClick={() => {
+                  const name = window.prompt('Neuer Name für das Modell:', m.name);
+                  if (name && name.trim()) onRenameModel(m.id, name.trim());
+                }}
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                className="ttt-game-btn-icon ttt-model-action"
+                title="Löschen"
+                aria-label={`${m.name} löschen`}
+                disabled={training}
+                onClick={() => {
+                  if (window.confirm(`Modell „${m.name}" endgültig löschen?`)) onDeleteModel(m.id);
+                }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="ttt-panel-note">Noch keine Modelle — lege unten dein erstes an.</p>
+      )}
+      <div className="ttt-model-create">
+        <input
+          value={newName}
+          placeholder="Name für neues Modell"
+          maxLength={32}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } }}
+        />
+        <button type="button" className="ttt-btn-ghost" disabled={training} onClick={create}>
+          <Plus size={14} /> Anlegen
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TrainingPanel({
+  snapshot,
+  isHost,
+  myAiModels,
+  onTrain,
+  onReset,
+  onSelectTrained,
+  onPlayOnline,
+  onCreateModel,
+  onRenameModel,
+  onDeleteModel,
+  onSelectModel,
+}) {
   const pub = snapshot?.public;
   const model = pub?.aiModel || {};
   const settings = pub?.settings || {};
@@ -501,20 +644,46 @@ function TrainingPanel({ snapshot, isHost, onTrain, onReset, onSelectTrained, on
   const isSolo = settings.playMode !== 'online';
   const usingTrained = isSolo && settings.aiDifficulty === 'trained';
   const onlineAutopilot = settings.playMode === 'online' && settings.aiAutoplay === true;
+  const activeName = (myAiModels?.models || []).find((m) => m.id === myAiModels?.activeId)?.name || '';
+
+  const manager = (
+    <ModelManager
+      myAiModels={myAiModels}
+      training={training}
+      onCreateModel={onCreateModel}
+      onRenameModel={onRenameModel}
+      onDeleteModel={onDeleteModel}
+      onSelectModel={onSelectModel}
+    />
+  );
 
   if (!isHost) {
-    return <p className="ttt-panel-note">Nur der Host kann die KI trainieren.</p>;
+    return (
+      <div className="ttt-training">
+        <p className="ttt-training-intro">
+          Verwalte hier deine eigenen Modelle. Trainiert wird nur beim Selberspielen —
+          starte dazu ein eigenes Solo-Spiel. Im laufenden Spiel kannst du jederzeit
+          eines deiner Modelle per <Brain size={13} /> Autopilot für dich spielen lassen.
+        </p>
+        {manager}
+      </div>
+    );
   }
 
   return (
     <div className="ttt-training">
       <p className="ttt-training-intro">
-        Trainiere eine eigene Tic-Tac-Toe-KI. Sie lernt aus <strong>jeder Partie</strong>,
-        die du gegen sie spielst — und optional zusätzlich durch Selbstspiel. Danach
-        kannst du sie im Solo-Modus als Gegner wählen oder sie <strong>online gegen
-        andere</strong> antreten lassen; auch dort lernt sie weiter.
+        Trainiere eigene Tic-Tac-Toe-Modelle: durch Selbstspiel-Training und aus
+        <strong> Solo-Partien</strong>, die du selbst gegen das aktive Modell spielst.
+        Im Spiel — auch online oder gegen den Algorithmus — kannst du dann live per
+        Button eines deiner Modelle für dich spielen lassen; dabei lernt es nicht weiter.
       </p>
 
+      {manager}
+
+      <p className="ttt-training-subhead">
+        Training{activeName ? ` — aktives Modell: ${activeName}` : ''}
+      </p>
       <div className="ttt-training-stats">
         <div className="ttt-training-stat">
           <span className="ttt-training-stat-value">{model.games || 0}</span>
@@ -604,7 +773,8 @@ function TicTacToeGuide() {
         <li><strong>Erweitert:</strong> 5×5 oder 7×7 mit 3–5 in einer Reihe — auch diagonal.</li>
         <li><strong>Online:</strong> 2–4 Spieler mit Symbolen X, O, △, □.</li>
         <li><strong>Solo:</strong> Du spielst gegen einen lokalen Algorithmus (Leicht/Mittel/Schwer).</li>
-        <li><strong>Eigene KI:</strong> Über das <Brain size={12} /> KI-Training trainierst du eine lernende KI — sie lernt aus jeder Partie gegen dich (3×3). Danach kannst du sie solo als Gegner wählen oder online für dich gegen andere antreten lassen.</li>
+        <li><strong>Eigene Modelle:</strong> Über <Brain size={12} /> KI-Modelle legst du mehrere benannte Modelle an. Trainiert wird nur beim Selberspielen (Selbstspiel-Training und Solo-Partien gegen das aktive Modell, 3×3).</li>
+        <li><strong>Autopilot:</strong> Im laufenden Spiel — online oder gegen den Algorithmus — lässt du per Button jederzeit eines deiner Modelle für dich spielen.</li>
       </ul>
     </div>
   );
@@ -643,6 +813,16 @@ export default function TicTacToeGamePage() {
   const rematch = useCallback(() => send({ type: 'action', action: { type: 'rematch' } }), [send]);
   const trainAi = useCallback((games) => send({ type: 'train_ai', games }), [send]);
   const resetAiModel = useCallback(() => send({ type: 'reset_ai_model' }), [send]);
+  const createAiModel = useCallback((name) => send({ type: 'create_ai_model', name }), [send]);
+  const renameAiModel = useCallback((id, name) => send({ type: 'rename_ai_model', id, name }), [send]);
+  const deleteAiModel = useCallback((id) => send({ type: 'delete_ai_model', id }), [send]);
+  const selectAiModel = useCallback((id) => send({ type: 'select_ai_model', id }), [send]);
+  const setAutopilot = useCallback(
+    (enabled, modelId) => send({ type: 'set_autopilot', enabled, modelId }),
+    [send],
+  );
+  const myAiModels = snapshot?.myAiModels || { activeId: '', models: [] };
+  const autopilot = snapshot?.autopilot || { enabled: false, modelId: '' };
   const selectTrainedAi = useCallback(
     () => send({ type: 'update_settings', settings: { ...(pub?.settings || {}), aiDifficulty: 'trained' } }),
     [pub?.settings, send],
@@ -690,7 +870,7 @@ export default function TicTacToeGamePage() {
         </div>
         <div className="ttt-game-titlebar-actions">
           <button type="button" className="ttt-game-btn-icon" title="Hilfe" onClick={() => setPanel('help')}><HelpCircle size={16} /></button>
-          {isHost ? <button type="button" className="ttt-game-btn-icon" title="KI-Training" onClick={() => setPanel('training')}><Brain size={16} /></button> : null}
+          <button type="button" className="ttt-game-btn-icon" title="KI-Modelle" onClick={() => setPanel('training')}><Brain size={16} /></button>
           {isHost && !isSolo ? <button type="button" className="ttt-game-btn-icon" title="Spieler" onClick={() => setPanel('players')}><Users size={16} /></button> : null}
           <button type="button" className="ttt-game-btn-icon" title="Einstellungen" onClick={() => setPanel('settings')}><Settings size={16} /></button>
           {isHost ? <button type="button" className="ttt-game-btn-icon" title="Speichern" onClick={() => send({ type: 'save_game' })}><Save size={16} /></button> : null}
@@ -706,7 +886,16 @@ export default function TicTacToeGamePage() {
         {inLobby ? (
           <LobbyView snapshot={snapshot} selfId={selfId} isHost={isHost} onStart={() => send({ type: 'host_start' })} onLeave={leave} />
         ) : (
-          <BoardView snapshot={snapshot} selfId={selfId} isHost={isHost} onPlace={place} onRematch={rematch} />
+          <BoardView
+            snapshot={snapshot}
+            selfId={selfId}
+            isHost={isHost}
+            onPlace={place}
+            onRematch={rematch}
+            myAiModels={myAiModels}
+            autopilot={autopilot}
+            onSetAutopilot={setAutopilot}
+          />
         )}
       </main>
       {panel === 'help' ? (
@@ -735,14 +924,19 @@ export default function TicTacToeGamePage() {
         </OverlayPanel>
       ) : null}
       {panel === 'training' ? (
-        <OverlayPanel title="KI-Training" onClose={() => setPanel('')}>
+        <OverlayPanel title="KI-Modelle" onClose={() => setPanel('')}>
           <TrainingPanel
             snapshot={snapshot}
             isHost={isHost}
+            myAiModels={myAiModels}
             onTrain={trainAi}
             onReset={resetAiModel}
             onSelectTrained={selectTrainedAi}
             onPlayOnline={enableOnlineAi}
+            onCreateModel={createAiModel}
+            onRenameModel={renameAiModel}
+            onDeleteModel={deleteAiModel}
+            onSelectModel={selectAiModel}
           />
         </OverlayPanel>
       ) : null}
