@@ -69,7 +69,7 @@ export default function ChatsPage() {
     deleteGroupChat,
     setContactNickname,
     setChatPinned,
-    setContactE2eeEnabled,
+    resetE2eeSession,
     setContactBlocked,
     setContactNotificationMute,
     deleteChat,
@@ -251,37 +251,21 @@ export default function ChatsPage() {
     openForwardDialog,
   });
 
+  // Rohe Klick-Koordinaten reichen: die Menüs clampen sich selbst anhand
+  // ihrer echten Größe am Viewport (useContextMenuPosition).
   const openMessageContextMenu = useCallback((e, message) => {
     if (selectionMode) return;
     if (!message?.messageId) return;
     e.preventDefault();
     e.stopPropagation();
-    const pad = 8;
-    const mw = 220;
-    const mh = 220;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + mw > window.innerWidth - pad) x = Math.max(pad, window.innerWidth - mw - pad);
-    if (y + mh > window.innerHeight - pad) y = Math.max(pad, window.innerHeight - mh - pad);
-    if (x < pad) x = pad;
-    if (y < pad) y = pad;
-    setMessageContextMenu({ message, x, y });
+    setMessageContextMenu({ message, x: e.clientX, y: e.clientY });
   }, [selectionMode]);
 
   const openChatListContextMenu = useCallback((e, chat) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedPeerId(chat.id);
-    const pad = 8;
-    const mw = 232;
-    const mh = 280;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + mw > window.innerWidth - pad) x = Math.max(pad, window.innerWidth - mw - pad);
-    if (y + mh > window.innerHeight - pad) y = Math.max(pad, window.innerHeight - mh - pad);
-    if (x < pad) x = pad;
-    if (y < pad) y = pad;
-    setListContextMenu({ chat, x, y });
+    setListContextMenu({ chat, x: e.clientX, y: e.clientY });
   }, [setSelectedPeerId]);
 
   const handleSelectChat = useCallback((id) => {
@@ -446,7 +430,7 @@ export default function ChatsPage() {
                   onOpenClearContext: dialogs.openClearContextForPeer,
                   onCopyPeerId: actions.copyPeerIdFromMenu,
                   applyNotificationMute: actions.applyNotificationMute,
-                  setContactE2eeEnabled,
+                  resetE2eeSession,
                   setContactBlocked,
                   toast,
                   onSelectTier: selectAiModelTier,
@@ -575,7 +559,7 @@ export default function ChatsPage() {
             dialogs.setShowGroupInfo(true);
           },
           setChatPinned,
-          setContactE2eeEnabled,
+          resetE2eeSession,
           setContactBlocked,
           onOpenNickname: dialogs.openNicknameForChat,
           onCopyPeerId: actions.copyPeerIdFromMenu,

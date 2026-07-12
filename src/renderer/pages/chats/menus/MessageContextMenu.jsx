@@ -1,6 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Copy, Forward, Reply, Trash2, X } from 'lucide-react';
 import { CHAT_ICON_STROKE, getMessageCopyText } from '../messageHelpers.jsx';
+import { useContextMenuPosition } from './useContextMenuPosition.js';
 
 /**
  * Kontextmenü einer Nachricht (Antworten/Kopieren/Weiterleiten/Löschen).
@@ -25,7 +27,7 @@ export function MessageContextMenu({
   onForward,
   onDeleteMessage,
 }) {
-  const messageContextMenuRef = useRef(null);
+  const { ref: messageContextMenuRef, style: menuStyle } = useContextMenuPosition(menu);
 
   useEffect(() => {
     if (!menu) return undefined;
@@ -50,12 +52,12 @@ export function MessageContextMenu({
 
   if (!menu) return null;
 
-  return (
+  return createPortal(
     <div
       ref={messageContextMenuRef}
-      className="chat-list-context-menu msg-context-menu"
+      className="chat-list-context-menu msg-context-menu context-menu-pop"
       role="menu"
-      style={{ left: menu.x, top: menu.y }}
+      style={menuStyle}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button
@@ -116,6 +118,7 @@ export function MessageContextMenu({
         <X size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         Aus
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }

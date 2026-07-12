@@ -15,7 +15,7 @@ import {
   waitForE2eeIdentity,
   waitForE2eeSession,
 } from '../e2eePersistence';
-import { newChatMessageId, contactWantsOutgoingE2ee } from '../appHelpers';
+import { newChatMessageId } from '../appHelpers';
 
 export function useE2ee({
   e2eeBootNonce,
@@ -129,7 +129,6 @@ export function useE2ee({
             const peerList = await window.bluetalk.peer.getPeers();
             for (const p of peerList || []) {
               if (!p?.id) continue;
-              if (!contactWantsOutgoingE2ee(contactsRef, p.id)) continue;
               if (contactsRef.current.some((c) => c?.id === p.id && c.blocked === true)) continue;
               void sendE2eeHandshake(p.id);
             }
@@ -174,20 +173,21 @@ export function useE2ee({
     }
   }, [sendE2eeHandshake]);
 
-  const setContactE2eeEnabled = useCallback((contactId, enabled) => {
+  /**
+   * Verwirft die E2EE-Sitzung eines Kontakts und startet einen frischen
+   * Handshake — z. B. um einen erwarteten Schlüsselwechsel zu bestätigen.
+   * (Ersetzt den früheren Klartext-Toggle; ausgehend ist immer E2EE.)
+   */
+  const resetE2eeSession = useCallback((contactId) => {
     if (!contactId) return;
-    const nextEnabled = Boolean(enabled);
-    upsertContact({ id: contactId, e2eeEnabled: nextEnabled });
-    if (nextEnabled) {
-      const next = { ...e2eeSessionsRef.current };
-      delete next[contactId];
-      e2eeSessionsRef.current = next;
-      e2eeReadyPeersRef.current.delete(contactId);
-      e2eeHandshakeSentRef.current.delete(contactId);
-      void persistE2eeSessionsMap(e2eeSessionsRef);
-      void sendE2eeHandshake(contactId, { force: true });
-    }
-  }, [upsertContact, sendE2eeHandshake]);
+    const next = { ...e2eeSessionsRef.current };
+    delete next[contactId];
+    e2eeSessionsRef.current = next;
+    e2eeReadyPeersRef.current.delete(contactId);
+    e2eeHandshakeSentRef.current.delete(contactId);
+    void persistE2eeSessionsMap(e2eeSessionsRef);
+    void sendE2eeHandshake(contactId, { force: true });
+  }, [sendE2eeHandshake]);
 
   const setContactBlocked = useCallback((contactId, blocked) => {
     if (!contactId) return;
@@ -207,7 +207,7 @@ export function useE2ee({
       e2eeHandshakeSentRef.current.delete(contactId);
       e2eeHandshakePromisesRef.current.delete(contactId);
       void persistE2eeSessionsMap(e2eeSessionsRef);
-    } else if (window.bluetalk && ownEcdhPublicSpkiRef.current && contactWantsOutgoingE2ee(contactsRef, contactId)) {
+    } else if (window.bluetalk && ownEcdhPublicSpkiRef.current) {
       e2eeHandshakeSentRef.current.delete(contactId);
       void sendE2eeHandshake(contactId, { force: true });
     }
@@ -216,7 +216,7 @@ export function useE2ee({
   return {
     sendE2eeHandshake,
     sendPairwiseEncrypted,
-    setContactE2eeEnabled,
+    resetE2eeSession,
     setContactBlocked,
   };
 }

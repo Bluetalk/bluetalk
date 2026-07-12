@@ -11,11 +11,3 @@ export function newChatMessageId() {
   }
   return `bt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
-
-/** Ausgehende E2EE, sofern der Kontakt nicht explizit `e2eeEnabled: false` hat. */
-export function contactWantsOutgoingE2ee(contactsRef, peerId) {
-  if (!peerId) return true;
-  const c = contactsRef.current.find((x) => x?.id === peerId);
-  if (c?.e2eeEnabled === false) return false;
-  return true;
-}

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Ban,
   Bell,
@@ -11,19 +12,18 @@ import {
   Pin,
   PinOff,
   Trash2,
-  Unlock,
   Users,
 } from 'lucide-react';
 import { isContactNotificationMuted } from '../../../contactNotificationMute';
 import {
   CHAT_ICON_STROKE,
-  contactE2eePreferenceOn,
   isContextMenuFlyoutTarget,
 } from '../messageHelpers.jsx';
 import {
   ContextMenuHoverSubmenu,
   NotificationMuteMenuItems,
 } from '../agentBlocks.jsx';
+import { useContextMenuPosition } from './useContextMenuPosition.js';
 
 /**
  * Kontextmenü einer Chatlisten-Zeile (KI-, Gruppen- und Peer-Variante).
@@ -35,11 +35,11 @@ import {
  * - resolveContact(peerId), applyNotificationMute(contactId, mode)
  * - actions: { onOpenChat(id), onOpenAiProfile(chat), onOpenClearContext(id),
  *   onOpenDelete(id), onOpenGroupInfo(id), setChatPinned(id, pinned),
- *   setContactE2eeEnabled(id, on), setContactBlocked(id, blocked),
+ *   resetE2eeSession(id), setContactBlocked(id, blocked),
  *   onOpenNickname(chat), onCopyPeerId(id), toast }
  */
 export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotificationMute, actions }) {
-  const listContextMenuRef = useRef(null);
+  const { ref: listContextMenuRef, style: menuStyle } = useContextMenuPosition(menu);
 
   useEffect(() => {
     if (!menu) return;
@@ -63,12 +63,12 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
 
   if (!menu) return null;
 
-  return (
+  return createPortal(
     <div
       ref={listContextMenuRef}
-      className="chat-list-context-menu"
+      className="chat-list-context-menu context-menu-pop"
       role="menu"
-      style={{ left: menu.x, top: menu.y }}
+      style={menuStyle}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button
@@ -128,6 +128,17 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
             <Users size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             Gruppeninfo
           </button>
+          <ContextMenuHoverSubmenu
+            label="Mitteilungen"
+            icon={isContactNotificationMuted(resolveContact(menu.chat.id)) ? BellOff : Bell}
+          >
+            <NotificationMuteMenuItems
+              contact={resolveContact(menu.chat.id)}
+              contactId={menu.chat.id}
+              applyNotificationMute={applyNotificationMute}
+              onDone={onClose}
+            />
+          </ContextMenuHoverSubmenu>
           <div className="chat-list-context-menu-sep" role="separator" />
           <button
             type="button"
@@ -162,24 +173,17 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
         className="chat-list-context-menu-item"
         role="menuitem"
         onClick={() => {
-          const id = menu.chat.id;
-          const on = contactE2eePreferenceOn(menu.chat.contact);
-          actions.setContactE2eeEnabled(id, !on);
+          actions.resetE2eeSession(menu.chat.id);
           actions.toast({
             variant: 'success',
-            title: !on ? 'E2EE aktiv' : 'E2EE aus',
+            title: 'Verschlüsselung erneuert',
+            message: 'Die E2EE-Sitzung wird neu ausgehandelt.',
           });
           onClose();
         }}
       >
-        {contactE2eePreferenceOn(menu.chat.contact) ? (
-          <Unlock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-        ) : (
-          <Lock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-        )}
-        {contactE2eePreferenceOn(menu.chat.contact)
-          ? 'E2EE deaktivieren (Klartext)'
-          : 'E2EE aktivieren'}
+        <Lock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        Verschlüsselung erneuern
       </button>
       {!resolveContact(menu.chat.id)?.blocked ? (
         <>
@@ -245,6 +249,7 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
       </button>
         </>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

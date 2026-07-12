@@ -4,6 +4,7 @@ import { startTransition } from 'react';
 import { base64ByteLength, validateStickerData } from '../stickers/stickerStore';
 import { MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_CHARS } from './chatConstants';
 import { buildMessageNotificationPreview } from '../utils/messageNotificationPreview';
+import { isContactNotificationMuted } from '../contactNotificationMute';
 import groupChat from '../../shared/group-chat.js';
 
 const {
@@ -31,6 +32,7 @@ export const GROUP_PROTOCOL_KINDS = [GROUP_EVENT_KIND, GROUP_MESSAGE_KIND, GROUP
  */
 export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPairwiseEncrypted) {
   const {
+    contactsRef,
     groupsRef,
     groupEventIdsRef,
     groupOutboxRef,
@@ -226,7 +228,9 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
         [group.id]: [...(prev[group.id] || []), groupMessage],
       }));
     });
-    if (!settingsRef.current.doNotDisturb) {
+    // Gruppen-Mute liegt als Kontakt-Eintrag mit der Gruppen-ID im Store.
+    const groupMuteContact = contactsRef?.current?.find?.((entry) => entry?.id === group.id);
+    if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(groupMuteContact)) {
       void window.bluetalk?.notify?.show?.({
         title: group.name,
         body: `${groupMessage.sender}: ${buildMessageNotificationPreview(groupMessage)}`,

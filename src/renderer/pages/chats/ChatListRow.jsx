@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, BellOff, ChevronDown, Pin, Unlock, Users } from 'lucide-react';
+import { Bot, BellOff, ChevronDown, Pin, Users } from 'lucide-react';
 import {
   formatGamePresenceLabel,
 } from '../../../shared/game-presence.js';
@@ -91,11 +91,6 @@ function ChatListRowInner({
             {chat.pinned && (
               <span className="chat-pin-badge" title="Angehefteter Chat">
                 <Pin size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-              </span>
-            )}
-            {chat.e2eePlaintextBadge && (
-              <span className="chat-pin-badge" title="Ausgehend ohne E2EE (Klartext)">
-                <Unlock size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
               </span>
             )}
             {isContactNotificationMuted(chatContact) && (

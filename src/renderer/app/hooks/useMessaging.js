@@ -3,7 +3,7 @@
 import { useCallback, startTransition } from 'react';
 import { encryptChatPayload } from '../../chatCrypto';
 import { waitForE2eeIdentity, waitForE2eeSession } from '../e2eePersistence';
-import { newChatMessageId, contactWantsOutgoingE2ee } from '../appHelpers';
+import { newChatMessageId } from '../appHelpers';
 import { isAiChatPeerId } from '../../aiChatConstants';
 import { sendGroupChatMessage } from '../sendGroupChatMessage';
 import { sendAiChatMessage } from '../sendAiChatMessage';
@@ -160,10 +160,11 @@ export function useMessaging({
         void applyMessagePatch(peerId, messageId, { deliveryStatus: 'scheduled', localPreviewUrl: undefined });
       };
 
+      // Chat-Inhalte gehen ausnahmslos E2EE-verschlüsselt raus; ohne Sitzung
+      // wird der Versand abgebrochen statt auf Klartext zurückzufallen.
       let wirePayload = innerPlain;
       if (
-        contactWantsOutgoingE2ee(contactsRef, peerId)
-        && (innerPlain.kind === 'chat' || innerPlain.kind === 'file' || innerPlain.kind === 'contact-share' || innerPlain.kind === 'sticker')
+        innerPlain.kind === 'chat' || innerPlain.kind === 'file' || innerPlain.kind === 'contact-share' || innerPlain.kind === 'sticker'
       ) {
         await waitForE2eeIdentity(ownEcdhPublicSpkiRef);
         let session = e2eeSessionsRef.current[peerId];
@@ -183,7 +184,7 @@ export function useMessaging({
           inboundToastRef.current?.({
             variant: 'error',
             title: 'E2EE nicht bereit',
-            message: 'Die Nachricht wurde nicht als Klartext gesendet. Prüfe die Verbindung oder bestätige einen erwarteten Schlüsselwechsel, indem du E2EE aus- und wieder einschaltest.',
+            message: 'Die Nachricht wurde nicht gesendet. Prüfe die Verbindung oder bestätige einen erwarteten Schlüsselwechsel über „Verschlüsselung erneuern“ im Chat-Menü.',
           });
           failScheduled();
           return false;

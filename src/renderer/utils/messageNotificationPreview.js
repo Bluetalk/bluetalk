@@ -7,6 +7,9 @@ export function buildMessageNotificationPreview(message) {
   if (message.kind === 'poker-invite') return `Poker: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'uno-invite') return `UNO: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'live-docs-invite') return `Dokument: ${message.fileName || message.tableName || 'Einladung'}`;
   if (message.kind === 'contact-share') {
     return `Kontakt: ${message.sharedContact?.displayName || message.sharedContact?.name || 'geteilt'}`;
   }

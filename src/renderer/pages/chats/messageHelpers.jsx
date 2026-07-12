@@ -442,11 +442,6 @@ function countUnreadPeerMessages(peerId, lastViewedTs, messagesByPeer, lastMessa
   return n;
 }
 
-/** Gespeicherte Präferenz pro Kontakt (Standard: E2EE an, außer `e2eeEnabled: false`). */
-function contactE2eePreferenceOn(contact) {
-  return contact?.e2eeEnabled !== false;
-}
-
 /**
  * Reads file as base64 with progress (0–1). Optional fast path uses readAsDataURL (often faster on large files).
  */
@@ -660,7 +655,6 @@ export {
   formatUnreadBadgeCount,
   peerProfileAddress,
   countUnreadPeerMessages,
-  contactE2eePreferenceOn,
   readFileAsBase64WithProgress,
   EXT_TO_IMAGE_MIME,
   imageMimeForFile,

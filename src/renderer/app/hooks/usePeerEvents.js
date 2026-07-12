@@ -2,7 +2,6 @@
 // Initial-Load, app:data-cleared und agent-ask-user, 1:1 aus App.jsx ausgelagert.
 import { useEffect, useLayoutEffect } from 'react';
 import { DEFAULT_APP_SETTINGS } from '../chatConstants';
-import { contactWantsOutgoingE2ee } from '../appHelpers';
 import { isAiChatPeerId } from '../../aiChatConstants';
 import { buildUserPresencePayload } from '../../../shared/user-presence.js';
 import { createPeerMessageHandler } from '../peerMessageHandler';
@@ -94,7 +93,7 @@ export function usePeerEvents(deps) {
         if (!blocked) {
           void window.bluetalk.peer.send(peer.id, buildUserPresencePayload(settingsRef.current));
         }
-        if (!blocked && ownEcdhPublicSpkiRef.current && contactWantsOutgoingE2ee(contactsRef, peer.id)) {
+        if (!blocked && ownEcdhPublicSpkiRef.current) {
           void sendE2eeHandshake(peer.id);
         }
         window.setTimeout(() => {

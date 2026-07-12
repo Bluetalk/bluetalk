@@ -111,7 +111,7 @@ export default function App() {
   const {
     sendE2eeHandshake,
     sendPairwiseEncrypted,
-    setContactE2eeEnabled,
+    resetE2eeSession,
     setContactBlocked,
   } = useE2ee({
     e2eeBootNonce,
@@ -321,7 +321,7 @@ export default function App() {
     refreshDiscovery,
     setContactNickname,
     setChatPinned,
-    setContactE2eeEnabled,
+    resetE2eeSession,
     deleteMessage,
     deleteChat,
     removeContact,
@@ -363,7 +363,7 @@ export default function App() {
     refreshDiscovery,
     setContactNickname,
     setChatPinned,
-    setContactE2eeEnabled,
+    resetE2eeSession,
     deleteMessage,
     deleteChat,
     removeContact,

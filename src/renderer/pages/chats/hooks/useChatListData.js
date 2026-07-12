@@ -70,7 +70,6 @@ export function useChatListData({
         bio,
         offline: !peer,
         pinned: Boolean(contact?.pinned),
-        e2eePlaintextBadge: contact?.e2eeEnabled === false,
         lastMessage: meta?.lastMessage || null,
         messageCount: meta?.count || 0,
         gamePresence: peerGamePresence[id] && !isPresenceStale(peerGamePresence[id])
@@ -102,7 +101,6 @@ export function useChatListData({
         isAiChat: true,
         isAgent: true,
         agentWorkDir: agent.agentWorkDir || '',
-        e2eePlaintextBadge: false,
         lastMessage: aiMeta?.lastMessage || null,
         messageCount: aiMeta?.count || 0,
         createdAt: agent.createdAt || 0,
@@ -125,7 +123,6 @@ export function useChatListData({
         bio: '',
         offline: onlineMembers.length <= 1,
         pinned: false,
-        e2eePlaintextBadge: false,
         lastMessage: groupMeta?.lastMessage || null,
         messageCount: groupMeta?.count || 0,
         activeMemberCount: activeMembers.length,

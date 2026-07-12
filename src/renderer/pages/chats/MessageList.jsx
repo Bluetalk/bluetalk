@@ -7,7 +7,6 @@ import {
   CHAT_BATCH_SIZE,
   CHAT_ICON_STROKE,
   PeerAvatar,
-  contactE2eePreferenceOn,
   formatGenTime,
   formatMessageTime,
   formatMuteExpiry,
@@ -146,12 +145,6 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
             )}
           </div>
         )}
-      {!selectedPeer.contact?.blocked && !contactE2eePreferenceOn(selectedPeer.contact) && (
-        <div className="chat-notice-muted" role="status">
-          Ausgehende Nachrichten in diesem Chat sind unverschlüsselt. Eingehende verschlüsselte Nachrichten
-          werden weiterhin entschlüsselt.
-        </div>
-      )}
       {hasMoreMessages && (
         <div className="chat-load-more">
           <button className="btn btn-secondary btn-sm" onClick={actions.onLoadOlder} disabled={loadingMore}>

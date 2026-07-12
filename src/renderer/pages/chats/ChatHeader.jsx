@@ -14,7 +14,6 @@ import {
   Pin,
   PinOff,
   Trash2,
-  Unlock,
   Users,
 } from 'lucide-react';
 import { formatGamePresenceLabel } from '../../../shared/game-presence.js';
@@ -26,7 +25,6 @@ import { isContactNotificationMuted } from '../../contactNotificationMute';
 import {
   CHAT_ICON_STROKE,
   PeerAvatar,
-  contactE2eePreferenceOn,
   isContextMenuFlyoutTarget,
 } from './messageHelpers.jsx';
 import {
@@ -50,7 +48,7 @@ import {
  * - actions: { onShowGroupInfo(), onShowPeerProfile(), onOpenNickname(),
  *   onTogglePinned(), onOpenDelete(peerId), onOpenClearContext(peerId),
  *   onCopyPeerId(peerId), applyNotificationMute(contactId, mode),
- *   setContactE2eeEnabled, setContactBlocked, toast,
+ *   resetE2eeSession, setContactBlocked, toast,
  *   onSelectTier, onSelectCloudModel, onOpenCloudSettings }
  */
 export function ChatHeader({
@@ -148,7 +146,6 @@ export function ChatHeader({
               {!isAiChatSelected && !isGroupSelected && selectedPeer.contact?.nickname && selectedPeer.baseName !== selectedPeer.contact.nickname
                 ? ` · ${selectedPeer.baseName}`
                 : ''}
-              {!isAiChatSelected && !contactE2eePreferenceOn(selectedPeer.contact) ? ' · Klartext (ausgehend)' : ''}
               {!isAiChatSelected && isContactNotificationMuted(selectedContact)
                 ? ' · Mitteilungen stumm'
                 : ''}
@@ -248,27 +245,17 @@ export function ChatHeader({
               role="menuitem"
               onClick={() => {
                 if (!selectedPeer) return;
-                const on = contactE2eePreferenceOn(selectedPeer.contact);
-                const next = !on;
-                actions.setContactE2eeEnabled(selectedPeer.id, next);
+                actions.resetE2eeSession(selectedPeer.id);
                 actions.toast({
                   variant: 'success',
-                  title: next ? 'E2EE aktiv' : 'E2EE aus',
-                  message: next
-                    ? 'Ausgehende Nachrichten werden wieder verschlüsselt, sobald eine Sitzung besteht.'
-                    : 'Ausgehende Nachrichten gehen unverschlüsselt; eingehende E2EE-Nachrichten werden weiter entschlüsselt.',
+                  title: 'Verschlüsselung erneuert',
+                  message: 'Die E2EE-Sitzung wird neu ausgehandelt.',
                 });
                 setChatActionsMenuOpen(false);
               }}
             >
-              {contactE2eePreferenceOn(selectedPeer.contact) ? (
-                <Unlock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-              ) : (
-                <Lock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-              )}
-              {contactE2eePreferenceOn(selectedPeer.contact)
-                ? 'E2EE deaktivieren (Klartext)'
-                : 'E2EE aktivieren'}
+              <Lock size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+              Verschlüsselung erneuern
             </button>
             {!selectedContact?.blocked ? (
               <>

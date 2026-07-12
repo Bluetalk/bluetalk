@@ -20,14 +20,21 @@ import {
 } from '../../shared/game-presence.js';
 import { USER_PRESENCE_KIND } from '../../shared/user-presence.js';
 import { REALTIME_KIND } from '../../shared/plugin-realtime.mjs';
-import groupChat from '../../shared/group-chat.js';
 import { GROUP_PROTOCOL_KINDS, handleGroupProtocolFrame } from './groupInboundHandler';
 
-const {
-  GROUP_EVENT_KIND,
-  GROUP_MESSAGE_KIND,
-  GROUP_RECEIPT_KIND,
-} = groupChat;
+// Eingehende Inhalte, die eine Desktop-Benachrichtigung auslösen sollen.
+const NOTIFYABLE_KINDS = new Set([
+  'chat',
+  'file',
+  'sticker',
+  'contact-share',
+  'poker-invite',
+  'uno-invite',
+  'connect-four-invite',
+  'chess-invite',
+  'tic-tac-toe-invite',
+  'live-docs-invite',
+]);
 
 export function createPeerMessageHandler(deps) {
   const {
@@ -127,7 +134,7 @@ export function createPeerMessageHandler(deps) {
           inboundToastRef.current?.({
             variant: 'warning',
             title: 'E2EE-Sicherheitsschlüssel geändert',
-            message: 'Die verschlüsselte Sitzung wurde angehalten. Deaktiviere und aktiviere E2EE für den Kontakt erneut, wenn die Änderung erwartet war.',
+            message: 'Die verschlüsselte Sitzung wurde angehalten. Wähle im Chat-Menü „Verschlüsselung erneuern“, wenn die Änderung erwartet war.',
           });
           return;
         }
@@ -301,17 +308,6 @@ export function createPeerMessageHandler(deps) {
           from: fromId,
         };
         wasPairwiseEncrypted = true;
-        const contact = contactsRef.current.find((entry) => entry?.id === fromId);
-        if (
-          !settingsRef.current.doNotDisturb
-          && !isContactNotificationMuted(contact)
-          && ![GROUP_EVENT_KIND, GROUP_MESSAGE_KIND, GROUP_RECEIPT_KIND].includes(inner.kind)
-        ) {
-          void window.bluetalk?.notify?.show?.({
-            title: contact?.nickname || contact?.name || normalized.sender || fromId,
-            body: buildMessageNotificationPreview(normalized),
-          });
-        }
       } catch (e) {
         console.error('E2EE decrypt failed:', e);
         return;
@@ -353,6 +349,18 @@ export function createPeerMessageHandler(deps) {
 
     const meta = await window.bluetalk.messages.append(fromId, normalized);
     if (meta?.appended === false) return;
+
+    // Benachrichtigen erst nach erfolgreichem Append (keine Duplikate) und
+    // unabhängig davon, ob die Nachricht verschlüsselt ankam.
+    if (NOTIFYABLE_KINDS.has(normalized.kind) && fromId) {
+      const notifyContact = contactsRef.current.find((entry) => entry?.id === fromId);
+      if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(notifyContact)) {
+        void window.bluetalk?.notify?.show?.({
+          title: notifyContact?.nickname || notifyContact?.name || normalized.sender || fromId,
+          body: buildMessageNotificationPreview(normalized),
+        });
+      }
+    }
 
     if ((normalized.kind === 'poker-invite' || normalized.kind === 'uno-invite' || normalized.kind === 'connect-four-invite' || normalized.kind === 'chess-invite' || normalized.kind === 'tic-tac-toe-invite') && fromId) {
       const game = normalized.kind === 'poker-invite'

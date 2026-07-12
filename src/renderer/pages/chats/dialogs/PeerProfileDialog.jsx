@@ -3,7 +3,6 @@ import { Copy, X } from 'lucide-react';
 import {
   CHAT_ICON_STROKE,
   PeerAvatar,
-  contactE2eePreferenceOn,
   peerProfileAddress,
 } from '../messageHelpers.jsx';
 
@@ -67,7 +66,6 @@ export function PeerProfileDialog({ open, selectedPeer, onClose, copyToClipboard
                     : selectedPeer.offline
                       ? 'Offline'
                       : 'Online'}
-              {!contactE2eePreferenceOn(selectedPeer.contact) ? ' · Ausgehend ohne E2EE' : ''}
             </span>
           </div>
           <div className="peer-profile-field">

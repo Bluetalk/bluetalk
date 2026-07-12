@@ -111,6 +111,12 @@
   animation: pop-in 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: top;
 }
+
+/* Rechtsklick-Menüs wachsen vom Cursor weg; die transform-origin setzt
+   useContextMenuPosition inline (top/bottom × left/right je nach Flip). */
+.context-menu-pop {
+  animation: pop-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 .modal-overlay { animation: fade-overlay 0.18s ease both; }
 .modal { animation: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
@@ -134,6 +140,7 @@
   .msg-row,
   .sidebar-link.active,
   .context-menu,
+  .context-menu-pop,
   .dropdown-menu,
   .profile-menu,
   .chat-header-peer-menu,
