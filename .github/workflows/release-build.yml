@@ -8,6 +8,13 @@
 # haengt Installer + .sig + latest.json an das GitHub-Release an. Der in
 # tauri.conf.json konfigurierte Endpoint zeigt auf
 # .../releases/latest/download/latest.json.
+#
+# Migration v1 -> v2: v1.x-Clients aktualisieren ueber electron-updater, der die
+# latest.yml vom "Latest"-Release liest. Damit v1-Nutzer dauerhaft und ohne
+# manuellen Download auf v2 migrieren, haengt der letzte Schritt an JEDES stabile
+# v2-Release zusaetzlich die Bruecke an (latest.yml + 1.1.25-Installer). Da GitHub
+# das neueste stabile Release automatisch als "Latest" markiert, finden v1-Clients
+# dort immer die Bruecke, v2-Clients die latest.json.
 name: Release Build
 
 on:
@@ -67,3 +74,27 @@ jobs:
           releaseBody: 'Siehe Release-Notes.'
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+
+      # v1 -> v2 Bruecke: nur an stabile Releases anhaengen (nur die werden "Latest"
+      # und damit von electron-updater gelesen). Alpha/Beta sind Prereleases -> skip.
+      - name: Attach v1 migration bridge (electron-updater)
+        if: ${{ !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p bridge
+          # Bruecken-Artefakte liegen dauerhaft am v1.1.25-Release; von dort kopieren.
+          for a in 1 2 3; do
+            gh release download v1.1.25 --repo "$GITHUB_REPOSITORY" -D bridge --clobber \
+              --pattern 'latest.yml' \
+              --pattern 'BlueTalk-Setup-1.1.25.exe' \
+              --pattern 'BlueTalk-Setup-1.1.25.exe.blockmap' && break || { echo "download retry $a"; sleep 5; }
+          done
+          for f in latest.yml BlueTalk-Setup-1.1.25.exe.blockmap BlueTalk-Setup-1.1.25.exe; do
+            for a in 1 2 3; do
+              gh release upload "${{ github.ref_name }}" --repo "$GITHUB_REPOSITORY" --clobber "bridge/$f" \
+                && { echo "attached $f"; break; } || { echo "upload retry $a for $f"; sleep 5; }
+            done
+          done
