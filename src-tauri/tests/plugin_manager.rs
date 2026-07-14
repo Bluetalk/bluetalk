@@ -1,4 +1,4 @@
-#[path = "../src/plugin_manager.rs"]
+#[path = "../src/plugin_manager/mod.rs"]
 mod plugin_manager;
 
 use std::{collections::BTreeSet, fs, path::Path};
