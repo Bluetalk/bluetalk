@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "id": "theme-studio",
-  "name": "Theme Studio",
+  "name": "Design",
   "version": "1.2.0",
   "apiVersion": "^2.0.0",
-  "description": "Farben und Akzente für hell und dunkel anpassen. Live-Vorschau, visuelle Presets, Feinabstimmung, Export/Import und Zurücksetzen.",
+  "description": "Farben für hell und dunkel anpassen.",
   "author": "BlueTalk",
   "ui": { "entry": "ui.js", "kind": "trusted-renderer" },
   "permissions": ["ui:tab"],

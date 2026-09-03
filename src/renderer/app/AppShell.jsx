@@ -4,6 +4,20 @@ import React, { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 
 import ChatsPage from '../pages/Chats';
+import SettingsPage from '../pages/Settings';
+import AccountSettingsPage from '../pages/settings/AccountSettings';
+import ConnectionSettingsPage from '../pages/settings/ConnectionSettings';
+import UpdatesSettingsPage from '../pages/settings/UpdatesSettings';
+import ApplicationSettingsPage from '../pages/settings/ApplicationSettings';
+import StickersSettingsPage from '../pages/settings/StickersSettings';
+import AiSettingsPage from '../pages/settings/AiSettings';
+import NewConnectionsPage from '../pages/NewConnections';
+import CloudSyncPage from '../pages/CloudSync';
+import LibraryPage from '../pages/Library';
+import GamesPage from '../pages/Games';
+import DocumentsLauncherPage from '../pages/DocumentsLauncher';
+import NotFoundPage from '../pages/NotFound';
+import PluginsPage from '../pages/Plugins';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { ToastProvider } from '../components/ToastProvider';
 import PluginScreenHost from '../plugins/PluginScreenHost';
@@ -14,22 +28,16 @@ import TitleBar from './TitleBar';
 import Sidebar from './Sidebar';
 import { InboundToastBridge, PluginRuntimeToastBridge } from './bridges';
 
-const SettingsPage = lazy(() => import('../pages/Settings'));
-const AccountSettingsPage = lazy(() => import('../pages/settings/AccountSettings'));
-const ConnectionSettingsPage = lazy(() => import('../pages/settings/ConnectionSettings'));
-const UpdatesSettingsPage = lazy(() => import('../pages/settings/UpdatesSettings'));
-const ApplicationSettingsPage = lazy(() => import('../pages/settings/ApplicationSettings'));
-const StickersSettingsPage = lazy(() => import('../pages/settings/StickersSettings'));
-const AiSettingsPage = lazy(() => import('../pages/settings/AiSettings'));
-const NewConnectionsPage = lazy(() => import('../pages/NewConnections'));
-const CloudSyncPage = lazy(() => import('../pages/CloudSync'));
-const LibraryPage = lazy(() => import('../pages/Library'));
-const GamesPage = lazy(() => import('../pages/Games'));
-const DocumentsLauncherPage = lazy(() => import('../pages/DocumentsLauncher'));
-const NotFoundPage = lazy(() => import('../pages/NotFound'));
-const PluginsPage = lazy(() => import('../pages/Plugins'));
 const PluginTabView = lazy(() => import('../plugins/PluginTabView'));
 const DocsPage = lazy(() => import('../docs/DocsPage'));
+
+function ContentFallback() {
+  return (
+    <div className="page page-loading" role="status" aria-label="Wird geladen">
+      <span className="spinner spinner--md" />
+    </div>
+  );
+}
 
 export default function AppShell({
   inboundToastRef,
@@ -46,12 +54,18 @@ export default function AppShell({
   return (
     <ToastProvider solidBottomRight>
       <ErrorBoundary>
-          <HashRouter>
+        <HashRouter>
           <InboundToastBridge toastRef={inboundToastRef} />
           <PluginRuntimeToastBridge />
-          <Suspense fallback={<div className="page"><div className="page-body">Wird geladen…</div></div>}>
           <Routes>
-            <Route path="/docs/*" element={<DocsPage />} />
+            <Route
+              path="/docs/*"
+              element={(
+                <Suspense fallback={<ContentFallback />}>
+                  <DocsPage />
+                </Suspense>
+              )}
+            />
             <Route
               path="*"
               element={(
@@ -78,6 +92,7 @@ export default function AppShell({
             <div className="app-body">
               <Sidebar />
               <main className="content">
+                <Suspense fallback={<ContentFallback />}>
                 <Routes>
                   <Route path="/" element={<ChatsPage />} />
                   <Route path="/new" element={<NewConnectionsPage />} />
@@ -96,6 +111,7 @@ export default function AppShell({
                   <Route path="/plugin/:tabId" element={<PluginTabView />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>
+                </Suspense>
               </main>
             </div>
             <PluginScreenHost />
@@ -117,7 +133,6 @@ export default function AppShell({
               )}
             />
           </Routes>
-          </Suspense>
         </HashRouter>
       </ErrorBoundary>
     </ToastProvider>

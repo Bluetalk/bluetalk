@@ -10,10 +10,6 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-@keyframes page-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
 @keyframes list-row-in {
   from { opacity: 0; transform: translateX(-6px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -32,11 +28,7 @@
 }
 
 /* ---------- Page / route transitions ----------
-   Route components remount on navigation, so the animation replays
-   on every page change without any JS — a gentle fade-and-rise. */
-.content > .page {
-  animation: page-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
+   Kein Opacity-0-Einstieg: das wirkte wie ein weißes Fenster-Reload. */
 .page-body {
   scroll-behavior: smooth;
 }
@@ -55,15 +47,19 @@
 .sidebar-link {
   transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
 }
-.sidebar-link:hover { transform: translateX(2px); }
-.sidebar-link:active { transform: translateX(0) scale(0.98); }
-.sidebar-link.active { animation: pop-in 0.2s ease both; }
+.sidebar-link:active { transform: scale(0.92); }
+.tb-btn { transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease; }
+.tb-btn:active { transform: scale(0.9); }
 
 /* ---------- Chat list rows ----------
-   Background-only feedback; scaling would shimmer the row text on click. */
+   Background-only hover; a tiny press scale is safe because the row
+   is large enough that label rasterisation doesn't shimmer. */
 .list-item {
-  transition: background 0.14s ease;
+  transition: background 0.14s ease, transform 0.12s ease;
 }
+.list-item:active { transform: scale(0.985); }
+
+.settings-nav-row:active { transform: scale(0.99); }
 
 /* ---------- Cards lift on hover ---------- */
 .games-launch-card,
@@ -78,6 +74,12 @@
 .library-item:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+.games-launch-card:active,
+.plugin-card:active,
+.doc-card:active,
+.library-item:active {
+  transform: translateY(0) scale(0.99);
 }
 
 /* ---------- Card grids: gentle staggered entrance ----------
@@ -148,7 +150,9 @@
   .modal,
   .composer-live-indicator,
   .plugin-grid > .plugin-card,
-  .games-grid > .games-launch-card {
+  .games-grid > .games-launch-card,
+  .spinner,
+  .loading-dots i {
     animation: none !important;
   }
   .btn:hover,
@@ -158,9 +162,17 @@
   .sidebar-link:hover,
   .sidebar-link:active,
   .games-launch-card:hover,
+  .games-launch-card:active,
   .plugin-card:hover,
+  .plugin-card:active,
   .doc-card:hover,
-  .library-item:hover {
+  .doc-card:active,
+  .library-item:hover,
+  .library-item:active,
+  .list-item:active,
+  .settings-nav-row:active,
+  .tb-btn:active,
+  .theme-switch-btn:active {
     transform: none !important;
   }
   .page-body { scroll-behavior: auto; }

@@ -201,8 +201,9 @@ export default function GamesPage() {
       ) : null}
 
       {loading ? (
-        <div className="games-empty">
-          <p className="text-muted">Spiele werden geladen…</p>
+        <div className="page-loading" role="status">
+          <span className="spinner spinner--md" />
+          <span>Spiele werden geladen…</span>
         </div>
       ) : null}
 

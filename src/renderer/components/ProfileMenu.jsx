@@ -116,16 +116,15 @@ export default function ProfileMenu({ variant = 'default' }) {
         className={`profile-menu-trigger${isSidebar ? ' profile-menu-trigger--sidebar' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        title="Profile"
+        aria-label={isSidebar ? 'Profil' : undefined}
+        title={isSidebar ? undefined : 'Profile'}
       >
         {settings.profilePicture ? (
           <img src={settings.profilePicture} alt="" className="profile-menu-trigger-avatar" />
         ) : (
           <span className="profile-menu-trigger-letter">{initial}</span>
         )}
-        {isSidebar ? (
-          <span className="profile-menu-sidebar-label">Profile</span>
-        ) : (
+        {isSidebar ? null : (
           open ? <ChevronDown size={15} strokeWidth={1.75} /> : <ChevronUp size={15} strokeWidth={1.75} />
         )}
       </button>

@@ -13,6 +13,13 @@ export function useContactsAndSettings({
 }) {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    try {
+      if (theme === 'light' || theme === 'dark') {
+        localStorage.setItem('bluetalk-theme', theme);
+      }
+    } catch {
+      /* ignore quota / private mode */
+    }
   }, [theme]);
 
   const applyContactPatch = useCallback((prev, patch) => {

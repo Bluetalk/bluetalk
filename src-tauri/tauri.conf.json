@@ -23,7 +23,9 @@
         "decorations": false,
         "resizable": true,
         "fullscreen": false,
-        "visible": true
+        "visible": true,
+        "theme": "Dark",
+        "backgroundColor": "#111111"
       }
     ],
     "security": {

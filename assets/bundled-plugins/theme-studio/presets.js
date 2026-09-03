@@ -283,10 +283,10 @@ export const PRESETS = {
 };
 
 export const CUSTOM_TOKENS = [
-  { key: '--accent', label: 'Accent', accent: true },
-  { key: '--bg-0', label: 'Background' },
+  { key: '--accent', label: 'Akzent', accent: true },
+  { key: '--bg-0', label: 'Hintergrund' },
   { key: '--fg-0', label: 'Text' },
-  { key: '--border', label: 'Border' },
+  { key: '--border', label: 'Rahmen' },
 ];
 
 export const GENERATED_ACCENT_TOKENS = ['--accent-hover', '--accent-fg', '--accent-soft', '--accent-2'];
@@ -297,13 +297,13 @@ export const ALLOWED_CUSTOM_TOKENS = new Set([
 ]);
 
 export const PRESET_LABELS = {
-  default: { title: 'Default', desc: 'Built-in BlueTalk' },
-  ocean: { title: 'Ocean', desc: 'Cool blues' },
-  ember: { title: 'Ember', desc: 'Warm orange' },
-  amethyst: { title: 'Amethyst', desc: 'Soft purple' },
-  forest: { title: 'Forest', desc: 'Mint & green' },
-  midnight: { title: 'Midnight', desc: 'Indigo night' },
-  rose: { title: 'Rose', desc: 'Pink blush' },
+  default: { title: 'Standard', desc: 'BlueTalk' },
+  ocean: { title: 'Ozean', desc: 'Blau' },
+  ember: { title: 'Glut', desc: 'Warm' },
+  amethyst: { title: 'Amethyst', desc: 'Violett' },
+  forest: { title: 'Wald', desc: 'Grün' },
+  midnight: { title: 'Nacht', desc: 'Indigo' },
+  rose: { title: 'Rose', desc: 'Rosa' },
 };
 
 /**

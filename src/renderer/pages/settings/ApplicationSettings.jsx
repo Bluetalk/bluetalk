@@ -101,13 +101,29 @@ export default function ApplicationSettingsPage() {
 
             <div className="toggle-row">
               <div className="toggle-row-info">
-                <span>Design</span>
-                <span>Zwischen hellem und dunklem Modus wechseln</span>
+                <span>Erscheinungsbild</span>
+                <span>Heller oder dunkler Modus für die ganze App</span>
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={toggleTheme}>
-                {theme === 'dark' ? <Sun size={15} strokeWidth={SETTINGS_ICON_STROKE} /> : <Moon size={15} strokeWidth={SETTINGS_ICON_STROKE} />}
-                {theme === 'dark' ? 'Hell' : 'Dunkel'}
-              </button>
+              <div className="theme-switch" role="group" aria-label="Erscheinungsbild">
+                <button
+                  type="button"
+                  className={`theme-switch-btn${theme === 'light' ? ' is-active' : ''}`}
+                  onClick={() => { if (theme !== 'light') toggleTheme(); }}
+                  aria-pressed={theme === 'light'}
+                >
+                  <Sun size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                  Hell
+                </button>
+                <button
+                  type="button"
+                  className={`theme-switch-btn${theme === 'dark' ? ' is-active' : ''}`}
+                  onClick={() => { if (theme !== 'dark') toggleTheme(); }}
+                  aria-pressed={theme === 'dark'}
+                >
+                  <Moon size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                  Dunkel
+                </button>
+              </div>
             </div>
 
             <div className="toggle-row">

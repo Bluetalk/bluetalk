@@ -49,7 +49,7 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
 
   api.ui.registerTab({
     id: 'studio',
-    label: 'Themes',
+    label: 'Design',
     icon: 'Palette',
     order: 15,
     render(container) {
@@ -186,22 +186,22 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
         if (!btn) return;
         commit(withPreset(io.loadState(), btn.dataset.preset));
         refreshAll();
-        api.notify.toast?.({ variant: 'success', title: 'Preset applied' });
+        api.notify.toast?.({ variant: 'success', title: 'Vorlage übernommen' });
       });
 
       container.querySelector('[data-action="reset"]').addEventListener('click', () => {
         io.clear();
         applyGlobalStyle(io.loadState(), styleTarget);
         refreshAll();
-        api.notify.toast?.({ variant: 'success', title: 'Theme reset' });
+        api.notify.toast?.({ variant: 'success', title: 'Zurückgesetzt' });
       });
 
       container.querySelector('[data-action="export"]').addEventListener('click', async () => {
         try {
           await navigator.clipboard.writeText(io.exportJson());
-          api.notify.toast?.({ variant: 'success', title: 'Theme copied to clipboard' });
+          api.notify.toast?.({ variant: 'success', title: 'In die Zwischenablage kopiert' });
         } catch {
-          api.notify.toast?.({ variant: 'error', title: 'Could not copy — check clipboard permissions' });
+          api.notify.toast?.({ variant: 'error', title: 'Zwischenablage nicht verfügbar' });
         }
       });
 
@@ -217,9 +217,9 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
           const next = io.parseImportText(await file.text());
           commit(next);
           refreshAll();
-          api.notify.toast?.({ variant: 'success', title: 'Theme imported' });
+          api.notify.toast?.({ variant: 'success', title: 'Importiert' });
         } catch {
-          api.notify.toast?.({ variant: 'error', title: 'Invalid theme file' });
+          api.notify.toast?.({ variant: 'error', title: 'Ungültige Datei' });
         }
       });
 

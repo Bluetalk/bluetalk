@@ -9,10 +9,8 @@
   flex-shrink: 0;
 }
 
-.sidebar-link-plugin span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sidebar-link-plugin {
+  overflow: visible;
 }
 
 .page-plugins .page-header {
@@ -88,7 +86,7 @@
 
 .games-empty {
   padding: 32px 24px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px dashed var(--border-strong);
   background: var(--bg-1);
   text-align: center;

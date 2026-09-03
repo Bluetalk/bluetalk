@@ -1,10 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:* http://127.0.0.1:*; worker-src 'self' blob:;" />
     <title>BlueTalk</title>
+    <style>
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        background: #111111;
+        color: #ededed;
+        color-scheme: dark;
+      }
+    </style>
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

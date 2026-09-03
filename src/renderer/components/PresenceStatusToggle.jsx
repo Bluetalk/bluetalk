@@ -11,11 +11,11 @@ export default function PresenceStatusToggle({ compact = false }) {
       type="button"
       className={`presence-toggle${active ? ' presence-toggle--dnd' : ''}${compact ? ' presence-toggle--compact' : ''}`}
       onClick={() => updateSettings({ doNotDisturb: !active })}
-      title={
+      title={compact ? undefined : (
         active
           ? 'Nicht stören aktiv — keine Benachrichtigungen. Klicken zum Deaktivieren.'
           : 'Nicht stören aktivieren — unterdrückt Benachrichtigungen für dich.'
-      }
+      )}
       aria-pressed={active}
       aria-label={active ? 'Nicht stören aktiv' : 'Verfügbar'}
     >

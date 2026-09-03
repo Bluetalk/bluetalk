@@ -235,8 +235,8 @@ export default function LibraryPage() {
         </div>
 
         {loading ? (
-          <div className="library-loading">
-            <span className="spinner spinner--accent" />
+          <div className="library-loading page-loading" role="status">
+            <span className="spinner spinner--md" />
             <span>Bibliothek wird geladen…</span>
           </div>
         ) : filtered.length === 0 ? (

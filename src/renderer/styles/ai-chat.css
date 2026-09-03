@@ -996,7 +996,7 @@
   background: color-mix(in srgb, var(--bg-2) 72%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   color: var(--fg-3);
-  border-radius: 16px 16px 4px 16px;
+  border-radius: 16px;
   opacity: 0.88;
 }
 .msg-subagent-prompt .msg-markdown {

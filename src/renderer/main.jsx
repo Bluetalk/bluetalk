@@ -1,7 +1,8 @@
-import React, { Suspense } from 'react';
+import React, { lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import '../bridge/bluetalkBridge.js';
 import './styles/global.css';
+import App from './App';
 
 const GAME_WINDOW_ROUTES = new Set([
   '/poker-game',
@@ -17,16 +18,17 @@ const GAME_WINDOW_ROUTES = new Set([
 window.addEventListener('contextmenu', (event) => event.preventDefault());
 
 const hashPath = window.location.hash.slice(1).split(/[?#]/, 1)[0] || '/';
-const RootApp = React.lazy(() => (
-  GAME_WINDOW_ROUTES.has(hashPath)
-    ? import('./GameWindowApp')
-    : import('./App')
-));
+const isGameWindow = GAME_WINDOW_ROUTES.has(hashPath);
+const GameWindowApp = lazy(() => import('./GameWindowApp'));
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Suspense fallback={<main className="page"><div className="page-body">BlueTalk wird geladen…</div></main>}>
-      <RootApp />
-    </Suspense>
+    {isGameWindow ? (
+      <Suspense fallback={<main className="page"><div className="page-body">BlueTalk wird geladen…</div></main>}>
+        <GameWindowApp />
+      </Suspense>
+    ) : (
+      <App />
+    )}
   </React.StrictMode>
 );

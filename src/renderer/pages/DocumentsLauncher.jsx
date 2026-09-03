@@ -168,7 +168,10 @@ export default function DocumentsLauncherPage() {
       ) : null}
 
       {loading ? (
-        <div className="games-empty"><p className="text-muted">Wird geladen…</p></div>
+        <div className="page-loading" role="status">
+          <span className="spinner spinner--md" />
+          <span>Dokumente werden geladen…</span>
+        </div>
       ) : !entry ? (
         <div className="games-empty">
           <h3>Dokumente nicht verfügbar</h3>
