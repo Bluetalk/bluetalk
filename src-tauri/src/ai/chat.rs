@@ -37,16 +37,31 @@ mod tool_parsing;
 
 use messages::{build_chat_history, resolve_agent_context};
 use segments::{
-    clear_last_stream_answer, consolidate_segments, segment_type, split_thinking_text,
-    upsert_stream_answer, upsert_stream_thinking,
+    clear_last_stream_answer, consolidate_segments, segment_type,
+    upsert_stream_thinking,
 };
-use stream::chat_request_stream;
+use stream::{chat_request_stream, openai_chat_request_stream};
 use tool_parsing::{normalize_tool_calls_for_ollama, resolve_tool_calls_from_assistant_text};
 
 const MAX_AGENT_ROUNDS: usize = 64;
 const MAX_SUBAGENT_ROUNDS: usize = 25;
 
-const SYSTEM_CORRECTION_PROMPT: &str = "SYSTEM-KORREKTUR: Deine vorige Ausgabe hat ein Tool-Ergebnis simuliert und wurde verworfen. Führe jetzt den nächsten nötigen Schritt ausschließlich als nativen Function-Call aus. Für send_bluetalk_reply brauchst du peer_id, content und die echte reply_to_message_id aus einem Tool-Ergebnis. Schreibe keinen Begleittext, keinen SYSTEM-TOOL-ERGEBNIS-Marker und kein Erfolgs-JSON.";
+const SYSTEM_CORRECTION_PROMPT: &str = "SYSTEM-KORREKTUR: Deine vorige Ausgabe hat ein Tool-Ergebnis simuliert und wurde verworfen. Führe jetzt den nächsten nötigen Schritt ausschließlich als nativen Function-Call aus. Sichtbare Nutzer-Antworten gehören in message_send. Für send_bluetalk_reply brauchst du peer_id, content und die echte reply_to_message_id aus einem Tool-Ergebnis. Schreibe keinen Begleittext, keinen SYSTEM-TOOL-ERGEBNIS-Marker und kein Erfolgs-JSON.";
+
+const MESSAGE_SEND_NUDGE: &str = "SYSTEM: Deine letzte Ausgabe ist für den Nutzer unsichtbar. Rufe JETZT das Tool message_send mit dem Text auf, den der Nutzer in einer Chat-Bubble sehen soll. Kein Begleittext.";
+
+struct ChatBusyGuard {
+    manager: Arc<OllamaManager>,
+    peer_id: String,
+    request_id: String,
+}
+
+impl Drop for ChatBusyGuard {
+    fn drop(&mut self) {
+        self.manager.end_chat(&self.peer_id);
+        self.manager.emit_bot_typing(&self.peer_id, &self.request_id, false);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Sub-Agent
@@ -272,22 +287,51 @@ pub async fn chat(manager: Arc<OllamaManager>, payload: Value) -> Value {
     }
 
     let state = manager.refresh_state().await;
-    if !state.setup_complete {
-        return json!({"ok": false, "error": "setup_incomplete", "state": manager.state_value()});
+    let agent = manager.get_agent(&peer_id);
+    let global_openai = manager.kv_get("aiChat.openai", json!({}));
+    let openai = catalog::resolve_bot_openai(agent.as_ref(), &global_openai);
+    let (tier_id, cloud_id, model) = if let Some(ref openai) = openai {
+        ("cloud".to_string(), String::new(), openai.model.clone())
+    } else {
+        let (tier_id, cloud_id) = catalog::resolve_bot_model_selection(
+            agent.as_ref(),
+            &state.selected_model_tier,
+            &state.selected_cloud_model_id,
+        );
+        let model = catalog::resolve_active_model_name(&tier_id, &cloud_id);
+        (tier_id, cloud_id, model)
+    };
+    if openai.is_none() {
+        let source = agent
+            .as_ref()
+            .and_then(|value| value.get("modelSource"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if source == "openai" {
+            return json!({"ok": false, "error": "api_not_configured"});
+        }
+        if !state.setup_complete {
+            return json!({"ok": false, "error": "setup_incomplete", "state": manager.state_value()});
+        }
     }
-    if !attachments.is_empty()
-        && !catalog::model_supports_vision(&state.selected_model_tier, &state.selected_cloud_model_id)
-    {
+    if !attachments.is_empty() && !catalog::model_supports_vision(&tier_id, &cloud_id) && openai.is_none() {
         return json!({"ok": false, "error": "vision_not_supported", "state": manager.state_value()});
     }
-    let tier_id = state.selected_model_tier.clone();
-    let model = catalog::resolve_active_model_name(&tier_id, &state.selected_cloud_model_id);
     if model.is_empty() {
         return json!({"ok": false, "error": "model_missing", "state": manager.state_value()});
     }
-    if !manager.ensure_server_running().await {
+    if openai.is_none() && !manager.ensure_server_running().await {
         return json!({"ok": false, "error": "server_not_running", "state": manager.state_value()});
     }
+    if !manager.try_begin_chat(&peer_id) {
+        return json!({"ok": false, "error": "chat_busy", "state": manager.state_value()});
+    }
+    manager.emit_bot_typing(&peer_id, &request_id, true);
+    let _busy_guard = ChatBusyGuard {
+        manager: manager.clone(),
+        peer_id: peer_id.clone(),
+        request_id: request_id.clone(),
+    };
 
     let cancel = manager.register_abort(&request_id);
     let result = run_agent_chat(
@@ -297,8 +341,9 @@ pub async fn chat(manager: Arc<OllamaManager>, payload: Value) -> Value {
         &request_id,
         &attachments,
         &tier_id,
-        &state.selected_cloud_model_id,
+        &cloud_id,
         &model,
+        openai.as_ref(),
         &cancel,
     )
     .await;
@@ -316,6 +361,7 @@ async fn run_agent_chat(
     tier_id: &str,
     selected_cloud_model_id: &str,
     model: &str,
+    openai: Option<&catalog::OpenAiCompat>,
     cancel: &CancelToken,
 ) -> Value {
     let agent_ctx = resolve_agent_context(manager, peer_id);
@@ -369,16 +415,20 @@ async fn run_agent_chat(
     let mut segments: Vec<Value> = Vec::new();
     let mut history = build_chat_history(manager, peer_id, tier_id, prompt, attachments, &agent_ctx);
     let mut collected_tool_events: Vec<Value> = Vec::new();
-    let mut final_content = String::new();
+    let final_content = String::new();
     let mut final_thinking = String::new();
     let mut final_stats: Option<Value> = None;
     let mut forged_tool_result_repairs = 0usize;
+    let mut sent_via_message_send = 0usize;
+    let mut message_send_nudges = 0usize;
 
     let app = manager.app.clone();
     let request_id_owned = request_id.to_string();
+    let peer_id_owned = peer_id.to_string();
     let mut forward_progress = move |mut update: Value| {
         if let Some(object) = update.as_object_mut() {
-            object.insert("requestId".into(), json!(request_id_owned));
+            object.insert("requestId".into(), json!(request_id_owned.clone()));
+            object.insert("peerId".into(), json!(peer_id_owned.clone()));
         }
         let _ = app.emit_to("main", "ollama:chat-progress", update);
     };
@@ -391,20 +441,31 @@ async fn run_agent_chat(
             break Ok(());
         }
 
-        let response = match chat_request_stream(
-            manager,
-            json!({
-                "model": model,
-                "messages": history.clone(),
-                "tools": tier_tools.clone(),
-                "think": think_option.clone(),
-            }),
-            cancel,
-            &mut segments,
-            &mut forward_progress,
-        )
-        .await
-        {
+        let response = match if let Some(openai) = openai {
+            openai_chat_request_stream(
+                openai,
+                &history,
+                &tier_tools,
+                cancel,
+                &mut segments,
+                &mut forward_progress,
+            )
+            .await
+        } else {
+            chat_request_stream(
+                manager,
+                json!({
+                    "model": model,
+                    "messages": history.clone(),
+                    "tools": tier_tools.clone(),
+                    "think": think_option.clone(),
+                }),
+                cancel,
+                &mut segments,
+                &mut forward_progress,
+            )
+            .await
+        } {
             Ok(response) => response,
             Err(error) => break Err(error),
         };
@@ -455,13 +516,6 @@ async fn run_agent_chat(
             if response.stats.is_some() {
                 final_stats = response.stats;
             }
-            if !display_content.is_empty() {
-                final_content = if final_content.is_empty() {
-                    display_content.clone()
-                } else {
-                    format!("{final_content}\n\n{display_content}")
-                };
-            }
             if !msg_thinking.is_empty() {
                 final_thinking = if final_thinking.is_empty() {
                     msg_thinking.clone()
@@ -470,8 +524,43 @@ async fn run_agent_chat(
                 };
                 upsert_stream_thinking(&mut segments, &msg_thinking);
             }
-            if !display_content.trim().is_empty() {
-                upsert_stream_answer(&mut segments, &display_content);
+            clear_last_stream_answer(&mut segments);
+            let visible = display_content.trim();
+            if sent_via_message_send > 0 {
+                break Ok(());
+            }
+            if !visible.is_empty() && !tools::is_placeholder_bot_reply(visible) {
+                if message_send_nudges < 1 {
+                    message_send_nudges += 1;
+                    history.push(json!({"role": "assistant", "content": visible}));
+                    history.push(json!({"role": "system", "content": MESSAGE_SEND_NUDGE}));
+                    forward_progress(json!({
+                        "thinking": final_thinking,
+                        "content": final_content,
+                        "segments": segments.clone(),
+                        "tps": 0,
+                        "genTimeMs": 0,
+                        "done": false,
+                    }));
+                    continue 'agent;
+                }
+                let send_result = tools::execute_tool_call(
+                    "message_send",
+                    &json!({"content": visible}),
+                    &tool_ctx,
+                )
+                .await;
+                if send_result.get("ok").and_then(Value::as_bool) == Some(true)
+                    && send_result.get("ignored").and_then(Value::as_bool) != Some(true)
+                {
+                    sent_via_message_send += 1;
+                }
+                break Ok(());
+            }
+            if message_send_nudges < 1 {
+                message_send_nudges += 1;
+                history.push(json!({"role": "system", "content": MESSAGE_SEND_NUDGE}));
+                continue 'agent;
             }
             break Ok(());
         }
@@ -557,6 +646,13 @@ async fn run_agent_chat(
                 tool_result.get("ok").and_then(Value::as_bool).unwrap_or(true)
             );
 
+            if (tool_name == "message_send" || tool_name == "attach_file")
+                && tool_result.get("ok").and_then(Value::as_bool) == Some(true)
+                && tool_result.get("ignored").and_then(Value::as_bool) != Some(true)
+            {
+                sent_via_message_send += 1;
+            }
+
             if tool_name == "run_command" {
                 for index in (0..segments.len()).rev() {
                     let is_pending_run = segment_type(&segments[index]) == "tool"
@@ -572,7 +668,7 @@ async fn run_agent_chat(
                         break;
                     }
                 }
-            } else {
+            } else if tool_name != "message_send" {
                 let tool_event = json!({
                     "name": tool_name.clone(),
                     "arguments": tool_args.clone(),
@@ -625,11 +721,15 @@ async fn run_agent_chat(
             }
         }
         if !pending_user_question.is_empty() {
-            final_content = if final_content.is_empty() {
-                format!("❓ {pending_user_question}")
-            } else {
-                format!("{final_content}\n\n❓ {pending_user_question}")
-            };
+            let send_result = tools::execute_tool_call(
+                "message_send",
+                &json!({"content": format!("❓ {pending_user_question}")}),
+                &tool_ctx,
+            )
+            .await;
+            if send_result.get("ok").and_then(Value::as_bool) == Some(true) {
+                sent_via_message_send += 1;
+            }
             break Ok(());
         }
     };
@@ -638,27 +738,12 @@ async fn run_agent_chat(
         return json!({"ok": false, "error": error, "state": manager.state_value()});
     }
 
-    let (split_thinking, split_content) = split_thinking_text(&final_content);
-    let content = if split_content.is_empty() {
-        final_content.clone()
-    } else {
-        split_content
-    };
-    let thinking = [final_thinking.as_str(), split_thinking.as_str()]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .collect::<Vec<&str>>()
-        .join("\n\n")
-        .trim()
-        .to_string();
+    let thinking = final_thinking.trim().to_string();
 
-    // Kein harter Fehler, wenn zwar kein Text, aber Thinking- oder Tool-Segmente
-    // vorhanden sind — kleine Modelle beenden den Loop oft ohne finale Antwort.
     let has_segments = segments
         .iter()
         .any(|s| matches!(segment_type(s), "thinking" | "tool" | "answer"));
-    if content.trim().is_empty() && !has_segments {
+    if sent_via_message_send == 0 && thinking.is_empty() && !has_segments {
         return json!({"ok": false, "error": "empty_response", "state": manager.state_value()});
     }
 
@@ -676,7 +761,8 @@ async fn run_agent_chat(
 
     let mut message = Map::new();
     message.insert("kind".into(), json!("chat"));
-    message.insert("content".into(), json!(content));
+    message.insert("content".into(), json!(""));
+    message.insert("sentCount".into(), json!(sent_via_message_send));
     if !thinking.is_empty() {
         message.insert("thinking".into(), json!(thinking));
     }
@@ -691,6 +777,21 @@ async fn run_agent_chat(
     }
     message.insert("sender".into(), json!(sender));
     message.insert("model".into(), json!(model));
+
+    if manager.work_log_enabled(peer_id) {
+        manager.append_bot_worklog(
+            peer_id,
+            json!({
+                "id": Uuid::new_v4().to_string(),
+                "at": chrono::Utc::now().timestamp_millis(),
+                "thinking": thinking,
+                "segments": normalized_segments,
+                "toolEvents": collected_tool_events,
+                "sentCount": sent_via_message_send,
+                "model": model,
+            }),
+        );
+    }
 
     json!({
         "ok": true,

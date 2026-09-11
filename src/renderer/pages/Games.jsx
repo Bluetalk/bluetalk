@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import { pluginRuntime } from '../plugins/pluginRuntime';
 import { useApp } from '../App';
+import { PeerAvatar } from './chats/messageHelpers.jsx';
 import {
   canJoinGameViaPresence,
   formatGamePresenceLabel,
@@ -64,6 +65,7 @@ export default function GamesPage() {
         presence,
         hostName,
         gameLabel: GAME_LABELS[presence.game] || presence.game,
+        profilePicture: contact?.profilePicture || peer?.profilePicture || '',
       });
     }
     return rows.sort((a, b) => a.hostName.localeCompare(b.hostName, undefined, { sensitivity: 'base' }));
@@ -146,175 +148,175 @@ export default function GamesPage() {
   };
 
   return (
-    <div className="page page-games">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title-row">
-            <span className="page-title-icon" aria-hidden>
-              <Sparkles size={18} strokeWidth={ICON_STROKE} />
-            </span>
-            Spiele
-          </h1>
-          <p>
-            Starte installierte Spiele — Host erstellt die Lobby, Gäste treten per Chat-Einladung bei.
-          </p>
-        </div>
-      </div>
-
-      <div className="page-body games-page-body">
-      {openInvites.length > 0 ? (
-        <section className="games-invites" aria-label="Offene Spiel-Einladungen">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <Mail size={15} strokeWidth={ICON_STROKE} />
-              </span>
-              Einladungen &amp; offene Lobbys
-              <span className="badge badge-muted">{openInvites.length}</span>
-            </h3>
+    <div className="page page-inset page-games">
+      <div className="page-shell">
+        <header className="page-shell-header">
+          <div className="page-shell-copy">
+            <h1>Spiele</h1>
+            <p>Spiel starten. Andere treten über eine Einladung im Chat bei.</p>
           </div>
-          <div className="flex flex-col gap-2">
-            {openInvites.map(({ hostPeerId, presence, hostName, gameLabel }) => (
-              <div key={`${hostPeerId}:${presence.sessionId}`} className="card card-row">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="list-item-avatar">{(hostName || '?')[0].toUpperCase()}</div>
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">
-                      {gameLabel} · {presence.tableName || gameLabel}
-                    </div>
-                    <div className="text-xs text-muted truncate">
-                      {hostName} · {formatGamePresenceLabel(presence)} · {presence.playerCount}/{presence.maxPlayers} Spieler
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm flex-shrink-0"
-                  onClick={() => void joinGameFromPresence(presence, hostPeerId)}
-                >
-                  Beitreten
-                </button>
+          <div className="page-shell-actions">
+            <Link to="/plugins" viewTransition className="btn btn-secondary btn-sm">
+              Erweiterungen
+            </Link>
+          </div>
+        </header>
+
+        <div className="page-shell-body">
+          {openInvites.length > 0 ? (
+            <section className="new-section games-invites" aria-label="Offene Spiel-Einladungen">
+              <div className="new-section-title">
+                <Mail size={14} strokeWidth={ICON_STROKE} aria-hidden />
+                Einladungen
+                <span className="new-section-count">{openInvites.length}</span>
               </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {loading ? (
-        <div className="page-loading" role="status">
-          <span className="spinner spinner--md" />
-          <span>Spiele werden geladen…</span>
-        </div>
-      ) : null}
-
-      {!loading && entries.length === 0 ? (
-        <div className="games-empty">
-          <h3>Noch keine Spiele aktiv</h3>
-          <p>
-            Aktiviere Spiele wie Poker oder UNO unter <strong>Erweiterungen</strong>, um sie hier zu sehen.
-          </p>
-        </div>
-      ) : null}
-
-      {!loading && entries.length > 0 ? (
-        <div className="games-grid">
-          {entries.map(({ game, state, labels }) => {
-            const cardClass = `games-launch-card${state.active ? ' is-active' : ''}${!game.enabled ? ' is-inactive' : ''}`;
-            // Alpha-Badge nur, wenn das Manifest tatsächlich einen alphaNotice-Text liefert.
-            const isAlpha = Boolean(game.alphaNotice);
-            const showTag = game.tag && String(game.tag).toLowerCase() !== 'alpha';
-            return (
-              <article key={game.id} className={cardClass}>
-                <div className="games-launch-card-head">
-                  <div className={`games-launch-mark games-launch-mark--${game.id}`} aria-hidden>
-                    {game.mark}
+              <div className="new-request-list">
+                {openInvites.map(({ hostPeerId, presence, hostName, gameLabel, profilePicture }) => (
+                  <div key={`${hostPeerId}:${presence.sessionId}`} className="new-request-row">
+                    <PeerAvatar pictureUrl={profilePicture} name={hostName} size={40} />
+                    <div className="new-request-copy">
+                      <div className="new-person-name">
+                        {gameLabel}
+                        {presence.tableName && presence.tableName !== gameLabel ? ` · ${presence.tableName}` : ''}
+                      </div>
+                      <div className="new-person-meta">
+                        {hostName} · {formatGamePresenceLabel(presence)} · {presence.playerCount}/{presence.maxPlayers} Spieler
+                      </div>
+                    </div>
+                    <div className="new-request-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void joinGameFromPresence(presence, hostPeerId)}
+                      >
+                        Beitreten
+                      </button>
+                    </div>
                   </div>
-                  <div className="games-launch-heading">
-                    <div className="games-launch-title-row">
-                      <h3>{game.name}</h3>
-                      {isAlpha ? (
-                        <span className="plugin-tag-badge plugin-tag-badge--card plugin-tag-badge--alpha">Alpha</span>
-                      ) : null}
-                      {showTag ? (
-                        <span className="plugin-tag-badge plugin-tag-badge--card">{game.tag}</span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {loading ? (
+            <div className="page-loading" role="status">
+              <span className="spinner spinner--md" />
+              <span>Spiele werden geladen…</span>
+            </div>
+          ) : null}
+
+          {!loading && entries.length === 0 ? (
+            <div className="page-empty">
+              <Sparkles size={28} strokeWidth={ICON_STROKE} aria-hidden />
+              <p className="empty-state-title">Noch keine Spiele</p>
+              <p>Aktiviere Spiele wie Poker oder UNO unter Erweiterungen, um sie hier zu sehen.</p>
+              <div className="empty-state-actions">
+                <Link to="/plugins" viewTransition className="btn btn-primary btn-sm">
+                  Zu Erweiterungen
+                </Link>
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && entries.length > 0 ? (
+            <div className="games-grid">
+              {entries.map(({ game, state, labels }) => {
+                const cardClass = `games-launch-card${state.active ? ' is-active' : ''}${!game.enabled ? ' is-inactive' : ''}`;
+                const isAlpha = Boolean(game.alphaNotice);
+                const showTag = game.tag && String(game.tag).toLowerCase() !== 'alpha';
+                return (
+                  <article key={game.id} className={cardClass}>
+                    <div className="games-launch-card-head">
+                      <div className={`games-launch-mark games-launch-mark--${game.id}`} aria-hidden>
+                        {game.mark}
+                      </div>
+                      <div className="games-launch-heading">
+                        <div className="games-launch-title-row">
+                          <h3>{game.name}</h3>
+                          {isAlpha ? (
+                            <span className="plugin-tag-badge plugin-tag-badge--card plugin-tag-badge--alpha">Alpha</span>
+                          ) : null}
+                          {showTag ? (
+                            <span className="plugin-tag-badge plugin-tag-badge--card">{game.tag}</span>
+                          ) : null}
+                        </div>
+                        {state.active ? (
+                          <span className="games-launch-status games-launch-status--live">
+                            <span className="games-launch-status-dot" aria-hidden />
+                            Läuft
+                          </span>
+                        ) : !game.enabled ? (
+                          <span className="games-launch-status">Inaktiv</span>
+                        ) : state.hasSavedGame ? (
+                          <span className="games-launch-status">Gespeichertes Spiel</span>
+                        ) : (
+                          <span className="games-launch-status games-launch-status--ready">Bereit</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="games-launch-body">
+                      <p className="games-launch-desc">{game.description}</p>
+                      {!game.enabled ? (
+                        <p className="games-launch-hint">Installiert, aber noch nicht aktiviert.</p>
+                      ) : state.active ? (
+                        <p className="games-launch-hint">
+                          <strong>{state.tableName || game.name}</strong> läuft — Einladungen und Einstellungen im Spielfenster.
+                        </p>
+                      ) : game.alphaNotice ? (
+                        <p className="games-alpha-notice" role="note">{game.alphaNotice}</p>
                       ) : null}
                     </div>
-                    {state.active ? (
-                      <span className="games-launch-status games-launch-status--live">
-                        <span className="games-launch-status-dot" aria-hidden />
-                        Läuft
-                      </span>
-                    ) : !game.enabled ? (
-                      <span className="games-launch-status">Inaktiv</span>
-                    ) : state.hasSavedGame ? (
-                      <span className="games-launch-status">Gespeichertes Spiel</span>
-                    ) : (
-                      <span className="games-launch-status games-launch-status--ready">Bereit</span>
-                    )}
-                  </div>
-                </div>
 
-                <div className="games-launch-body">
-                  <p className="games-launch-desc">{game.description}</p>
-                  {!game.enabled ? (
-                    <p className="games-launch-hint">Installiert, aber noch nicht aktiviert.</p>
-                  ) : state.active ? (
-                    <p className="games-launch-hint">
-                      <strong>{state.tableName || game.name}</strong> läuft — Einladungen und Einstellungen im Spielfenster.
-                    </p>
-                  ) : game.alphaNotice ? (
-                    <p className="games-alpha-notice" role="note">{game.alphaNotice}</p>
-                  ) : null}
-                </div>
-
-                <div className="games-launch-actions">
-                  {!game.enabled ? (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void enableGame(game.id)}
-                      >
-                        Spiel aktivieren
-                      </button>
-                      <Link to="/plugins" className="btn btn-secondary btn-sm">
-                        Erweiterungen
-                      </Link>
-                    </>
-                  ) : state.active ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => void invokeGame(game.id, 'openWindow')}
-                    >
-                      {labels.openWindow}
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void invokeGame(game.id, 'launchNew')}
-                      >
-                        {labels.launchNew}
-                      </button>
-                      {state.hasSavedGame ? (
+                    <div className="games-launch-actions">
+                      {!game.enabled ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => void enableGame(game.id)}
+                          >
+                            Spiel aktivieren
+                          </button>
+                          <Link to="/plugins" viewTransition className="btn btn-secondary btn-sm">
+                            Erweiterungen
+                          </Link>
+                        </>
+                      ) : state.active ? (
                         <button
                           type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => void invokeGame(game.id, 'launchResume')}
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void invokeGame(game.id, 'openWindow')}
                         >
-                          {labels.launchResume}
+                          {labels.openWindow}
                         </button>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => void invokeGame(game.id, 'launchNew')}
+                          >
+                            {labels.launchNew}
+                          </button>
+                          {state.hasSavedGame ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => void invokeGame(game.id, 'launchResume')}
+                            >
+                              {labels.launchResume}
+                            </button>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
-      ) : null}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { ModalOverlay } from '../components/ModalOverlay';
 import { pluginRuntime } from './pluginRuntime';
 
 /**
@@ -7,7 +8,7 @@ import { pluginRuntime } from './pluginRuntime';
  * calling `BlueTalkPlugin.ui.openScreen('my-screen', ctx)`.
  */
 export default function PluginScreenHost() {
-  const [state, setState] = useState(null); // { screen, ctx }
+  const [state, setState] = useState(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -47,21 +48,27 @@ export default function PluginScreenHost() {
   if (!state) return null;
 
   return (
-    <div className="plugin-screen-overlay" role="dialog">
-      <div className="plugin-screen-dialog">
+    <ModalOverlay
+      className="plugin-screen-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={state.screen.title}
+      onClick={() => setState(null)}
+    >
+      <div className="plugin-screen-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="plugin-screen-header">
           <span className="plugin-screen-title">{state.screen.title}</span>
           <button
             type="button"
-            className="plugin-screen-close"
+            className="btn btn-ghost btn-icon btn-sm"
             onClick={() => setState(null)}
-            aria-label="Close"
+            aria-label="Schließen"
           >
-            <X size={16} strokeWidth={2} />
+            <X size={16} strokeWidth={1.75} />
           </button>
         </div>
         <div ref={containerRef} className="plugin-screen-body" />
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

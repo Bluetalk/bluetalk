@@ -28,6 +28,7 @@ export function useChatDialogs({
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showPeerProfile, setShowPeerProfile] = useState(false);
+  const [showBotWorklog, setShowBotWorklog] = useState(false);
 
   const [showNickname, setShowNickname] = useState(false);
   const [nicknameInput, setNicknameInput] = useState('');
@@ -51,6 +52,7 @@ export function useChatDialogs({
   useEffect(() => {
     setShowPeerProfile(false);
     setShowGroupInfo(false);
+    setShowBotWorklog(false);
   }, [selectedPeerId]);
 
   useEffect(() => {
@@ -68,6 +70,19 @@ export function useChatDialogs({
   }, [showClearContextConfirm, clearContextTargetPeerId, peerPendingClear]);
 
   const closePeerProfile = useCallback(() => setShowPeerProfile(false), []);
+  const togglePeerProfile = useCallback(() => {
+    setShowBotWorklog(false);
+    setShowPeerProfile((open) => !open);
+  }, []);
+  const closeBotWorklog = useCallback(() => setShowBotWorklog(false), []);
+  const openBotWorklog = useCallback(() => {
+    setShowPeerProfile(false);
+    setShowBotWorklog(true);
+  }, []);
+  const toggleBotWorklog = useCallback(() => {
+    setShowPeerProfile(false);
+    setShowBotWorklog((open) => !open);
+  }, []);
 
   const openNicknameDialog = () => {
     if (!selectedPeer) return;
@@ -90,6 +105,7 @@ export function useChatDialogs({
 
   const openAiProfileEditor = (chat) => {
     if (chat?.id) setSelectedPeerId(chat.id);
+    setShowBotWorklog(false);
     setShowPeerProfile(true);
     closeListContextMenu();
   };
@@ -150,7 +166,7 @@ export function useChatDialogs({
       toast({
         variant: 'success',
         title: 'Verlauf geleert',
-        message: 'Chatverlauf und Agent-Kontext wurden zurückgesetzt.',
+        message: 'Chatverlauf und Bot-Kontext wurden zurückgesetzt.',
       });
       setWarning('');
       setShowClearContextConfirm(false);
@@ -174,6 +190,11 @@ export function useChatDialogs({
     showPeerProfile,
     setShowPeerProfile,
     closePeerProfile,
+    togglePeerProfile,
+    showBotWorklog,
+    closeBotWorklog,
+    openBotWorklog,
+    toggleBotWorklog,
     showNickname,
     setShowNickname,
     nicknameInput,

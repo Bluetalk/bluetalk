@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Cloud, User } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from './ToastProvider';
+import PresenceStatusSlider from './PresenceStatusSlider';
+import {
+  formatOwnPresenceLabel,
+  resolveUserPresenceStatus,
+} from '../../shared/user-presence.js';
 
 const MAX_AVATAR_BYTES = 380 * 1024;
 
@@ -85,6 +90,8 @@ export default function ProfileMenu({ variant = 'default' }) {
   }, [open]);
 
   const initial = (settings.displayName || '?')[0].toUpperCase();
+  const presenceStatus = resolveUserPresenceStatus(settings);
+  const presenceLabel = formatOwnPresenceLabel(settings);
 
   const onAvatarPick = async (e) => {
     const file = e.target.files?.[0];
@@ -116,14 +123,17 @@ export default function ProfileMenu({ variant = 'default' }) {
         className={`profile-menu-trigger${isSidebar ? ' profile-menu-trigger--sidebar' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={isSidebar ? 'Profil' : undefined}
-        title={isSidebar ? undefined : 'Profile'}
+        aria-label={isSidebar ? `Profil · ${presenceLabel}` : undefined}
+        title={isSidebar ? undefined : `Profil · ${presenceLabel}`}
       >
-        {settings.profilePicture ? (
-          <img src={settings.profilePicture} alt="" className="profile-menu-trigger-avatar" />
-        ) : (
-          <span className="profile-menu-trigger-letter">{initial}</span>
-        )}
+        <span className="profile-menu-trigger-face">
+          {settings.profilePicture ? (
+            <img src={settings.profilePicture} alt="" className="profile-menu-trigger-avatar" />
+          ) : (
+            <span className="profile-menu-trigger-letter">{initial}</span>
+          )}
+          <span className={`profile-status-lamp is-${presenceStatus}`} aria-hidden />
+        </span>
         {isSidebar ? null : (
           open ? <ChevronDown size={15} strokeWidth={1.75} /> : <ChevronUp size={15} strokeWidth={1.75} />
         )}
@@ -177,6 +187,11 @@ export default function ProfileMenu({ variant = 'default' }) {
             </div>
 
             <div className="input-group">
+              <label>Status</label>
+              <PresenceStatusSlider compactLabels />
+            </div>
+
+            <div className="input-group">
               <label htmlFor="profile-menu-bio">Bio</label>
               <textarea
                 id="profile-menu-bio"
@@ -194,7 +209,7 @@ export default function ProfileMenu({ variant = 'default' }) {
               className="btn btn-cloud-sync w-full"
               onClick={() => {
                 setOpen(false);
-                navigate('/cloud-sync');
+                navigate('/cloud-sync', { viewTransition: true });
               }}
             >
               <Cloud size={16} strokeWidth={1.75} />

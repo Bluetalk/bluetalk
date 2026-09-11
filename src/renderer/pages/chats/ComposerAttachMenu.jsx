@@ -210,7 +210,7 @@ export function ComposerAttachMenu({
         onClick={() => setAttachMenuOpen((o) => !o)}
         disabled={composerDisabled || readingFile || sendingFile}
         title="Anhang hinzufügen"
-        style={{ height: 40, width: 40 }}
+        style={{ height: 32, width: 32 }}
       >
         <Plus size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
       </button>

@@ -18,9 +18,16 @@ import {
   GAME_PRESENCE_KIND,
   gameInviteKey,
 } from '../../shared/game-presence.js';
-import { USER_PRESENCE_KIND } from '../../shared/user-presence.js';
+import { USER_PRESENCE_KIND, parseIncomingUserPresenceStatus, shouldSuppressNotifications } from '../../shared/user-presence.js';
+import { TYPING_KIND, TYPING_EXPIRE_MS } from '../../shared/chat-typing.js';
 import { REALTIME_KIND } from '../../shared/plugin-realtime.mjs';
 import { GROUP_PROTOCOL_KINDS, handleGroupProtocolFrame } from './groupInboundHandler';
+import {
+  REACTION_KIND,
+  isAllowedReactionEmoji,
+  setReactorEmoji,
+  findMessageForReaction,
+} from './messageReactions';
 
 // Eingehende Inhalte, die eine Desktop-Benachrichtigung auslösen sollen.
 const NOTIFYABLE_KINDS = new Set([
@@ -30,7 +37,7 @@ const NOTIFYABLE_KINDS = new Set([
   'contact-share',
 ]);
 
-// Einladungen laufen an Chatverlauf vorbei in den Spiele- bzw. Dokumente-Tab.
+// Spiel-Einladungen laufen am Chatverlauf vorbei in den Spiele-Tab.
 const INVITE_KINDS = new Set([
   'poker-invite',
   'uno-invite',
@@ -57,12 +64,13 @@ export function createPeerMessageHandler(deps) {
     sendE2eeHandshake,
     setPeerReadReceipts,
     setPeerUserPresence,
+    setPeerTyping,
     setPeerGamePresence,
     setGameInviteKeys,
-    setDocInvites,
     setChatMeta,
     setMessages,
     setContacts,
+    messageCacheRef,
   } = deps;
 
   return async (msg) => {
@@ -228,12 +236,26 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
+    if (msg.kind === TYPING_KIND && fromId) {
+      if (isBlocked) return;
+      setPeerTyping?.((prev) => {
+        if (msg.active === false) {
+          if (!prev[fromId]) return prev;
+          const next = { ...prev };
+          delete next[fromId];
+          return next;
+        }
+        return { ...prev, [fromId]: Date.now() + TYPING_EXPIRE_MS };
+      });
+      return;
+    }
+
     if (msg.kind === USER_PRESENCE_KIND && fromId) {
       if (isBlocked) return;
       setPeerUserPresence((prev) => ({
         ...prev,
         [fromId]: {
-          status: msg.status === 'dnd' ? 'dnd' : 'online',
+          status: parseIncomingUserPresenceStatus(msg.status),
           updatedAt: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
         },
       }));
@@ -324,6 +346,17 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
+    if (normalized.kind === REACTION_KIND && fromId) {
+      const emoji = normalized.emoji;
+      const refMessageId = normalized.refMessageId;
+      if (!isAllowedReactionEmoji(emoji) || !refMessageId) return;
+      const existing = await findMessageForReaction(messageCacheRef, fromId, refMessageId);
+      if (!existing) return;
+      const reactions = setReactorEmoji(existing.reactions, emoji, fromId, normalized.active !== false);
+      await applyMessagePatch(fromId, refMessageId, { reactions });
+      return;
+    }
+
     if (normalized.kind === 'sticker') {
       try {
         normalized = { ...normalized, ...validateStickerData(normalized) };
@@ -343,56 +376,35 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
-    // Spiel- und Dokument-Einladungen landen nicht mehr im Chatverlauf:
-    // sie werden registriert (Spiele-Tab bzw. Dokumente-Tab zeigen sie an),
+    // Spiel-Einladungen landen nicht im Chatverlauf: sie werden registriert,
     // lösen eine Benachrichtigung aus und sind damit abgehandelt.
     if (INVITE_KINDS.has(normalized.kind) && fromId) {
       if (normalized.kind === 'live-docs-invite') {
-        const roomId = String(normalized.roomId || '');
-        const hostPeerId = normalized.hostPeerId || fromId;
-        if (roomId && hostPeerId) {
-          setDocInvites?.((prev) => {
-            const list = Array.isArray(prev) ? prev : [];
-            if (list.some((entry) => entry?.roomId === roomId)) return list;
-            const next = [
-              {
-                roomId,
-                hostPeerId,
-                fileName: String(normalized.fileName || ''),
-                sender: String(normalized.sender || ''),
-                receivedAt: Date.now(),
-              },
-              ...list,
-            ].slice(0, 20);
-            void window.bluetalk?.store?.set?.('liveDocsInvites', next);
-            return next;
-          });
-        }
-      } else {
-        const game = normalized.kind === 'poker-invite'
-          ? 'poker'
-          : normalized.kind === 'uno-invite'
-            ? 'uno'
-            : normalized.kind === 'chess-invite'
-              ? 'chess'
-              : normalized.kind === 'tic-tac-toe-invite'
-                ? 'tic-tac-toe'
-                : 'connect-four';
-        const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
-        const hostPeerId = normalized.hostPeerId || fromId;
-        if (sessionId && hostPeerId) {
-          const key = gameInviteKey(game, hostPeerId, sessionId);
-          setGameInviteKeys((prev) => {
-            if (prev.has(key)) return prev;
-            const next = new Set(prev);
-            next.add(key);
-            void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
-            return next;
-          });
-        }
+        return;
+      }
+      const game = normalized.kind === 'poker-invite'
+        ? 'poker'
+        : normalized.kind === 'uno-invite'
+          ? 'uno'
+          : normalized.kind === 'chess-invite'
+            ? 'chess'
+            : normalized.kind === 'tic-tac-toe-invite'
+              ? 'tic-tac-toe'
+              : 'connect-four';
+      const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
+      const hostPeerId = normalized.hostPeerId || fromId;
+      if (sessionId && hostPeerId) {
+        const key = gameInviteKey(game, hostPeerId, sessionId);
+        setGameInviteKeys((prev) => {
+          if (prev.has(key)) return prev;
+          const next = new Set(prev);
+          next.add(key);
+          void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
+          return next;
+        });
       }
       const inviteContact = contactsRef.current.find((entry) => entry?.id === fromId);
-      if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(inviteContact)) {
+      if (!shouldSuppressNotifications(settingsRef.current) && !isContactNotificationMuted(inviteContact)) {
         void window.bluetalk?.notify?.show?.({
           title: inviteContact?.nickname || inviteContact?.name || normalized.sender || fromId,
           body: buildMessageNotificationPreview(normalized),
@@ -417,7 +429,7 @@ export function createPeerMessageHandler(deps) {
     // unabhängig davon, ob die Nachricht verschlüsselt ankam.
     if (NOTIFYABLE_KINDS.has(normalized.kind) && fromId) {
       const notifyContact = contactsRef.current.find((entry) => entry?.id === fromId);
-      if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(notifyContact)) {
+      if (!shouldSuppressNotifications(settingsRef.current) && !isContactNotificationMuted(notifyContact)) {
         void window.bluetalk?.notify?.show?.({
           title: notifyContact?.nickname || notifyContact?.name || normalized.sender || fromId,
           body: buildMessageNotificationPreview(normalized),

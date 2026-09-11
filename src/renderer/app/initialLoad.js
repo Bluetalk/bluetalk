@@ -19,7 +19,6 @@ export async function loadInitialData(deps, isCancelled) {
     setChatLastViewedPeerTs,
     setPeerReadReceipts,
     setGameInviteKeys,
-    setDocInvites,
     setSettings,
     setTheme,
     setShowUsernameOnboarding,
@@ -44,7 +43,6 @@ export async function loadInitialData(deps, isCancelled) {
       peerInfo,
       storedGroupOutbox,
       storedGroupEventIds,
-      storedDocInvites,
     ] = await Promise.all([
       window.bluetalk.store.get('contacts', []),
       window.bluetalk.messages.getMeta(),
@@ -56,7 +54,6 @@ export async function loadInitialData(deps, isCancelled) {
       window.bluetalk.peer.getInfo(),
       window.bluetalk.store.get('groupOutbox', []),
       window.bluetalk.store.get('groupEventIds', []),
-      window.bluetalk.store.get('liveDocsInvites', []),
     ]);
 
     if (isCancelled()) return;
@@ -119,10 +116,6 @@ export async function loadInitialData(deps, isCancelled) {
       setGameInviteKeys(new Set(storedInviteKeys.filter((key) => typeof key === 'string' && key.length)));
     }
 
-    if (Array.isArray(storedDocInvites) && storedDocInvites.length) {
-      setDocInvites?.(storedDocInvites.filter((entry) => entry && typeof entry.roomId === 'string' && entry.roomId));
-    }
-
     const stored = storedSettings && typeof storedSettings === 'object' ? storedSettings : {};
     let mergedSettings = { ...DEFAULT_APP_SETTINGS, ...stored };
     mergedSettings.uiResize = {
@@ -134,6 +127,9 @@ export async function loadInitialData(deps, isCancelled) {
       ...(stored.uiCollapse && typeof stored.uiCollapse === 'object' ? stored.uiCollapse : {}),
     };
     const displayNameTrim = (mergedSettings.displayName || '').trim();
+    if (!mergedSettings.presenceStatus) {
+      mergedSettings.presenceStatus = mergedSettings.doNotDisturb ? 'dnd' : 'online';
+    }
     if (mergedSettings.onboardingUsernameDone !== true && displayNameTrim && displayNameTrim !== 'Anonymous') {
       mergedSettings = { ...mergedSettings, onboardingUsernameDone: true };
       window.bluetalk.store.set('settings', mergedSettings);

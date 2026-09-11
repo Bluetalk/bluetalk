@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Search, Users, X } from 'lucide-react';
+import { MessageCircle, PanelLeftClose, PanelLeftOpen, Search, Users, X } from 'lucide-react';
 import VerticalResizeHandle from '../../components/VerticalResizeHandle';
-import { CHAT_ICON_STROKE, countUnreadPeerMessages } from './messageHelpers.jsx';
+import {
+  CHAT_ICON_STROKE,
+  CHAT_LIST_WIDTH_COLLAPSED,
+  countUnreadPeerMessages,
+} from './messageHelpers.jsx';
 import { ChatListRow } from './ChatListRow.jsx';
 
 /**
  * Linke Spalte: Chatlisten-Header, Suche (inkl. Strg+K-Fokus), Chat-/Agenten-
- * Zeilen und Resize-Handle bzw. Collapse-Strip.
+ * Zeilen, Resize-Handle und eingeklappte Avatar-Leiste.
  *
  * Props:
  * - collapsed, widthPx, onToggleCollapse: Collapse/Breite (useChatListWidth)
@@ -14,8 +18,7 @@ import { ChatListRow } from './ChatListRow.jsx';
  * - onShowCreateGroup(): öffnet den Gruppen-Dialog
  * - chats: mainChatList (die Suche/Filterung passiert lokal)
  * - listState: { chatLastViewedPeerTs, messages, subagentsByPeer,
- *   expandedAgentSubs, selectedPeerId, selectedSubagent, debugMode,
- *   ollamaSetupComplete }
+ *   expandedAgentSubs, selectedPeerId, selectedSubagent, debugMode, peerTyping }
  * - actions: { resolveContact, isAiChatPending, onSelectChat(id),
  *   onChatContextMenu(e, chat), onToggleAgentSubs(id, e), onOpenSubagent(chatId, subId) }
  */
@@ -33,7 +36,19 @@ export function ChatListPanel({
   actions,
 }) {
   const [search, setSearch] = useState('');
+  const [railMotion, setRailMotion] = useState(false);
   const searchInputRef = useRef(null);
+
+  const handleToggleCollapse = () => {
+    setRailMotion(true);
+    onToggleCollapse();
+  };
+
+  useEffect(() => {
+    if (!railMotion) return undefined;
+    const id = window.setTimeout(() => setRailMotion(false), 400);
+    return () => window.clearTimeout(id);
+  }, [railMotion]);
 
   // Ctrl/Cmd+K jumps to the chat search from anywhere in the page.
   useEffect(() => {
@@ -41,6 +56,11 @@ export function ChatListPanel({
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
         && (event.key === 'k' || event.key === 'K')) {
         event.preventDefault();
+        if (collapsed) {
+          setRailMotion(true);
+          onToggleCollapse();
+          return;
+        }
         const input = searchInputRef.current;
         if (input) {
           input.focus();
@@ -50,11 +70,11 @@ export function ChatListPanel({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [collapsed, onToggleCollapse]);
 
-  const filtered = chats.filter((chat) =>
+  const filtered = (collapsed ? chats : chats.filter((chat) =>
     `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
-  );
+  ));
 
   const {
     chatLastViewedPeerTs,
@@ -64,65 +84,55 @@ export function ChatListPanel({
     selectedPeerId,
     selectedSubagent,
     debugMode,
-    ollamaSetupComplete,
+    peerTyping = {},
   } = listState;
 
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        className="panel-collapse-strip panel-collapse-strip--chat-list"
-        onClick={onToggleCollapse}
-        title="Chatliste einblenden"
-        aria-label="Chatliste einblenden"
-        aria-expanded={false}
-      >
-        <PanelLeftOpen size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-      </button>
-    );
-  }
-
   return (
-    <>
-      <div
-        className="split-list split-list--resizable"
-        style={{ width: widthPx, flexShrink: 0 }}
-      >
+    <div
+      className={`split-list-shell${collapsed ? ' split-list-shell--collapsed' : ''}${railMotion ? ' split-list-shell--motion' : ''}`}
+      style={{ width: collapsed ? CHAT_LIST_WIDTH_COLLAPSED : widthPx, flexShrink: 0 }}
+    >
+      <div className={`split-list split-list--resizable${collapsed ? ' split-list--collapsed' : ''}`}>
         <div className="split-list-header">
           <h2>Chats</h2>
           <div className="split-list-header-actions">
             <button
               type="button"
-              className="btn btn-ghost btn-icon btn-sm"
+              className="btn btn-ghost btn-icon btn-sm split-list-create-group"
               onClick={onShowCreateGroup}
               title="Neue Gruppe"
               aria-label="Neue Gruppe"
+              aria-hidden={collapsed}
+              tabIndex={collapsed ? -1 : undefined}
             >
               <Users size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             </button>
             <button
               type="button"
-              className="btn btn-ghost btn-icon btn-sm"
-              onClick={onToggleCollapse}
-              title="Chatliste einklappen"
-              aria-label="Chatliste einklappen"
-              aria-expanded
+              className="btn btn-ghost btn-icon btn-sm split-list-collapse-btn"
+              onClick={handleToggleCollapse}
+              title={collapsed ? 'Chatliste einblenden' : 'Chatliste einklappen'}
+              aria-label={collapsed ? 'Chatliste einblenden' : 'Chatliste einklappen'}
+              aria-expanded={!collapsed}
             >
-              <PanelLeftClose size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+              {collapsed
+                ? <PanelLeftOpen size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                : <PanelLeftClose size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />}
             </button>
           </div>
         </div>
-        <div className="split-list-search-wrap">
+        <div className="split-list-search-wrap" aria-hidden={collapsed}>
           <div className="search-bar">
             <Search size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             <input
               ref={searchInputRef}
               className="input"
-              placeholder="Chats durchsuchen…  (Strg+K)"
+              placeholder="Chats durchsuchen…"
               value={search}
+              tabIndex={collapsed ? -1 : undefined}
               onChange={(e) => setSearch(e.target.value)}
             />
-            {search && (
+            {search ? (
               <button
                 type="button"
                 className="search-bar-clear"
@@ -131,13 +141,27 @@ export function ChatListPanel({
               >
                 <X size={13} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
               </button>
+            ) : (
+              <kbd className="search-kbd">Strg+K</kbd>
             )}
           </div>
         </div>
         <div className="split-list-body">
           {filtered.length === 0 && (
             <div className="empty-state split-list-empty-state">
-              <p>No chats yet. Use New in the sidebar for peers without a conversation, or connect below.</p>
+              {search ? (
+                <>
+                  <Search size={22} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                  <p className="empty-state-title">Keine Treffer</p>
+                  <p>Kein Chat passt zu „{search.trim()}“.</p>
+                </>
+              ) : (
+                <>
+                  <MessageCircle size={22} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                  <p className="empty-state-title">Noch keine Chats</p>
+                  <p>Unter Neu jemanden finden oder einen Peer per Adresse verbinden.</p>
+                </>
+              )}
             </div>
           )}
           {filtered.map((chat) => {
@@ -161,11 +185,11 @@ export function ChatListPanel({
                 chatContact={chatContact}
                 unreadCount={unreadCount}
                 subagents={subagents}
-                subagentsExpanded={subagentsExpanded}
+                subagentsExpanded={!collapsed && subagentsExpanded}
                 isParentActive={isParentActive}
                 selectedSubagent={selectedSubagent}
                 aiPending={actions.isAiChatPending(chat.id)}
-                ollamaSetupComplete={ollamaSetupComplete}
+                peerTypingActive={Number(peerTyping?.[chat.id]) > Date.now()}
                 debugMode={debugMode}
                 onSelect={actions.onSelectChat}
                 onContextMenu={actions.onChatContextMenu}
@@ -182,6 +206,6 @@ export function ChatListPanel({
         onCommit={onResizeCommit}
         onDoubleClick={onResizeReset}
       />
-    </>
+    </div>
   );
 }

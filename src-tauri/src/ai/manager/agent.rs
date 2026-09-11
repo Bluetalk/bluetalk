@@ -44,16 +44,29 @@ impl OllamaManager {
 
     /// Führt eine ask_user-Anfrage aus: Event an das Main-Fenster, Antwort via
     /// `ollama_reply_ask_user`, Timeout 3 Minuten, abbruchbar über abort_chat.
-    pub async fn run_ask_user(&self, peer_id: &str, request_id: &str, question: &str) -> Value {
+    pub async fn run_ask_user(
+        &self,
+        peer_id: &str,
+        request_id: &str,
+        question: &str,
+        options: &[String],
+    ) -> Value {
         let (tx, rx) = oneshot::channel::<String>();
-        self.ask_registry.lock().insert(request_id.to_string(), tx);
+        self.ask_registry
+            .lock()
+            .insert(request_id.to_string(), (peer_id.to_string(), tx));
 
         let emitted = self
             .app
             .emit_to(
                 "main",
                 "ollama:ask-user",
-                json!({"peerId": peer_id, "requestId": request_id, "question": question}),
+                json!({
+                    "peerId": peer_id,
+                    "requestId": request_id,
+                    "question": question,
+                    "options": options,
+                }),
             )
             .is_ok();
         if !emitted {
@@ -66,9 +79,15 @@ impl OllamaManager {
                 "note": "Kein interaktiver Dialog verfügbar.",
             });
         }
+        let _ = self.append_bot_chat_message(peer_id, question);
 
         let outcome = tokio::time::timeout(Duration::from_secs(180), rx).await;
         self.ask_registry.lock().remove(request_id);
+        let _ = self.app.emit_to(
+            "main",
+            "ollama:ask-user-done",
+            json!({ "requestId": request_id, "peerId": peer_id }),
+        );
 
         match outcome {
             Ok(Ok(answer)) => {
@@ -98,10 +117,14 @@ impl OllamaManager {
     }
 
     pub fn reply_ask_user(&self, request_id: &str, answer: String) -> Value {
-        let sender = self.ask_registry.lock().remove(request_id);
-        match sender {
-            Some(sender) => {
-                let _ = sender.send(answer);
+        let pending = self.ask_registry.lock().remove(request_id);
+        match pending {
+            Some((peer_id, sender)) => {
+                let text: String = answer.trim().chars().take(8000).collect();
+                if !text.is_empty() {
+                    let _ = self.append_user_chat_message(&peer_id, &text);
+                }
+                let _ = sender.send(text);
                 json!({"ok": true})
             }
             None => json!({"ok": false, "error": "not_found"}),
@@ -255,6 +278,201 @@ impl OllamaManager {
                 .find(|entry| entry.get("id").and_then(Value::as_str) == Some(peer_id))
                 .cloned()
         })
+    }
+
+    pub fn bot_display_name(&self, peer_id: &str) -> String {
+        self.get_agent(peer_id)
+            .and_then(|agent| {
+                agent
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(|name| name.trim().to_string())
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| catalog::BOT_DEFAULT_NAME.to_string())
+    }
+
+    /// Schreibt eine sichtbare Bot-Bubble in den eigenen KI-Chat.
+    pub fn append_bot_chat_message(&self, peer_id: &str, content: &str) -> Value {
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return json!({"ok": false, "error": "empty_content"});
+        }
+        if !catalog::is_ai_chat_peer_id(peer_id) {
+            return json!({"ok": false, "error": "not_bot_chat"});
+        }
+        let message_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let message = json!({
+            "kind": "chat",
+            "content": trimmed,
+            "from": "peer",
+            "sender": self.bot_display_name(peer_id),
+            "messageId": message_id,
+            "timestamp": timestamp,
+            "via": "message_send",
+        });
+        self.emit_bot_appended(peer_id, message, message_id, timestamp)
+    }
+
+    pub fn append_user_chat_message(&self, peer_id: &str, content: &str) -> Value {
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return json!({"ok": false, "error": "empty_content"});
+        }
+        if !catalog::is_ai_chat_peer_id(peer_id) {
+            return json!({"ok": false, "error": "not_bot_chat"});
+        }
+        let message_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let message = json!({
+            "kind": "chat",
+            "content": trimmed,
+            "from": "self",
+            "sender": "Du",
+            "messageId": message_id,
+            "timestamp": timestamp,
+            "via": "ask_user",
+        });
+        self.emit_bot_appended(peer_id, message, message_id, timestamp)
+    }
+
+    pub fn append_bot_chat_file(
+        &self,
+        peer_id: &str,
+        file_name: &str,
+        file_size: u64,
+        file_type: &str,
+        file_data: &str,
+        caption: &str,
+    ) -> Value {
+        if !catalog::is_ai_chat_peer_id(peer_id) {
+            return json!({"ok": false, "error": "not_bot_chat"});
+        }
+        let message_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let content = if caption.is_empty() { file_name } else { caption };
+        let message = json!({
+            "kind": "file",
+            "content": content,
+            "fileName": file_name,
+            "fileSize": file_size,
+            "fileType": file_type,
+            "fileData": file_data,
+            "from": "peer",
+            "sender": self.bot_display_name(peer_id),
+            "messageId": message_id,
+            "timestamp": timestamp,
+            "via": "attach_file",
+        });
+        self.emit_bot_appended(peer_id, message, message_id, timestamp)
+    }
+
+    pub fn append_bot_chat_file_link(
+        &self,
+        peer_id: &str,
+        file_name: &str,
+        file_size: u64,
+        file_path: &str,
+        caption: &str,
+    ) -> Value {
+        if !catalog::is_ai_chat_peer_id(peer_id) {
+            return json!({"ok": false, "error": "not_bot_chat"});
+        }
+        let message_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let content = if caption.is_empty() { file_name } else { caption };
+        let message = json!({
+            "kind": "file-link",
+            "content": content,
+            "fileName": file_name,
+            "fileSize": file_size,
+            "filePath": file_path,
+            "from": "peer",
+            "sender": self.bot_display_name(peer_id),
+            "messageId": message_id,
+            "timestamp": timestamp,
+            "via": "attach_file",
+        });
+        self.emit_bot_appended(peer_id, message, message_id, timestamp)
+    }
+
+    fn emit_bot_appended(&self, peer_id: &str, message: Value, message_id: String, timestamp: i64) -> Value {
+        match self.database.append_message(peer_id, message.clone()) {
+            Ok(meta) => {
+                let payload = json!({
+                    "peerId": peer_id,
+                    "message": message,
+                    "meta": meta,
+                });
+                let _ = self.app.emit_to("main", "bot:message", payload);
+                json!({"ok": true, "messageId": message_id, "timestamp": timestamp})
+            }
+            Err(error) => json!({"ok": false, "error": error.to_string()}),
+        }
+    }
+
+    pub fn work_log_enabled(&self, peer_id: &str) -> bool {
+        self.get_agent(peer_id)
+            .and_then(|agent| agent.get("workLogEnabled").and_then(Value::as_bool))
+            .unwrap_or(false)
+    }
+
+    pub fn append_bot_worklog(&self, peer_id: &str, entry: Value) {
+        if !catalog::is_ai_chat_peer_id(peer_id) {
+            return;
+        }
+        let mut store = self.kv_get("aiChat.worklogs", json!({}));
+        let list = store
+            .as_object_mut()
+            .and_then(|object| {
+                let slot = object.entry(peer_id.to_string()).or_insert_with(|| json!([]));
+                slot.as_array_mut()
+            });
+        let Some(list) = list else {
+            return;
+        };
+        list.push(entry.clone());
+        const MAX_LOGS: usize = 40;
+        if list.len() > MAX_LOGS {
+            let extra = list.len() - MAX_LOGS;
+            list.drain(0..extra);
+        }
+        self.kv_set("aiChat.worklogs", store);
+        let _ = self.app.emit_to(
+            "main",
+            "bot:worklog",
+            json!({ "peerId": peer_id, "entry": entry }),
+        );
+    }
+
+    pub fn try_begin_chat(&self, peer_id: &str) -> bool {
+        let mut busy = self.busy_peers.lock();
+        if busy.contains(peer_id) {
+            return false;
+        }
+        busy.insert(peer_id.to_string());
+        true
+    }
+
+    pub fn end_chat(&self, peer_id: &str) {
+        self.busy_peers.lock().remove(peer_id);
+    }
+
+    pub fn is_chat_busy(&self, peer_id: &str) -> bool {
+        self.busy_peers.lock().contains(peer_id)
+    }
+
+    pub fn emit_bot_typing(&self, peer_id: &str, request_id: &str, active: bool) {
+        let _ = self.app.emit_to(
+            "main",
+            "bot:typing",
+            json!({
+                "peerId": peer_id,
+                "requestId": request_id,
+                "active": active,
+            }),
+        );
     }
 
     /// Anzeige-Label eines Kontakts (nickname > name > peerId).

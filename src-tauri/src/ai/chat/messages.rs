@@ -102,6 +102,26 @@ pub(super) struct AgentContext {
 
 pub(super) fn resolve_agent_context(manager: &OllamaManager, peer_id: &str) -> AgentContext {
     let agent = manager.get_agent(peer_id);
+    let mut description = agent
+        .as_ref()
+        .and_then(|a| a.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(catalog::BOT_DESCRIPTION_MAX_CHARS)
+        .collect::<String>();
+    if description.is_empty() {
+        description = agent
+            .as_ref()
+            .and_then(|a| a.get("bio"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(catalog::BOT_DESCRIPTION_MAX_CHARS)
+            .collect::<String>();
+    }
     let personality_id = agent
         .as_ref()
         .and_then(|a| a.get("personality"))
@@ -137,16 +157,13 @@ pub(super) fn resolve_agent_context(manager: &OllamaManager, peer_id: &str) -> A
             .unwrap_or(""),
     )
     .to_string();
-    let allow_bluetalk = agent
-        .as_ref()
-        .and_then(|a| a.get("allowBluetalkMessaging"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let allow_bluetalk = true;
 
     AgentContext {
         prompt_config: catalog::AgentPromptConfig {
             personality_id,
             personality_custom,
+            description,
             agent_mode: true,
             agent_work_dir: work_dir.to_string_lossy().to_string(),
         },

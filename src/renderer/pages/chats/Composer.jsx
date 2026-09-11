@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { SendHorizontal, Square, X } from 'lucide-react';
 import groupChat from '../../../shared/group-chat.js';
+import { TYPING_REFRESH_MS } from '../../../shared/chat-typing.js';
 import {
   CHAT_ICON_STROKE,
   COMPOSER_TEXTAREA_MIN_HEIGHT,
@@ -10,6 +11,7 @@ import {
 } from './messageHelpers.jsx';
 import { FileTypeIcon } from './messageParts.jsx';
 import { ComposerAttachMenu } from './ComposerAttachMenu.jsx';
+import { BotActionBar } from './BotActionBar.jsx';
 import { useComposerSend } from './hooks/useComposerSend.js';
 
 const { getGroupMember } = groupChat;
@@ -43,6 +45,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     showAiComposerAttach,
     composerDisabled,
     showOfflineComposerReconnect,
+    askUser = null,
   } = chat;
   const { replyToMessage, onClearReply } = reply;
   const {
@@ -56,9 +59,62 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     sendingFile,
   } = attachments;
   const { settings, contacts, peers, debugMode, warning } = env;
-  const { sendMessage, cancelAiChat, connectToAddress, toast, setWarning } = actions;
+  const { sendMessage, sendTyping, cancelAiChat, connectToAddress, toast, setWarning, onAskReply } = actions;
+  const askActive = Boolean(askUser?.requestId);
+  const showStop = isAiChatSelected && aiChatPending && !askActive;
 
   const [input, setInput] = useState('');
+  const typingPeerRef = useRef('');
+  const lastTypingSentRef = useRef(0);
+  const typingActiveRef = useRef(false);
+
+  const stopTyping = useCallback(() => {
+    const peerId = typingPeerRef.current;
+    if (!peerId || !typingActiveRef.current) {
+      typingActiveRef.current = false;
+      return;
+    }
+    typingActiveRef.current = false;
+    lastTypingSentRef.current = 0;
+    sendTyping?.(peerId, false);
+  }, [sendTyping]);
+
+  const pulseTyping = useCallback(() => {
+    const peerId = selectedPeer?.id;
+    if (!peerId || isAiChatSelected || isGroupSelected || composerDisabled) return;
+    const now = Date.now();
+    typingPeerRef.current = peerId;
+    if (!typingActiveRef.current || now - lastTypingSentRef.current >= TYPING_REFRESH_MS) {
+      typingActiveRef.current = true;
+      lastTypingSentRef.current = now;
+      sendTyping?.(peerId, true);
+    }
+  }, [composerDisabled, isAiChatSelected, isGroupSelected, selectedPeer?.id, sendTyping]);
+
+  useEffect(() => {
+    const previous = typingPeerRef.current;
+    if (previous && previous !== selectedPeer?.id) {
+      if (typingActiveRef.current) sendTyping?.(previous, false);
+      typingActiveRef.current = false;
+      lastTypingSentRef.current = 0;
+    }
+    typingPeerRef.current = selectedPeer?.id || '';
+  }, [selectedPeer?.id, sendTyping]);
+
+  useEffect(() => () => {
+    const peerId = typingPeerRef.current;
+    if (peerId && typingActiveRef.current) sendTyping?.(peerId, false);
+  }, [sendTyping]);
+
+  useEffect(() => {
+    if (composerDisabled) stopTyping();
+  }, [composerDisabled, stopTyping]);
+
+  useEffect(() => {
+    if (!input.trim() || isAiChatSelected || isGroupSelected || composerDisabled) return undefined;
+    const id = window.setInterval(() => pulseTyping(), TYPING_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [composerDisabled, input, isAiChatSelected, isGroupSelected, pulseTyping]);
 
   // Ohne Attach-Unterstützung (KI-Modell ohne Vision) einen bereits
   // gewählten Anhang verwerfen — exakt wie zuvor.
@@ -106,6 +162,28 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     debugMode,
   });
 
+  const [sendBurst, setSendBurst] = useState(false);
+
+  const fireSend = () => {
+    if (askActive) {
+      if (!input.trim() || composerDisabled) return;
+      onAskReply?.(input.trim());
+      setInput('');
+      return;
+    }
+    if (isAiChatSelected && aiChatPending) return;
+    if (
+      sendingFile
+      || readingFile
+      || (!input.trim() && !pendingFile)
+      || composerDisabled
+    ) return;
+    setSendBurst(true);
+    window.setTimeout(() => setSendBurst(false), 380);
+    stopTyping();
+    send();
+  };
+
   const handleComposerPaste = (event) => {
     if (composerDisabled || readingFile || sendingFile) return;
     if (isAiChatSelected && !aiChatSupportsVision) return;
@@ -120,7 +198,9 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
   };
 
   return (
-    <div className="chat-composer-stack">
+    <div className="chat-composer-wrap">
+      {isAiChatSelected ? <BotActionBar askUser={askUser} onReply={onAskReply} /> : null}
+      <div className="chat-composer-stack">
       {/* Offline wird jetzt allein durch den ausgegrauten Senden-Button und den
           Composer-Platzhalter signalisiert — keine schwebende Statuspille mehr. */}
       {replyToMessage && (
@@ -211,17 +291,24 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setInput(value);
+            if (value.trim()) pulseTyping();
+            else stopTyping();
+          }}
           onPaste={handleComposerPaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              send();
+              fireSend();
             }
           }}
           placeholder={
             isAiChatSelected
-              ? aiChatPending ? 'KI antwortet...' : 'Nachricht an KI schreiben...'
+              ? askActive
+                ? (askUser?.options?.length ? 'Oder selbst antworten…' : 'Antwort schreiben…')
+                : aiChatPending ? 'Bot schreibt…' : 'Nachricht an Bot…'
               : isGroupSelected && !selectedPeer.canSend
                 ? (getGroupMember(selectedPeer.group, ownPeerId)?.state === 'invited'
                   ? 'Beitritt wird bestätigt…'
@@ -242,10 +329,10 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
           disabled={composerDisabled}
         />
         <button
-          className="btn btn-primary btn-icon"
-          onClick={isAiChatSelected && aiChatPending ? () => void cancelAiChat() : send}
+          className={`btn btn-primary btn-icon chat-send-btn${sendBurst ? ' is-sending' : ''}`}
+          onClick={showStop ? () => void cancelAiChat() : fireSend}
           disabled={
-            !(isAiChatSelected && aiChatPending)
+            !showStop
             && (
               sendingFile
               || readingFile
@@ -253,15 +340,16 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
               || composerDisabled
             )
           }
-          style={{ height: 40, width: 40 }}
-          title={isAiChatSelected && aiChatPending ? 'Antwort stoppen' : 'Nachricht senden'}
+          style={{ height: 32, width: 32 }}
+          title={showStop ? 'Antwort stoppen' : askActive ? 'Antwort senden' : 'Nachricht senden'}
         >
-          {isAiChatSelected && aiChatPending ? (
+          {showStop ? (
             <Square size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
           ) : (
             <SendHorizontal size={17} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
           )}
         </button>
+      </div>
       </div>
     </div>
   );

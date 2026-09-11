@@ -159,7 +159,7 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false, 
     return (
       <div className="ai-setup-complete animate-fade">
         <Bot size={40} strokeWidth={1.5} aria-hidden />
-        <h3>KI-Chat bereit</h3>
+        <h3>Bots bereit</h3>
         <p className="text-muted">
           Modell: {selectedTier === 'cloud'
             ? (AI_CLOUD_MODELS[ollamaState.selectedCloudModelId]?.label || AI_CLOUD_MODELS[selectedCloudModel]?.label || 'Cloud')
@@ -177,8 +177,8 @@ export default function AiChatSetup({ ollamaState, onRefresh, embedded = false, 
             <Bot size={28} strokeWidth={1.75} aria-hidden />
           </div>
           <div>
-            <h2>KI-Chat einrichten</h2>
-            <p className="text-sm text-muted">Lokale KI über Ollama — deine Nachrichten bleiben auf dem Gerät.</p>
+            <h2>Bots einrichten</h2>
+            <p className="text-sm text-muted">Lokale Modelle über Ollama — deine Nachrichten bleiben auf dem Gerät.</p>
           </div>
         </div>
       )}

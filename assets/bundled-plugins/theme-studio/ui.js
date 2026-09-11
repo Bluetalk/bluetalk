@@ -65,14 +65,28 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
         applyPreviewVars(previewEl, vars);
         previewModeBtns.forEach((btn) => {
           btn.classList.toggle('is-active', btn.dataset.previewMode === previewMode);
+          btn.setAttribute('aria-pressed', btn.dataset.previewMode === previewMode ? 'true' : 'false');
         });
+        container.querySelectorAll('[data-mode-panel]').forEach((panel) => {
+          panel.classList.toggle('is-preview', panel.dataset.modePanel === previewMode);
+        });
+      }
+
+      function setPreviewMode(mode) {
+        if (previewMode === mode) return;
+        previewMode = mode;
+        refreshPreview();
       }
 
       previewModeBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
-          previewMode = btn.dataset.previewMode;
-          refreshPreview();
+          setPreviewMode(btn.dataset.previewMode);
         });
+      });
+
+      container.querySelectorAll('[data-mode-panel]').forEach((panel) => {
+        panel.addEventListener('focusin', () => setPreviewMode(panel.dataset.modePanel));
+        panel.addEventListener('pointerdown', () => setPreviewMode(panel.dataset.modePanel));
       });
 
       const grid = container.querySelector('[data-presets]');
@@ -113,6 +127,7 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
 
       function applyToken(mode, varName, value, accent) {
         commit(withTokenOverride(io.loadState(), mode, varName, value, accent));
+        previewMode = mode;
         refreshPreview();
       }
 
@@ -190,6 +205,7 @@ export default function activateThemeStudioPlugin(BlueTalkPlugin) {
       });
 
       container.querySelector('[data-action="reset"]').addEventListener('click', () => {
+        if (!window.confirm('Farben auf den Standard zurücksetzen?')) return;
         io.clear();
         applyGlobalStyle(io.loadState(), styleTarget);
         refreshAll();

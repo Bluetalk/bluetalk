@@ -21,8 +21,8 @@ export function usePeerEvents(deps) {
     setChatLastViewedPeerTs,
     setPeerGamePresence,
     setPeerUserPresence,
+    setPeerTyping,
     setGameInviteKeys,
-    setDocInvites,
     setSettings,
     setTheme,
     setLoadError,
@@ -147,9 +147,9 @@ export function usePeerEvents(deps) {
         sendE2eeHandshake,
         setPeerReadReceipts,
         setPeerUserPresence,
+        setPeerTyping,
         setPeerGamePresence,
         setGameInviteKeys,
-        setDocInvites,
         setChatMeta,
         setMessages,
         setContacts,
@@ -175,7 +175,6 @@ export function usePeerEvents(deps) {
       setChatLastViewedPeerTs,
       setPeerReadReceipts,
       setGameInviteKeys,
-      setDocInvites,
       setSettings,
       setTheme,
       setShowUsernameOnboarding,
@@ -276,6 +275,14 @@ export function usePeerEvents(deps) {
     return window.bluetalk.ollama.onAskUser((data) => {
       if (!data || !data.requestId) return;
       setAgentAskUser(data);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.bluetalk?.ollama?.onAskUserDone) return undefined;
+    return window.bluetalk.ollama.onAskUserDone((data) => {
+      if (!data?.requestId) return;
+      setAgentAskUser((current) => (current?.requestId === data.requestId ? null : current));
     });
   }, []);
 }

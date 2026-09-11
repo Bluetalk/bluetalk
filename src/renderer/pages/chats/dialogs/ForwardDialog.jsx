@@ -1,5 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
+import { ModalOverlay } from '../../../components/ModalOverlay.jsx';
 import { CHAT_ICON_STROKE, PeerAvatar, getLastPreview } from '../messageHelpers.jsx';
 
 /**
@@ -14,8 +15,7 @@ export function ForwardDialog({ forwardDialog, forwardableChats, busy, debugMode
   if (!forwardDialog) return null;
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalOverlay
       onClick={() => {
         if (busy) return;
         onClose();
@@ -56,7 +56,12 @@ export function ForwardDialog({ forwardDialog, forwardableChats, busy, debugMode
                 disabled={busy}
                 onClick={() => void onForward(chat.id)}
               >
-                <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={32} />
+                <PeerAvatar
+                  pictureUrl={chat.profilePicture}
+                  name={chat.displayName}
+                  size={32}
+                  className={chat.isAiChat ? 'peer-avatar-img--bot' : ''}
+                />
                 <div className="forward-dialog-item-info">
                   <div className="forward-dialog-item-name">{chat.displayName}</div>
                   <div className="forward-dialog-item-sub">{getLastPreview(chat.lastMessage, debugMode)}</div>
@@ -75,6 +80,6 @@ export function ForwardDialog({ forwardDialog, forwardableChats, busy, debugMode
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

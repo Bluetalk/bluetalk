@@ -21,6 +21,7 @@ export const DEFAULT_APP_SETTINGS = {
   debugMode: false,
   windowsNotifications: true,
   doNotDisturb: false,
+  presenceStatus: 'online',
   sendReadReceipts: true,
   /** Gespeicherte Panel-Breiten (Pixel). */
   uiResize: {},

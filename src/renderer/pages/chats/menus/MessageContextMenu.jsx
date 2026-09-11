@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, Forward, Reply, Trash2, X } from 'lucide-react';
+import { Copy, Forward, Reply, ScrollText, Trash2, X } from 'lucide-react';
 import { CHAT_ICON_STROKE, getMessageCopyText } from '../messageHelpers.jsx';
 import { useContextMenuPosition } from './useContextMenuPosition.js';
+import { REACTION_EMOJIS } from '../../../app/messageReactions';
 
 /**
- * Kontextmenü einer Nachricht (Antworten/Kopieren/Weiterleiten/Löschen).
+ * Kontextmenü einer Nachricht (Reaktionen/Antworten/Kopieren/Weiterleiten/Löschen).
  * Escape-/Outside-Click-Handling ist aus Chats.jsx mitgewandert.
  *
  * Props:
@@ -16,6 +17,7 @@ import { useContextMenuPosition } from './useContextMenuPosition.js';
  * - copyToClipboard(text, successTitle)
  * - onForward(messages[]): öffnet den Weiterleiten-Dialog (schließt selbst)
  * - onDeleteMessage(peerId, messageId)
+ * - onReact(message, emoji)
  */
 export function MessageContextMenu({
   menu,
@@ -26,6 +28,9 @@ export function MessageContextMenu({
   copyToClipboard,
   onForward,
   onDeleteMessage,
+  onReact,
+  workLogEnabled = false,
+  onOpenWorklog,
 }) {
   const { ref: messageContextMenuRef, style: menuStyle } = useContextMenuPosition(menu);
 
@@ -60,6 +65,24 @@ export function MessageContextMenu({
       style={menuStyle}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {onReact ? (
+        <div className="msg-context-react" role="toolbar" aria-label="Reaktion">
+          {REACTION_EMOJIS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              className="msg-react-pick"
+              onClick={() => {
+                onReact(menu.message, emoji);
+                onClose();
+              }}
+              aria-label={`Mit ${emoji} reagieren`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <button
         type="button"
         className="chat-list-context-menu-item"
@@ -95,6 +118,20 @@ export function MessageContextMenu({
         <Forward size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         Weiterleiten
       </button>
+      {workLogEnabled && onOpenWorklog && selectedPeer?.isAiChat ? (
+        <button
+          type="button"
+          className="chat-list-context-menu-item"
+          role="menuitem"
+          onClick={() => {
+            onOpenWorklog();
+            onClose();
+          }}
+        >
+          <ScrollText size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          Worklog
+        </button>
+      ) : null}
       <button
         type="button"
         className="chat-list-context-menu-item chat-list-context-menu-item--danger"

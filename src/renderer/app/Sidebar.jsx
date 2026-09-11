@@ -1,11 +1,11 @@
 // Seitenleiste inkl. Plugin-Tabs, ausgelagert aus App.jsx (Verhalten identisch).
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
-import { MessageCircle, Settings as SettingsIcon, UserPlus, Blocks, Plug, FolderOpen, FileText, Palette, Sparkles, Spade } from 'lucide-react';
+import { MessageCircle, Settings as SettingsIcon, UserPlus, Blocks, Plug, FolderOpen, Palette, Sparkles, Spade } from 'lucide-react';
 import ProfileMenu from '../components/ProfileMenu';
-import PresenceStatusToggle from '../components/PresenceStatusToggle';
 import { pluginRuntime } from '../plugins/pluginRuntime';
 import { useApp } from './appContext';
+import { formatOwnPresenceLabel } from '../../shared/user-presence.js';
 
 function resolveLucideIcon(name) {
   if (!name || typeof name !== 'string') return Plug;
@@ -46,12 +46,11 @@ export default function Sidebar() {
 
   const links = [
     { to: '/', label: 'Chats', icon: MessageCircle },
-    { to: '/new', label: 'New', icon: UserPlus },
+    { to: '/new', label: 'Neu', icon: UserPlus },
     { to: '/library', label: 'Bibliothek', icon: FolderOpen },
-    { to: '/documents', label: 'Dokumente', icon: FileText },
     { to: '/games', label: 'Spiele', icon: Sparkles },
     { to: '/plugins', label: 'Erweiterungen', icon: Blocks },
-    { to: '/settings', label: 'Settings', icon: SettingsIcon },
+    { to: '/settings', label: 'Einstellungen', icon: SettingsIcon },
   ];
 
   if (sidebarCollapsed) {
@@ -69,6 +68,7 @@ export default function Sidebar() {
             <NavLink
               key={to}
               to={to}
+              viewTransition
               className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
               aria-label={tip}
               {...bindTip(tip)}
@@ -90,6 +90,7 @@ export default function Sidebar() {
             <NavLink
               key={tab.tabId}
               to={tab.path}
+              viewTransition
               className={({ isActive }) => `sidebar-link sidebar-link-plugin ${isActive ? 'active' : ''}`}
               aria-label={tip}
               {...bindTip(tip)}
@@ -101,11 +102,8 @@ export default function Sidebar() {
       </div>
       <div className="sidebar-footer">
         <div className="sidebar-profile-cluster">
-          <div className="sidebar-tip-anchor" {...bindTip('Profil')}>
+          <div className="sidebar-tip-anchor" {...bindTip(`Profil · ${formatOwnPresenceLabel(settings)}`)}>
             <ProfileMenu variant="sidebar" />
-          </div>
-          <div className="sidebar-tip-anchor" {...bindTip(settings.doNotDisturb ? 'Nicht stören' : 'Verfügbar')}>
-            <PresenceStatusToggle compact />
           </div>
         </div>
       </div>

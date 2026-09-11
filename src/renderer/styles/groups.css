@@ -147,7 +147,7 @@
   gap: 11px;
   padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: var(--radius-md);
   background: transparent;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
@@ -228,7 +228,7 @@
   margin: 10px 20px 0;
   padding: 9px 11px;
   border: 1px solid color-mix(in srgb, var(--red) 32%, var(--border));
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--red);
   background: color-mix(in srgb, var(--red) 7%, transparent);
   font-size: 12px;
@@ -303,7 +303,7 @@
   gap: 11px;
   min-height: 54px;
   padding: 7px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 .group-member-row:hover {
   background: var(--bg-hover);
@@ -340,7 +340,7 @@
   gap: 9px;
   margin: 0 20px;
   padding: 11px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--fg-3);
   background: var(--bg-2);
   border: 1px solid var(--border);

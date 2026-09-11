@@ -31,28 +31,30 @@ pub fn get_system_prompt_for_tier(tier_id: &str, agent_mode: bool, append_ornith
     format!("{AI_CHAT_SYSTEM_PROMPT_BASE}\n\n{section}")
 }
 
-/// Konfiguration für den Agent-System-Prompt (Persönlichkeit + Arbeitsverzeichnis).
+/// Konfiguration für den Agent-System-Prompt (Beschreibung + Arbeitsverzeichnis).
 #[derive(Debug, Clone, Default)]
 pub struct AgentPromptConfig {
+    #[allow(dead_code)]
     pub personality_id: String,
     pub personality_custom: String,
+    pub description: String,
     pub agent_mode: bool,
     pub agent_work_dir: String,
 }
 
-/// Baut den System-Prompt inkl. Agent-Persönlichkeit (wie v1
-/// `getSystemPromptForAgent`).
+/// Baut den System-Prompt inkl. Bot-Beschreibung.
 pub fn get_system_prompt_for_agent(tier_id: &str, config: &AgentPromptConfig) -> String {
-    let personality_id = if is_valid_personality_id(&config.personality_id) {
-        config.personality_id.as_str()
-    } else {
-        AI_PERSONALITY_DEFAULT_ID
-    };
     let personality_custom: String = config
         .personality_custom
         .trim()
         .chars()
         .take(AI_PERSONALITY_CUSTOM_MAX_CHARS)
+        .collect();
+    let description: String = config
+        .description
+        .trim()
+        .chars()
+        .take(BOT_DESCRIPTION_MAX_CHARS)
         .collect();
 
     let id = if is_valid_model_tier(tier_id) {
@@ -70,15 +72,15 @@ pub fn get_system_prompt_for_agent(tier_id: &str, config: &AgentPromptConfig) ->
         prompt.push_str("\n\n## Arbeitsverzeichnis\n");
         prompt.push_str(work_dir_text);
     }
-    let preset = personality_prompt(personality_id);
-    if !preset.is_empty() {
-        prompt.push_str("\n\n");
-        prompt.push_str(preset);
-    }
-    if !personality_custom.is_empty() {
+    if !description.is_empty() {
+        prompt.push_str("\n\n## Bot-Beschreibung\n");
+        prompt.push_str(&description);
+    } else if !personality_custom.is_empty() {
         prompt.push_str("\n\n## Zusätzliche Persönlichkeits-Anweisungen\n");
         prompt.push_str(&personality_custom);
     }
+    prompt.push_str("\n\n");
+    prompt.push_str(BOT_MESSAGE_SEND_RULES);
     if config.agent_mode && id == "ornith" {
         // Sicherheits- und Toolregeln absichtlich ganz zuletzt platzieren, damit
         // weder Arbeitsverzeichnis noch Persönlichkeit sie abschwächen können.

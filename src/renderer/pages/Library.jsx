@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   Download,
@@ -10,6 +11,7 @@ import {
   FileText,
   Search,
   Smile,
+  X,
 } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
@@ -25,6 +27,14 @@ const FILTERS = [
   { id: 'sticker', label: 'Sticker', icon: Smile },
 ];
 
+const CATEGORY_LABELS = {
+  image: 'Bild',
+  video: 'Video',
+  audio: 'Audio',
+  other: 'Datei',
+  sticker: 'Sticker',
+};
+
 function formatSize(bytes) {
   if (!bytes || bytes <= 0) return '';
   if (bytes < 1024) return `${bytes} B`;
@@ -34,12 +44,18 @@ function formatSize(bytes) {
 
 function formatDate(ts) {
   if (!ts) return '';
-  return new Date(ts).toLocaleString(undefined, {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  if (sameDay) {
+    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString(undefined, {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    ...(sameYear ? {} : { year: 'numeric' }),
   });
 }
 
@@ -104,6 +120,15 @@ export default function LibraryPage() {
         .includes(query)
     );
   }, [items, filter, search, contactName]);
+
+  const filterCounts = useMemo(() => {
+    const counts = { all: items.length };
+    for (const { id } of FILTERS) {
+      if (id === 'all') continue;
+      counts[id] = items.filter((item) => item.category === id).length;
+    }
+    return counts;
+  }, [items]);
 
   const loadPreview = useCallback(async (item) => {
     const key = `${item.peerId}:${item.messageId}`;
@@ -195,126 +220,136 @@ export default function LibraryPage() {
   };
 
   return (
-    <div className="page library-page">
-      <div className="page-header">
-        <div>
-          <h1>Bibliothek</h1>
-          <p className="page-subtitle">Alle empfangenen Dateien und Medien</p>
-        </div>
-      </div>
+    <div className="page page-inset library-page">
+      <div className="page-shell">
+        <header className="page-shell-header">
+          <div className="page-shell-copy">
+            <h1>Bibliothek</h1>
+            <p>Empfangene Dateien und Medien aus deinen Chats.</p>
+          </div>
+        </header>
 
-      <div className="page-body">
-        <div className="search-bar" style={{ minWidth: 200, maxWidth: 360, marginBottom: 12 }}>
-          <Search size={14} />
-          <input
-            className="input"
-            placeholder="Nach Datei oder Absender suchen…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="page-shell-search">
+          <div className="search-bar">
+            <Search size={14} strokeWidth={ICON_STROKE} aria-hidden />
+            <input
+              className="input"
+              placeholder="Nach Datei oder Absender suchen…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search ? (
+              <button
+                type="button"
+                className="search-bar-clear"
+                aria-label="Suche zurücksetzen"
+                onClick={() => setSearch('')}
+              >
+                <X size={13} strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            ) : null}
+          </div>
+          <div className="library-filters" role="tablist" aria-label="Medienfilter">
+            {FILTERS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={filter === id}
+                className={`library-filter-btn${filter === id ? ' active' : ''}`}
+                onClick={() => setFilter(id)}
+              >
+                <Icon size={14} strokeWidth={ICON_STROKE} aria-hidden />
+                {label}
+                <span className="library-filter-count">{filterCounts[id] ?? 0}</span>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="library-filters">
-          {FILTERS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              className={`library-filter-btn${filter === id ? ' active' : ''}`}
-              onClick={() => setFilter(id)}
-            >
-              <Icon size={14} strokeWidth={ICON_STROKE} aria-hidden />
-              {label}
-              {id === 'all' ? (
-                <span className="library-filter-count">{items.length}</span>
+
+        <div className="page-shell-body">
+          {loading ? (
+            <div className="library-loading page-loading" role="status">
+              <span className="spinner spinner--md" />
+              <span>Bibliothek wird geladen…</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="page-empty">
+              <FolderOpen size={28} strokeWidth={ICON_STROKE} aria-hidden />
+              {items.length > 0 ? (
+                <>
+                  <p className="empty-state-title">Keine Treffer</p>
+                  <p>Keine Datei passt zu Filter oder Suche.</p>
+                </>
               ) : (
-                <span className="library-filter-count">
-                  {items.filter((i) => i.category === id).length}
-                </span>
+                <>
+                  <p className="empty-state-title">Noch keine empfangenen Dateien</p>
+                  <p>Dateien und Sticker aus Chats erscheinen hier automatisch.</p>
+                </>
               )}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <div className="library-loading page-loading" role="status">
-            <span className="spinner spinner--md" />
-            <span>Bibliothek wird geladen…</span>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="library-empty card">
-            <FolderOpen size={32} strokeWidth={ICON_STROKE} aria-hidden />
-            {items.length > 0 ? (
-              <>
-                <p>Keine Treffer</p>
-                <span>Keine Datei passt zu Filter oder Suche.</span>
-              </>
-            ) : (
-              <>
-                <p>Noch keine empfangenen Dateien</p>
-                <span>Dateien und Sticker aus Chats erscheinen hier automatisch.</span>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="library-grid">
-            {filtered.map((item) => {
-              const key = `${item.peerId}:${item.messageId}`;
-              const preview = previewCache[key];
-              const isVisual = item.category === 'image' || item.category === 'sticker';
-              const FilterIcon = FILTERS.find((f) => f.id === item.category)?.icon || FileText;
-              return (
-                <div key={key} className="library-item card">
-                  <button
-                    type="button"
-                    className="library-item-preview"
-                    onClick={() => void openItem(item)}
-                  >
-                    {isVisual && preview?.url ? (
-                      <img src={preview.url} alt="" loading="lazy" />
-                    ) : (
-                      <div className="library-item-icon">
-                        <FilterIcon size={28} strokeWidth={ICON_STROKE} />
+            </div>
+          ) : (
+            <div className="library-grid">
+              {filtered.map((item) => {
+                const key = `${item.peerId}:${item.messageId}`;
+                const preview = previewCache[key];
+                const isVisual = item.category === 'image' || item.category === 'sticker';
+                const FilterIcon = FILTERS.find((f) => f.id === item.category)?.icon || FileText;
+                const categoryLabel = CATEGORY_LABELS[item.category] || 'Datei';
+                const dateLabel = formatDate(item.timestamp);
+                return (
+                  <div key={key} className="library-item">
+                    <button
+                      type="button"
+                      className="library-item-preview"
+                      onClick={() => void openItem(item)}
+                    >
+                      {isVisual && preview?.url ? (
+                        <img src={preview.url} alt="" loading="lazy" />
+                      ) : (
+                        <div className="library-item-icon">
+                          <FilterIcon size={28} strokeWidth={ICON_STROKE} />
+                        </div>
+                      )}
+                      <span className="library-item-badge">{categoryLabel}</span>
+                    </button>
+                    <div className="library-item-info">
+                      <div className="library-item-name" title={item.fileName || ''}>
+                        {item.fileName || (item.kind === 'sticker' ? 'Sticker' : 'Datei')}
                       </div>
-                    )}
-                    {item.category === 'sticker' ? (
-                      <span className="library-item-badge">Sticker</span>
-                    ) : null}
-                  </button>
-                  <div className="library-item-info">
-                    <div className="library-item-name" title={item.fileName || ''}>
-                      {item.fileName || (item.kind === 'sticker' ? 'Sticker' : 'Datei')}
+                      <div className="library-item-meta">
+                        <span>{contactName(item.peerId, item.sender)}</span>
+                        {item.fileSize ? <span>{formatSize(item.fileSize)}</span> : null}
+                        {dateLabel ? <span>{dateLabel}</span> : null}
+                      </div>
                     </div>
-                    <div className="library-item-meta">
-                      <span>{contactName(item.peerId, item.sender)}</span>
-                      {item.fileSize ? <span>{formatSize(item.fileSize)}</span> : null}
+                    <div className="library-item-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-icon btn-sm"
+                        title="Speichern"
+                        onClick={() => void saveItem(item)}
+                      >
+                        <Download size={14} strokeWidth={ICON_STROKE} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-icon btn-sm"
+                        title="Zum Chat"
+                        onClick={() => goToChat(item.peerId)}
+                      >
+                        <MessageSquare size={14} strokeWidth={ICON_STROKE} />
+                      </button>
                     </div>
-                    <div className="library-item-date">{formatDate(item.timestamp)}</div>
                   </div>
-                  <div className="library-item-actions">
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-icon btn-sm"
-                      title="Speichern"
-                      onClick={() => void saveItem(item)}
-                    >
-                      <Download size={14} strokeWidth={ICON_STROKE} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-icon btn-sm"
-                      title="Zum Chat"
-                      onClick={() => goToChat(item.peerId)}
-                    >
-                      <MessageSquare size={14} strokeWidth={ICON_STROKE} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
-      {lightbox ? (
+      {lightbox ? createPortal(
         <div className="media-lightbox" role="dialog" aria-modal="true" onClick={() => setLightbox(null)}>
           <div className="media-lightbox-inner" onClick={(e) => e.stopPropagation()}>
             <img src={lightbox.src} alt={lightbox.alt} />
@@ -345,7 +380,8 @@ export default function LibraryPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );

@@ -5,7 +5,13 @@ import { base64ByteLength, validateStickerData } from '../stickers/stickerStore'
 import { MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_CHARS } from './chatConstants';
 import { buildMessageNotificationPreview } from '../utils/messageNotificationPreview';
 import { isContactNotificationMuted } from '../contactNotificationMute';
+import { shouldSuppressNotifications } from '../../shared/user-presence.js';
 import groupChat from '../../shared/group-chat.js';
+import {
+  isAllowedReactionEmoji,
+  setReactorEmoji,
+  findMessageForReaction,
+} from './messageReactions';
 
 const {
   GROUP_EVENT_KIND,
@@ -183,6 +189,17 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
       groupRevision: normalized.groupRevision,
       from: fromId,
     };
+
+    if (groupMessage.kind === 'reaction') {
+      const emoji = groupMessage.emoji;
+      const refMessageId = groupMessage.refMessageId;
+      if (!isAllowedReactionEmoji(emoji) || !refMessageId) return;
+      const existing = await findMessageForReaction(messageCacheRef, group.id, refMessageId);
+      if (!existing) return;
+      const reactions = setReactorEmoji(existing.reactions, emoji, fromId, groupMessage.active !== false);
+      await applyMessagePatch(group.id, refMessageId, { reactions });
+      return;
+    }
     if (groupMessage.kind === 'sticker') {
       try {
         groupMessage = { ...groupMessage, ...validateStickerData(groupMessage) };
@@ -230,7 +247,7 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
     });
     // Gruppen-Mute liegt als Kontakt-Eintrag mit der Gruppen-ID im Store.
     const groupMuteContact = contactsRef?.current?.find?.((entry) => entry?.id === group.id);
-    if (!settingsRef.current.doNotDisturb && !isContactNotificationMuted(groupMuteContact)) {
+    if (!shouldSuppressNotifications(settingsRef.current) && !isContactNotificationMuted(groupMuteContact)) {
       void window.bluetalk?.notify?.show?.({
         title: group.name,
         body: `${groupMessage.sender}: ${buildMessageNotificationPreview(groupMessage)}`,

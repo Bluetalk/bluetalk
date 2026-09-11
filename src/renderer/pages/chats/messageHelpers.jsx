@@ -1,5 +1,5 @@
 // Extracted from Chats.jsx — presentational/pure chat modules (behaviour unchanged).
-import React from 'react';
+import React, { useId } from 'react';
 import {
   File,
   FileImage,
@@ -12,7 +12,18 @@ import {
   Smile,
 } from 'lucide-react';
 import { isContactNotificationMuted } from '../../contactNotificationMute';
-import { AI_THINKING_DEFAULT_MODE_ID, isValidThinkingMode, normalizeAgentMode, resolveAgentPersonality } from '../../aiChatConstants';
+import {
+  AI_CLOUD_MODELS,
+  AI_MODEL_TIERS,
+  AI_THINKING_DEFAULT_MODE_ID,
+  BOT_DEFAULT_NAME,
+  isValidModelTier,
+  isValidThinkingMode,
+  migrateBotDescription,
+  normalizeAgentMode,
+  normalizeBotRoutines,
+  resolveAgentPersonality,
+} from '../../aiChatConstants';
 
 const CHAT_ICON_STROKE = 1.75;
 const MAX_AVATAR_BYTES = 380 * 1024;
@@ -73,17 +84,34 @@ function subagentStatusLabel(status) {
 
 function normalizeAiAgent(agent) {
   const personality = resolveAgentPersonality(agent);
+  const description = migrateBotDescription(agent);
+  const name = String(agent.name || BOT_DEFAULT_NAME).trim() || BOT_DEFAULT_NAME;
   return {
     id: agent.id,
-    name: String(agent.name || 'KI-Assistent').trim() || 'KI-Assistent',
+    name,
     profilePicture: typeof agent.profilePicture === 'string' ? agent.profilePicture : '',
-    bio: typeof agent.bio === 'string' ? agent.bio.slice(0, 500) : '',
+    description,
+    bio: description.slice(0, 500),
     personality: personality.personalityId,
     personalityCustom: personality.personalityCustom,
+    modelTier: isValidModelTier(agent.modelTier) && !AI_MODEL_TIERS[agent.modelTier]?.local
+      ? agent.modelTier
+      : 'cloud',
+    cloudModelId: AI_CLOUD_MODELS[agent.cloudModelId] ? agent.cloudModelId : '',
+    modelSource: agent.modelSource === 'openai' || agent.modelSource === 'cloud'
+      ? agent.modelSource
+      : ((typeof agent.openaiBaseUrl === 'string' && agent.openaiBaseUrl.trim() && String(agent.openaiModel || '').trim())
+        ? 'openai'
+        : 'cloud'),
+    openaiBaseUrl: typeof agent.openaiBaseUrl === 'string' ? agent.openaiBaseUrl.trim() : '',
+    openaiApiKey: typeof agent.openaiApiKey === 'string' ? agent.openaiApiKey : '',
+    openaiModel: typeof agent.openaiModel === 'string' ? agent.openaiModel.trim() : '',
     agentMode: normalizeAgentMode(agent.agentMode),
     agentWorkDir: typeof agent.agentWorkDir === 'string' ? agent.agentWorkDir.trim() : '',
     thinkingMode: isValidThinkingMode(agent.thinkingMode) ? agent.thinkingMode : AI_THINKING_DEFAULT_MODE_ID,
-    allowBluetalkMessaging: Boolean(agent.allowBluetalkMessaging),
+    workLogEnabled: agent.workLogEnabled === true,
+    allowBluetalkMessaging: true,
+    routines: normalizeBotRoutines(agent.routines),
     createdAt: Number(agent.createdAt) || Date.now(),
   };
 }
@@ -123,11 +151,49 @@ function formatMuteExpiry(ts) {
 }
 
 function formatMessageTime(ts) {
-  if (!ts) return '';
+  return formatTime(ts);
+}
+
+const MESSAGE_CLUSTER_MS = 5 * 60 * 1000;
+
+function startOfLocalDay(ts) {
   const d = new Date(ts);
-  const main = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const ms = String(Math.floor(ts % 1000)).padStart(3, '0');
-  return `${main}.${ms}`;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function isSameCalendarDay(a, b) {
+  if (typeof a !== 'number' || typeof b !== 'number') return false;
+  return startOfLocalDay(a) === startOfLocalDay(b);
+}
+
+function formatDaySeparator(ts) {
+  if (typeof ts !== 'number') return '';
+  const start = startOfLocalDay(ts);
+  const today = startOfLocalDay(Date.now());
+  const diffDays = Math.round((today - start) / 86400000);
+  if (diffDays === 0) return 'Heute';
+  if (diffDays === 1) return 'Gestern';
+  const d = new Date(ts);
+  const opts = { weekday: 'long', day: 'numeric', month: 'long' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString('de-DE', opts);
+}
+
+function messageClusterKey(message) {
+  if (!message) return '';
+  if (message.from === 'self') return 'self';
+  return String(message.senderPeerId || message.from || 'other');
+}
+
+function isMessageClusterContinuation(prev, curr, windowMs = MESSAGE_CLUSTER_MS) {
+  if (!prev || !curr) return false;
+  if (messageClusterKey(prev) !== messageClusterKey(curr)) return false;
+  const pt = prev.timestamp;
+  const ct = curr.timestamp;
+  if (typeof pt !== 'number' || typeof ct !== 'number') return false;
+  if (ct - pt > windowMs) return false;
+  return isSameCalendarDay(pt, ct);
 }
 
 function formatTime(ts) {
@@ -151,7 +217,7 @@ function selfDeliveryLabel(m) {
     return { text: summary?.total ? `Vorgemerkt · ${summary.offline || 0} offline` : 'Vorgemerkt', pending: false };
   }
   if (m.deliveryStatus === 'delivered') {
-    return { text: summary?.total ? `Zugestellt · ${summary.delivered}/${summary.total}` : 'Delivered', pending: false };
+    return { text: '', pending: false };
   }
   if (m.deliveryStatus === 'blocked') return { text: 'Blockiert', pending: false };
   if (m.deliveryStatus === 'pending') return { text: 'Sending', pending: true };
@@ -198,10 +264,54 @@ function downloadBase64AsFile(fileName, base64) {
   URL.revokeObjectURL(url);
 }
 
-function PeerAvatar({ pictureUrl, name, size = 36, className = '' }) {
+function isCustomPeerPhoto(url) {
+  const value = typeof url === 'string' ? url.trim() : '';
+  if (!value) return false;
+  return !value.startsWith('data:image/svg+xml');
+}
+
+function BotAvatar3d({ size, className = '', status = 'idle' }) {
+  const uid = useId().replace(/:/g, '');
+  return (
+    <svg
+      className={`peer-avatar-img bot-avatar-3d ${className}`}
+      data-bot-status={status || 'idle'}
+      width={size}
+      height={size}
+      viewBox="0 0 128 128"
+      aria-hidden
+    >
+      <defs>
+        <radialGradient id={`${uid}ball`} cx="34%" cy="28%" r="74%">
+          <stop offset="0%" stopColor="var(--bot-avatar-hi)" />
+          <stop offset="46%" stopColor="var(--bot-avatar-mid)" />
+          <stop offset="100%" stopColor="var(--bot-avatar-lo)" />
+        </radialGradient>
+      </defs>
+      <circle cx="64" cy="64" r="64" fill={`url(#${uid}ball)`} />
+      <ellipse cx="46" cy="40" rx="24" ry="14" fill="var(--bot-avatar-sheen)" />
+      <g className="bot-avatar-eyes">
+        <g className="bot-avatar-eye">
+          <circle cx="50" cy="66" r="12" fill="var(--bot-avatar-eye)" />
+          <circle cx="46.5" cy="62" r="3.6" fill="var(--bot-avatar-spark)" />
+        </g>
+        <g className="bot-avatar-eye bot-avatar-eye--r">
+          <circle cx="78" cy="66" r="12" fill="var(--bot-avatar-eye)" />
+          <circle cx="74.5" cy="62" r="3.6" fill="var(--bot-avatar-spark)" />
+        </g>
+      </g>
+    </svg>
+  );
+}
+
+function PeerAvatar({ pictureUrl, name, size = 36, className = '', botStatus = 'idle' }) {
   const initial = (name || '?')[0].toUpperCase();
   const dim = { width: size, height: size, fontSize: Math.round(size * 0.38) };
-  if (pictureUrl) {
+  const isBot = className.includes('peer-avatar-img--bot');
+  if (isBot && !isCustomPeerPhoto(pictureUrl)) {
+    return <BotAvatar3d size={size} className={className} status={botStatus} />;
+  }
+  if (isCustomPeerPhoto(pictureUrl)) {
     return (
       <img
         src={pictureUrl}
@@ -225,8 +335,9 @@ const CHAT_BATCH_SIZE = 24;
 const CHAT_LIST_WIDTH_DEFAULT = 300;
 const CHAT_LIST_WIDTH_MIN = 220;
 const CHAT_LIST_WIDTH_MAX = 560;
+const CHAT_LIST_WIDTH_COLLAPSED = 72;
 
-const COMPOSER_TEXTAREA_MIN_HEIGHT = 40;
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 32;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 400;
 
 function getComposerTextareaMaxHeight() {
@@ -237,7 +348,7 @@ function getComposerTextareaMaxHeight() {
 function getMessagePreviewText(message, debugMode = false) {
   if (!message) return '';
   if (message.kind === 'sticker') return 'Sticker';
-  if (message.kind === 'file') return `📎 ${message.fileName || message.content || 'Anhang'}`;
+  if (message.kind === 'file' || message.kind === 'file-link') return `📎 ${message.fileName || message.content || 'Anhang'}`;
   if (message.kind === 'contact-share') {
     const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
     return `Kontakt: ${name}`;
@@ -253,7 +364,6 @@ function getMessagePreviewText(message, debugMode = false) {
   if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
-  if (message.kind === 'live-docs-invite') return `Dokument: ${message.fileName || message.tableName || 'Einladung'}`;
   const content = String(message.content || '').trim();
   if (!content) return 'Nachricht';
   return content.length > 120 ? `${content.slice(0, 117)}…` : content;
@@ -262,8 +372,8 @@ function getMessagePreviewText(message, debugMode = false) {
 function getMessageCopyText(message, debugMode = false) {
   if (!message) return '';
   if (message.kind === 'sticker') return '';
-  if (message.kind === 'file') {
-    return [message.fileName, message.content].filter(Boolean).join('\n').trim();
+  if (message.kind === 'file' || message.kind === 'file-link') {
+    return [message.fileName, message.filePath, message.content].filter(Boolean).join('\n').trim();
   }
   if (message.kind === 'contact-share') {
     const contact = message.sharedContact || {};
@@ -288,9 +398,6 @@ function getMessageCopyText(message, debugMode = false) {
   }
   if (message.kind === 'tic-tac-toe-invite') {
     return String(message.ticTacToeSettingsSummary || message.content || `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`).trim();
-  }
-  if (message.kind === 'live-docs-invite') {
-    return String(message.content || `Dokument: ${message.fileName || message.tableName || 'Einladung'}`).trim();
   }
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments?.length) {
@@ -377,7 +484,7 @@ function buildForwardPayload(message) {
 function getLastPreview(message, debugMode = false) {
   if (!message) return 'No messages';
   if (message.kind === 'sticker') return `${message.from === 'self' ? 'Du: ' : ''}Sticker`;
-  if (message.kind === 'file') return `File: ${message.fileName || message.content || 'Attachment'}`;
+  if (message.kind === 'file' || message.kind === 'file-link') return `File: ${message.fileName || message.content || 'Attachment'}`;
   if (message.kind === 'contact-share') {
     const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
     return `${message.from === 'self' ? 'Du: ' : ''}Kontakt: ${name}`;
@@ -400,9 +507,6 @@ function getLastPreview(message, debugMode = false) {
   }
   if (message.kind === 'tic-tac-toe-invite') {
     return `${message.from === 'self' ? 'Du: ' : ''}Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
-  }
-  if (message.kind === 'live-docs-invite') {
-    return `${message.from === 'self' ? 'Du: ' : ''}Dokument: ${message.fileName || message.tableName || 'Einladung'}`;
   }
   return (message.from === 'self' ? 'You: ' : '') + (message.content || 'Message');
 }
@@ -594,10 +698,7 @@ function getFileCategory(mime, fileName) {
 
 /** Bild-Only-Nachrichten: ohne Sprechblasen-Hintergrund, direkt im Verlauf */
 function isBareMediaMessage(message) {
-  if (!message) return false;
-  if (message.kind === 'sticker') {
-    return Boolean(message.fileData || message.localPreviewUrl);
-  }
+  if (!message || message.kind === 'sticker') return false;
   if (message.kind === 'file') {
     const mime = message.fileType || 'application/octet-stream';
     if (getFileCategory(mime, message.fileName) !== 'image') return false;
@@ -606,11 +707,15 @@ function isBareMediaMessage(message) {
   return Boolean(getImageUrl(message));
 }
 
+function isStickerMessage(message) {
+  return message?.kind === 'sticker';
+}
+
 /** Rich-Embeds (Poker, Kontakt, …): ohne Sprechblasen-Karte */
 function isChatEmbedMessage(message, debugMode = false) {
   if (!message) return false;
   if (message.kind === 'uno-invite') return debugMode;
-  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'live-docs-invite' || message.kind === 'contact-share';
+  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'contact-share';
 }
 
 
@@ -629,6 +734,9 @@ export {
   notificationMuteSelectValue,
   formatMuteExpiry,
   formatMessageTime,
+  formatDaySeparator,
+  isSameCalendarDay,
+  isMessageClusterContinuation,
   formatTime,
   formatGenTime,
   selfDeliveryLabel,
@@ -643,6 +751,7 @@ export {
   CHAT_LIST_WIDTH_DEFAULT,
   CHAT_LIST_WIDTH_MIN,
   CHAT_LIST_WIDTH_MAX,
+  CHAT_LIST_WIDTH_COLLAPSED,
   COMPOSER_TEXTAREA_MIN_HEIGHT,
   COMPOSER_TEXTAREA_MAX_HEIGHT,
   getComposerTextareaMaxHeight,
@@ -663,5 +772,6 @@ export {
   extOf,
   getFileCategory,
   isBareMediaMessage,
+  isStickerMessage,
   isChatEmbedMessage,
 };

@@ -5,13 +5,22 @@ import { encryptChatPayload } from '../../chatCrypto';
 import { waitForE2eeIdentity, waitForE2eeSession } from '../e2eePersistence';
 import { newChatMessageId } from '../appHelpers';
 import { isAiChatPeerId } from '../../aiChatConstants';
+import {
+  REACTION_KIND,
+  isAllowedReactionEmoji,
+  reactorHasEmoji,
+  setReactorEmoji,
+} from '../messageReactions';
 import { sendGroupChatMessage } from '../sendGroupChatMessage';
 import { sendAiChatMessage } from '../sendAiChatMessage';
 import groupChat from '../../../shared/group-chat.js';
+import { buildTypingPayload } from '../../../shared/chat-typing.js';
 
 const {
   GROUP_PROTOCOL_VERSION,
+  GROUP_MESSAGE_KIND,
   GROUP_RECEIPT_KIND,
+  buildTargetedGroupRoute,
   isActiveGroupMember,
   isGroupChatId,
 } = groupChat;
@@ -404,9 +413,96 @@ export function useMessaging({
     return true;
   }, [leaveGroupChat, removeGroup, persistGroupOutbox, deleteChat]);
 
+  const toggleMessageReaction = useCallback(async (peerId, message, emoji) => {
+    if (!window.bluetalk || !peerId || !message?.messageId) return;
+    if (!isAllowedReactionEmoji(emoji)) return;
+
+    const cached = (messageCacheRef.current[peerId] || []).find((item) => item.messageId === message.messageId) || message;
+    const active = !reactorHasEmoji(cached.reactions, 'self', emoji);
+    const reactions = setReactorEmoji(cached.reactions, emoji, 'self', active);
+    await applyMessagePatch(peerId, message.messageId, { reactions });
+
+    if (isAiChatPeerId(peerId)) return;
+    if (contactsRef.current.some((c) => {
+      if (c?.id !== peerId) return false;
+      return c.blocked === true || c.blockedByPeer === true;
+    })) return;
+
+    const payload = {
+      kind: REACTION_KIND,
+      refMessageId: message.messageId,
+      emoji,
+      active,
+    };
+
+    if (isGroupChatId(peerId)) {
+      const group = groupsRef.current.find((entry) => entry.id === peerId);
+      const selfPeerId = ownPeerIdRef.current;
+      if (!group || !selfPeerId || !isActiveGroupMember(group, selfPeerId)) return;
+      const route = buildTargetedGroupRoute(group, selfPeerId, { includeInvited: false });
+      const packetId = `react:${message.messageId}`;
+      const inner = {
+        kind: GROUP_MESSAGE_KIND,
+        protocolVersion: GROUP_PROTOCOL_VERSION,
+        groupId: group.id,
+        groupRevision: group.revision,
+        messageId: packetId,
+        senderPeerId: selfPeerId,
+        sender: settingsRef.current.displayName,
+        timestamp: Date.now(),
+        payload,
+      };
+      await Promise.all(route.recipients.map((recipientId) => sendGroupPacket(recipientId, inner, {
+        packetId,
+        groupId: group.id,
+        type: 'control',
+      })));
+      return;
+    }
+
+    try {
+      await waitForE2eeIdentity(ownEcdhPublicSpkiRef);
+      let session = e2eeSessionsRef.current[peerId];
+      const ready = e2eeReadyPeersRef.current.has(peerId);
+      if (!session?.aesKey || !session.keyId || !ready || session.keyChanged === true) {
+        await sendE2eeHandshake(peerId, { force: true, requestReply: true });
+        session = await waitForE2eeSession(
+          e2eeSessionsRef,
+          e2eeReadyPeersRef,
+          peerId,
+          '',
+          8000
+        );
+      }
+      if (!session?.aesKey || !session.keyId || session.keyChanged === true) return;
+      const wire = await encryptChatPayload(session.aesKey, payload, {
+        keyId: session.keyId,
+        version: session.e2eeVersion === 2 ? 2 : 1,
+      });
+      await window.bluetalk.peer.send(peerId, {
+        ...wire,
+        sender: settingsRef.current.displayName,
+        messageId: `react:${message.messageId}`,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.warn('[App] Reaction send failed:', err?.message || err);
+    }
+  }, [applyMessagePatch, sendE2eeHandshake, sendGroupPacket]);
+
+  const sendTyping = useCallback((peerId, active) => {
+    if (!window.bluetalk?.peer?.send || !peerId) return;
+    if (isAiChatPeerId(peerId) || isGroupChatId(peerId)) return;
+    const contact = contactsRef.current.find((entry) => entry?.id === peerId);
+    if (contact?.blocked || contact?.blockedByPeer || contact?.chatDeletedByPeer) return;
+    void window.bluetalk.peer.send(peerId, buildTypingPayload(active));
+  }, [contactsRef]);
+
   return {
     sendMessage,
     sendReadReceipt,
+    sendTyping,
+    toggleMessageReaction,
     deleteMessage,
     deleteChat,
     deleteGroupChat,

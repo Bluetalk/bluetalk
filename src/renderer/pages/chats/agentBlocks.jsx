@@ -12,7 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { filterToolEventsForDisplay, groupConsecutiveToolSegments, isRunCommandRunning, toolEventsFromSegment } from '../../utils/agentSegments.js';
 import { isContactNotificationMuted } from '../../contactNotificationMute';
-import { AI_CLOUD_MODELS, AI_MODEL_TIERS, isModelTierVisible } from '../../aiChatConstants';
+import { AI_CLOUD_MODELS } from '../../aiChatConstants';
 import {
   CHAT_ICON_STROKE,
   subagentStatusLabel,
@@ -211,7 +211,16 @@ function NotificationMuteMenuItems({ contact, contactId, onDone, applyNotificati
   );
 }
 
-function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudModel, onOpenCloudSettings, debugMode = false }) {
+function AiChatModelPicker({
+  ollamaState,
+  disabled,
+  onSelectCloudModel,
+  onSelectOpenai,
+  onOpenCloudSettings,
+  selectedCloudModelId: selectedCloudModelIdProp,
+  openaiLabel = '',
+  openaiActive = false,
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -224,52 +233,23 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  const selectedTierId = ollamaState?.selectedModelTier || '';
-  const selectedCloudModelId = ollamaState?.selectedCloudModelId || '';
-  const activeTier = AI_MODEL_TIERS[selectedTierId];
-  const activeCloudModel = selectedTierId === 'cloud' ? AI_CLOUD_MODELS[selectedCloudModelId] : null;
-  const activeLabel = activeCloudModel?.label || activeTier?.label || ollamaState?.activeModel || 'Modell';
+  const selectedCloudModelId = selectedCloudModelIdProp || ollamaState?.selectedCloudModelId || '';
+  const activeCloudModel = AI_CLOUD_MODELS[selectedCloudModelId];
+  const activeLabel = openaiActive
+    ? (openaiLabel || 'Eigene API')
+    : (activeCloudModel?.label || 'Cloud');
 
-  const availableOptions = useMemo(() => {
-    const localOptions = Object.values(AI_MODEL_TIERS)
-      .filter((tier) => tier.local && isModelTierVisible(tier, debugMode) && ollamaState?.modelStatus?.[tier.id] === 'ready')
-      .map((tier) => ({
-        key: `local:${tier.id}`,
-        kind: 'local',
-        tierId: tier.id,
-        label: tier.label,
-        model: tier.model,
-        beta: Boolean(tier.beta),
-      }));
-    const cloudOptions = ollamaState?.cloudAuth
+  const cloudOptions = useMemo(
+    () => (ollamaState?.cloudAuth
       ? Object.values(AI_CLOUD_MODELS).map((cloudModel) => ({
         key: `cloud:${cloudModel.id}`,
-        kind: 'cloud',
         cloudModelId: cloudModel.id,
         label: cloudModel.label,
         model: cloudModel.model,
       }))
-      : [];
-    return { localOptions, cloudOptions };
-  }, [ollamaState, debugMode]);
-
-  const hasOptions = availableOptions.localOptions.length > 0 || availableOptions.cloudOptions.length > 0;
-
-  const handleSelect = (option) => {
-    setOpen(false);
-    if (option.kind === 'cloud') {
-      onSelectCloudModel?.(option.cloudModelId);
-      return;
-    }
-    if (option.tierId !== selectedTierId) onSelectTier(option.tierId);
-  };
-
-  const isOptionActive = (option) => {
-    if (option.kind === 'cloud') {
-      return selectedTierId === 'cloud' && selectedCloudModelId === option.cloudModelId;
-    }
-    return selectedTierId === option.tierId;
-  };
+      : []),
+    [ollamaState]
+  );
 
   return (
     <div className={`ai-chat-model-picker${open ? ' ai-chat-model-picker--open' : ''}`} ref={wrapRef}>
@@ -287,58 +267,46 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
       </button>
       {open ? (
         <div className="ai-chat-model-picker-menu animate-scale" role="listbox" aria-label="Modell wählen">
-          {!hasOptions ? (
-            <div className="ai-chat-model-picker-empty text-sm text-muted">Keine Modelle bereit</div>
-          ) : (
+          <div className="ai-chat-model-picker-group-label">API</div>
+          <button
+            type="button"
+            role="option"
+            aria-selected={openaiActive}
+            className={`ai-chat-model-picker-option${openaiActive ? ' ai-chat-model-picker-option--active' : ''}`}
+            onClick={() => {
+              setOpen(false);
+              onSelectOpenai?.();
+            }}
+          >
+            <span className="ai-chat-model-picker-option-label">OpenAI-kompatible API</span>
+            <span className="ai-chat-model-picker-option-model text-muted">
+              {openaiLabel && openaiActive ? openaiLabel : 'Eigene URL'}
+            </span>
+          </button>
+          {cloudOptions.length > 0 ? (
             <>
-              {availableOptions.localOptions.length > 0 ? (
-                <>
-                  <div className="ai-chat-model-picker-group-label">Lokal</div>
-                  {availableOptions.localOptions.map((option) => {
-                    const isActive = isOptionActive(option);
-                    return (
-                      <button
-                        key={option.key}
-                        type="button"
-                        role="option"
-                        aria-selected={isActive}
-                        className={`ai-chat-model-picker-option${isActive ? ' ai-chat-model-picker-option--active' : ''}`}
-                        onClick={() => handleSelect(option)}
-                      >
-                        <span className="ai-chat-model-picker-option-label">
-                          {option.label}
-                          {option.beta ? <span className="badge badge-muted" style={{ marginLeft: 6 }}>Beta</span> : null}
-                        </span>
-                        <span className="ai-chat-model-picker-option-model text-muted">{option.model}</span>
-                      </button>
-                    );
-                  })}
-                </>
-              ) : null}
-              {availableOptions.cloudOptions.length > 0 ? (
-                <>
-                  <div className="ai-chat-model-picker-group-label">Cloud</div>
-                  {availableOptions.cloudOptions.map((option) => {
-                    const isActive = isOptionActive(option);
-                    return (
-                      <button
-                        key={option.key}
-                        type="button"
-                        role="option"
-                        aria-selected={isActive}
-                        className={`ai-chat-model-picker-option${isActive ? ' ai-chat-model-picker-option--active' : ''}`}
-                        onClick={() => handleSelect(option)}
-                      >
-                        <span className="ai-chat-model-picker-option-label">{option.label}</span>
-                        <span className="ai-chat-model-picker-option-model text-muted">{option.model}</span>
-                      </button>
-                    );
-                  })}
-                </>
-              ) : null}
+              <div className="ai-chat-model-picker-group-label">Ollama Cloud</div>
+              {cloudOptions.map((option) => {
+                const isActive = !openaiActive && selectedCloudModelId === option.cloudModelId;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    className={`ai-chat-model-picker-option${isActive ? ' ai-chat-model-picker-option--active' : ''}`}
+                    onClick={() => {
+                      setOpen(false);
+                      onSelectCloudModel?.(option.cloudModelId);
+                    }}
+                  >
+                    <span className="ai-chat-model-picker-option-label">{option.label}</span>
+                    <span className="ai-chat-model-picker-option-model text-muted">{option.model}</span>
+                  </button>
+                );
+              })}
             </>
-          )}
-          {!ollamaState?.cloudAuth ? (
+          ) : (
             <button
               type="button"
               className="ai-chat-model-picker-cloud-link text-sm"
@@ -349,7 +317,7 @@ function AiChatModelPicker({ ollamaState, disabled, onSelectTier, onSelectCloudM
             >
               Ollama Cloud in Einstellungen aktivieren
             </button>
-          ) : null}
+          )}
         </div>
       ) : null}
     </div>
@@ -403,6 +371,8 @@ const TOOL_LABELS = {
   read_bluetalk_messages: 'Liest Chat',
   send_bluetalk_message: 'Sendet',
   send_bluetalk_reply: 'Antwortet',
+  message_send: 'Schreibt',
+  attach_file: 'Datei',
   list_bluetalk_contacts: 'Kontakte',
   list_bluetalk_peers: 'Online-Peers',
   list_bluetalk_chats: 'Chats',
@@ -426,6 +396,8 @@ function toolArgPreview(name, args) {
     if (name === 'get_bluetalk_contact') return a.peer_id || '';
     if (name === 'list_bluetalk_contacts' || name === 'list_bluetalk_chats') return a.query || '';
     if (name === 'ask_user') return a.question || '';
+    if (name === 'message_send') return a.content || '';
+    if (name === 'attach_file') return a.path || a.caption || '';
     if (name === 'spawn_subagent') return a.task || '';
     if (name === 'bluetalk_command') {
       const bits = [a.pluginId, a.commandId].filter(Boolean);
@@ -574,8 +546,8 @@ function SubagentChatView({ segment, parentPeer, live = false, onBack }) {
           type="button"
           className="btn btn-ghost btn-icon chat-subagent-back"
           onClick={onBack}
-          aria-label="Zurück zum Agent-Chat"
-          title="Zurück zum Agent-Chat"
+          aria-label="Zurück zum Bot-Chat"
+          title="Zurück zum Bot-Chat"
         >
           <ChevronLeft size={18} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         </button>
@@ -789,7 +761,7 @@ const ChatMessage = React.memo(function ChatMessage({ message, onExpandImage, on
 
 function MediaLightbox({ open, src, alt, canSave, onClose, onSave }) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       className="media-lightbox-overlay"
       onClick={onClose}
@@ -832,7 +804,8 @@ function MediaLightbox({ open, src, alt, canSave, onClose, onSave }) {
       <div className="media-lightbox-stage" onClick={(e) => e.stopPropagation()}>
         <img src={src} alt={alt} className="media-lightbox-img" />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

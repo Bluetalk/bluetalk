@@ -15,7 +15,7 @@
 }
 .games-launch-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 230px;
+  contain-intrinsic-size: auto 180px;
 }
 
 /* Scroll-Ketten in verschachtelten Scroll-Containern unterbinden */

@@ -205,64 +205,11 @@ export function sendAiChatMessage(deps, peerId, payload) {
         setAiChatProgress((current) => (current?.requestId === requestId ? null : current));
       }
       if (result?.error === 'chat_aborted') {
-        const thinking = String(lastAiUpdate.thinking || '').trim();
-        const content = String(lastAiUpdate.content || '').trim();
-        const assistantMessage = {
-          kind: 'chat',
-          content,
-          thinking: thinking || undefined,
-          toolEvents: lastAiUpdate.toolEvents?.length ? lastAiUpdate.toolEvents : undefined,
-          segments: lastAiUpdate.segments?.length ? lastAiUpdate.segments : undefined,
-          aiStats:
-            lastAiUpdate.tps > 0 || lastAiUpdate.genTimeMs > 0
-              ? { tps: lastAiUpdate.tps, genTimeMs: lastAiUpdate.genTimeMs }
-              : undefined,
-          aiStopped: true,
-          sender: 'KI-Assistent',
-          messageId: newChatMessageId(),
-          timestamp: Date.now(),
-          from: 'peer',
-        };
-        const replyMeta = await window.bluetalk.messages.append(peerId, assistantMessage);
-        setMessages((prev) => ({
-          ...prev,
-          [peerId]: [...(prev[peerId] || []), assistantMessage],
-        }));
-        if (replyMeta?.count) {
-          setChatMeta((prev) => ({ ...prev, [peerId]: replyMeta }));
-        }
         return { ok: false, error: 'chat_aborted' };
       }
-      // Akzeptiere Ergebnis, wenn entweder Text vorhanden ist ODER Segmente
-      // (Thinking/Tools) — kleine Modelle beenden oft ohne finale Textantwort.
-      const resultSegments = Array.isArray(result?.message?.segments) ? result.message.segments : null;
-      const hasResultContent = Boolean(result?.ok)
-        && (result?.message?.content?.trim() || (resultSegments && resultSegments.length));
-      if (!hasResultContent) {
+      if (!result?.ok) {
         await applyMessagePatch(peerId, triggerMessageId, { deliveryStatus: 'scheduled' });
         return { ok: false, error: result?.error || 'chat_failed' };
-      }
-
-      const assistantMessage = {
-        kind: 'chat',
-        content: result.message.content || '',
-        thinking: result.message.thinking || undefined,
-        toolEvents: result.message.toolEvents || undefined,
-        segments: resultSegments || undefined,
-        aiStats: result.message.stats || undefined,
-        sender: result.message.sender || 'KI-Assistent',
-        model: result.message.model || '',
-        messageId: newChatMessageId(),
-        timestamp: Date.now(),
-        from: 'peer',
-      };
-      const replyMeta = await window.bluetalk.messages.append(peerId, assistantMessage);
-      setMessages((prev) => ({
-        ...prev,
-        [peerId]: [...(prev[peerId] || []), assistantMessage],
-      }));
-      if (replyMeta?.count) {
-        setChatMeta((prev) => ({ ...prev, [peerId]: replyMeta }));
       }
       return { ok: true };
     } catch (error) {

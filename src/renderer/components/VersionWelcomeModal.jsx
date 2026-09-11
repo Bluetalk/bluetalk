@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { ModalOverlay } from './ModalOverlay.jsx';
 
 export default function VersionWelcomeModal({ open, title, items, onContinue }) {
   const continueRef = useRef(null);
@@ -26,8 +27,8 @@ export default function VersionWelcomeModal({ open, title, items, onContinue }) 
   if (!open) return null;
 
   return (
-    <div
-      className="modal-overlay modal-overlay-welcome"
+    <ModalOverlay
+      className="modal-overlay-welcome"
       role="dialog"
       aria-modal="true"
       aria-labelledby="version-welcome-title"
@@ -47,6 +48,6 @@ export default function VersionWelcomeModal({ open, title, items, onContinue }) 
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

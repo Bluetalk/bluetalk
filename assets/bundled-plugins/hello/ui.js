@@ -14,48 +14,24 @@ export default function activateHelloPlugin(BlueTalkPlugin) {
     render(container) {
       container.innerHTML = `
         <div class="hello-plugin-card">
-          <h3>Hello plugin feed</h3>
           <p>
-            This tab demonstrates the plugin API. Click <strong>Ping peers</strong> to broadcast a
-            realtime message to every connected peer. All peer events appear below.
+            Diese Ansicht zeigt die Plugin-API. <strong>Ping peers</strong> sendet eine Nachricht an alle verbundenen Geräte. Ereignisse erscheinen unten.
           </p>
           <div class="hello-plugin-row">
-            <button class="hello-plugin-btn" data-action="ping">Ping peers</button>
-            <button class="hello-plugin-btn hello-plugin-btn-secondary" data-action="dialog">Open example screen</button>
+            <button type="button" data-action="ping">Ping peers</button>
+            <button type="button" data-action="dialog">Beispiel-Dialog</button>
             <span class="hello-plugin-count"></span>
           </div>
           <ul class="hello-plugin-log"></ul>
         </div>
         <style>
-          .hello-plugin-card {
-            max-width: 720px;
-            margin: 0 auto;
-            padding: 16px 20px;
-            background: var(--bg-1);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-          }
-          .hello-plugin-card h3 { margin-top: 0; }
+          .hello-plugin-card { max-width: 720px; }
           .hello-plugin-row {
             display: flex;
             gap: 8px;
             align-items: center;
-            margin: 12px 0;
+            margin: 12px 0 16px;
             flex-wrap: wrap;
-          }
-          .hello-plugin-btn {
-            background: var(--accent);
-            color: #fff;
-            border: 0;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-size: 13px;
-            cursor: pointer;
-          }
-          .hello-plugin-btn-secondary {
-            background: var(--bg-2);
-            color: var(--fg-0);
-            border: 1px solid var(--border);
           }
           .hello-plugin-count {
             font-size: 12px;
@@ -67,15 +43,18 @@ export default function activateHelloPlugin(BlueTalkPlugin) {
             margin: 0;
             max-height: 360px;
             overflow: auto;
-            border-top: 1px dashed var(--border);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background: var(--bg-1);
           }
           .hello-plugin-log li {
             font-family: var(--mono, monospace);
             font-size: 12px;
-            padding: 6px 4px;
+            padding: 8px 12px;
             border-bottom: 1px solid var(--border);
             color: var(--fg-1);
           }
+          .hello-plugin-log li:last-child { border-bottom: none; }
         </style>
       `;
 
@@ -147,7 +126,7 @@ export default function activateHelloPlugin(BlueTalkPlugin) {
           <li>Peers online: ${(api.peers() || []).length}</li>
           <li>Contacts saved: ${(api.contacts() || []).length}</li>
         </ul>
-        <button class="hello-plugin-btn" data-close>Close</button>
+        <button type="button" data-close>Schließen</button>
       `;
       container.querySelector('[data-close]').addEventListener('click', () => ctx.close?.());
     },

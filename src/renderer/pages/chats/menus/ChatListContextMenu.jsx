@@ -111,7 +111,7 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
             onClick={() => actions.onOpenDelete(menu.chat.id)}
           >
             <Trash2 size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-            Chat löschen…
+            Bot löschen…
           </button>
         </>
       ) : menu.chat.isGroup ? (
@@ -229,13 +229,13 @@ export function ChatListContextMenu({ menu, onClose, resolveContact, applyNotifi
           actions.setContactBlocked(id, blocked);
           actions.toast({
             variant: 'success',
-            title: blocked ? 'Contact blocked' : 'Contact unblocked',
+            title: blocked ? 'Kontakt blockiert' : 'Kontakt entblockt',
           });
           onClose();
         }}
       >
         <Ban size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-        {menu.chat.contact?.blocked ? 'Unblock' : 'Block'}
+        {menu.chat.contact?.blocked ? 'Entblocken' : 'Blockieren'}
       </button>
       <div className="chat-list-context-menu-sep" role="separator" />
       <button

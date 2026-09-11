@@ -8,13 +8,16 @@ export * from './ChatListRow.jsx';
 export * from './ChatListPanel.jsx';
 export * from './ChatHeader.jsx';
 export * from './MessageList.jsx';
+export * from './MessageReactions.jsx';
 export * from './Composer.jsx';
+export * from './BotActionBar.jsx';
 export * from './ComposerAttachMenu.jsx';
 export * from './AiSetupView.jsx';
 
 // Dialoge
 export * from './dialogs/ConnectDialog.jsx';
 export * from './dialogs/AiProfileDialog.jsx';
+export * from './dialogs/BotWorklogPanel.jsx';
 export * from './dialogs/PeerProfileDialog.jsx';
 export * from './dialogs/NicknameDialog.jsx';
 export * from './dialogs/ConfirmDialogs.jsx';
@@ -23,6 +26,7 @@ export * from './dialogs/ForwardDialog.jsx';
 // Kontextmenüs
 export * from './menus/ChatListContextMenu.jsx';
 export * from './menus/MessageContextMenu.jsx';
+export * from './menus/PeerChatContextMenu.jsx';
 
 // Hooks
 export * from './hooks/useOllamaAi.js';

@@ -2,7 +2,7 @@
 //! `src/shared/ai-chat-constants.js`: Modell-Stufen, Cloud-Modelle,
 //! System-Prompts, Tool-Schemas und Auflösungs-Helfer.
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 /// Virtuelle Peer-ID für den lokalen KI-Chat (kein P2P-Kontakt).
 pub const AI_CHAT_PEER_ID: &str = "__ai_chat__";

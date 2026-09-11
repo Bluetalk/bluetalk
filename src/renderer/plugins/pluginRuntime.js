@@ -19,12 +19,12 @@
 import { createRealtimeManager } from '../../shared/plugin-realtime.mjs';
 
 const LEGACY_GAME_TAB_IDS = new Set(['uno:game', 'poker:table']);
+const RETIRED_PLUGIN_IDS = new Set(['live-docs']);
 
 const BUNDLED_UI_LOADERS = Object.freeze({
   chess: () => import('../../../assets/bundled-plugins/chess/ui.js'),
   'connect-four': () => import('../../../assets/bundled-plugins/connect-four/ui.js'),
   hello: () => import('../../../assets/bundled-plugins/hello/ui.js'),
-  'live-docs': () => import('../../../assets/bundled-plugins/live-docs/ui.js'),
   poker: () => import('../../../assets/bundled-plugins/poker/ui.js'),
   'theme-studio': () => import('../../../assets/bundled-plugins/theme-studio/ui.js'),
   'tic-tac-toe': () => import('../../../assets/bundled-plugins/tic-tac-toe/ui.js'),
@@ -154,7 +154,7 @@ export class PluginRuntime {
 
     try {
       const prev = new Map(this.plugins.map((p) => [p.id, p]));
-      this.plugins = Array.isArray(list) ? list : [];
+      this.plugins = (Array.isArray(list) ? list : []).filter((plugin) => !RETIRED_PLUGIN_IDS.has(plugin?.id));
 
       const nextIds = new Set(this.plugins.map((p) => p.id));
       for (const id of Array.from(this.active.keys())) {
@@ -635,7 +635,7 @@ export class PluginRuntime {
     return this.plugins
       .filter((plugin) => this._isGamePlugin(plugin))
       .map((plugin) => this._mapGameEntry(plugin))
-      .filter((entry) => !entry.tool) // Werkzeuge (z. B. Dokumente) gehören nicht unter „Spiele"
+      .filter((entry) => !entry.tool)
       .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
   }
 

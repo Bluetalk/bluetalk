@@ -88,6 +88,7 @@ pub fn run() {
             commands::storage::library_list_media,
             commands::storage::library_get_media_data,
             commands::native::file_save_as,
+            commands::native::file_open_path,
             commands::native::notify_show,
             commands::native::agent_pick_folder,
             commands::maintenance::app_clear_cache,
@@ -156,6 +157,7 @@ pub fn run() {
             commands::ollama::ollama_start_cloud_sign_in,
             commands::ollama::ollama_confirm_cloud_auth,
             commands::ollama::ollama_reset_and_delete,
+            commands::ollama::ollama_run_routine,
             commands::ollama::agent_send_message_reply,
             commands::ollama::agent_connect_peer_reply,
         ])

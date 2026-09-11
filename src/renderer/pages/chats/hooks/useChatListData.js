@@ -1,12 +1,12 @@
 import { useCallback, useMemo } from 'react';
-import { isAiChatPeerId } from '../../../aiChatConstants';
+import { isAiChatPeerId, botHasRemoteApi } from '../../../aiChatConstants';
 import { isPresenceStale } from '../../../../shared/game-presence.js';
 import groupChat from '../../../../shared/group-chat.js';
 
 const { isActiveGroupMember, isGroupChatId } = groupChat;
 
 /**
- * Baut die sortierte Chatliste (Peers, Gruppen, KI-Agenten) samt Lookups.
+ * Baut die sortierte Chatliste (Peers, Gruppen, Bots) samt Lookups.
  * 1:1 aus Chats.jsx extrahiert — Verhalten unverändert.
  */
 export function useChatListData({
@@ -18,6 +18,8 @@ export function useChatListData({
   aiAgents,
   peerGamePresence,
   peerUserPresence,
+  openaiGlobal = null,
+  ollamaState = null,
 }) {
   const contactById = useMemo(() => {
     const map = new Map();
@@ -92,10 +94,10 @@ export function useChatListData({
         id: agent.id,
         peer: null,
         contact: null,
-        displayName: agent.name || 'KI-Assistent',
-        baseName: agent.name || 'KI-Assistent',
-        profilePicture: agent.profilePicture || '',
-        bio: agent.bio || '',
+        displayName: agent.name || 'Bot',
+        baseName: agent.name || 'Bot',
+        profilePicture: typeof agent.profilePicture === 'string' ? agent.profilePicture.trim() : '',
+        bio: agent.description || agent.bio || '',
         offline: false,
         pinned: false,
         isAiChat: true,
@@ -104,6 +106,7 @@ export function useChatListData({
         lastMessage: aiMeta?.lastMessage || null,
         messageCount: aiMeta?.count || 0,
         createdAt: agent.createdAt || 0,
+        botReady: botHasRemoteApi(agent, openaiGlobal, ollamaState),
       };
     });
 
@@ -138,7 +141,7 @@ export function useChatListData({
       const bTs = b.lastMessage?.timestamp || b.contact?.addedAt || b.createdAt || 0;
       return bTs - aTs;
     });
-  }, [aiAgents, chatMeta, contactById, contacts, groups, ownPeerId, peerById, peers, peerGamePresence, peerUserPresence]);
+  }, [aiAgents, chatMeta, contactById, contacts, groups, ownPeerId, peerById, peers, peerGamePresence, peerUserPresence, openaiGlobal, ollamaState]);
 
   const mainChatList = useMemo(
     () =>

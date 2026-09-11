@@ -16,17 +16,19 @@ export function useAiChat({
   activeAiChatRequestRef,
   sendMessageRef,
   connectToAddress,
+  setAgentAskUser,
 }) {
   const cancelAiChat = useCallback(async () => {
     const requestId = activeAiChatRequestRef.current || aiChatProgress?.requestId;
     if (!requestId || !window.bluetalk?.ollama?.abortChat) return false;
     try {
       const result = await window.bluetalk.ollama.abortChat(requestId);
+      setAgentAskUser?.((current) => (current?.requestId === requestId ? null : current));
       return result?.ok === true;
     } catch {
       return false;
     }
-  }, [aiChatProgress?.requestId]);
+  }, [aiChatProgress?.requestId, setAgentAskUser]);
 
   const clearAiChatContext = useCallback(async (peerId) => {
     if (!window.bluetalk || !peerId || !isAiChatPeerId(peerId)) return false;
@@ -66,6 +68,50 @@ export function useAiChat({
     (peerId) => Boolean(peerId && aiChatPendingPeerId === peerId),
     [aiChatPendingPeerId]
   );
+
+  useEffect(() => {
+    if (!window.bluetalk?.on) return undefined;
+    const unsubMessage = window.bluetalk.on('bot:message', (payload) => {
+      const peerId = payload?.peerId;
+      const message = payload?.message;
+      if (!peerId || !message?.messageId) return;
+      setMessages((prev) => {
+        const list = prev[peerId];
+        if (!Array.isArray(list)) return prev;
+        if (list.some((item) => item?.messageId === message.messageId)) return prev;
+        const next = { ...prev, [peerId]: [...list, message] };
+        messageCacheRef.current = next;
+        return next;
+      });
+      if (payload?.meta?.count) {
+        setChatMeta((prev) => ({ ...prev, [peerId]: payload.meta }));
+      }
+    });
+    const unsubTyping = window.bluetalk.on('bot:typing', (payload) => {
+      const peerId = payload?.peerId;
+      if (!peerId) return;
+      if (payload.active) {
+        setAiChatPendingPeerId(peerId);
+        setAiChatProgress((current) => (
+          current?.peerId === peerId
+            ? current
+            : { peerId, requestId: payload.requestId || '', thinking: '', content: '', toolEvents: [], tps: 0, genTimeMs: 0 }
+        ));
+      } else {
+        const requestId = payload.requestId || '';
+        setAiChatProgress((current) => {
+          if (current?.peerId !== peerId) return current;
+          if (requestId && current.requestId && requestId !== current.requestId) return current;
+          return null;
+        });
+        setAiChatPendingPeerId((current) => (current === peerId ? null : current));
+      }
+    });
+    return () => {
+      unsubMessage?.();
+      unsubTyping?.();
+    };
+  }, [setAiChatPendingPeerId, setAiChatProgress, setChatMeta, setMessages, messageCacheRef]);
 
   useEffect(() => {
     if (!window.bluetalk?.on || !window.bluetalk?.agent?.sendMessageReply) return undefined;

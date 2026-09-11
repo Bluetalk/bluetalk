@@ -165,6 +165,144 @@ export const AI_PERSONALITY_IDS = Object.keys(AI_PERSONALITY_PRESETS);
 export const AI_PERSONALITY_DEFAULT_ID = 'default';
 export const AI_PERSONALITY_CUSTOM_MAX_CHARS = 500;
 
+export const BOT_DEFAULT_NAME = 'Bot';
+export const BOT_DESCRIPTION_MAX_CHARS = 2000;
+export const BOT_ROUTINE_NAME_MAX_CHARS = 64;
+export const BOT_ROUTINE_PROMPT_MAX_CHARS = 2000;
+export const BOT_ROUTINE_TRIGGER_IDS = ['manual', 'interval', 'daily'];
+export const BOT_ROUTINE_DEFAULT_TRIGGER = 'manual';
+export const BOT_ROUTINE_MIN_INTERVAL_MINUTES = 5;
+export const BOT_ROUTINE_MAX_INTERVAL_MINUTES = 24 * 60;
+
+export function isValidModelTier(tierId) {
+  return Boolean(AI_MODEL_TIERS[tierId]);
+}
+
+export function resolveBotModel(agent, fallback = {}) {
+  const fallbackTier = isValidModelTier(fallback.modelTier) && !AI_MODEL_TIERS[fallback.modelTier]?.local
+    ? fallback.modelTier
+    : (isValidModelTier(fallback.selectedModelTier) && !AI_MODEL_TIERS[fallback.selectedModelTier]?.local
+      ? fallback.selectedModelTier
+      : 'cloud');
+  const fallbackCloud = AI_CLOUD_MODELS[fallback.cloudModelId]
+    ? fallback.cloudModelId
+    : (AI_CLOUD_MODELS[fallback.selectedCloudModelId]
+      ? fallback.selectedCloudModelId
+      : AI_CLOUD_DEFAULT_MODEL_ID);
+  const rawTier = isValidModelTier(agent?.modelTier) ? agent.modelTier : fallbackTier;
+  const modelTier = AI_MODEL_TIERS[rawTier]?.local ? 'cloud' : rawTier;
+  const cloudModelId = AI_CLOUD_MODELS[agent?.cloudModelId] ? agent.cloudModelId : fallbackCloud;
+  const openaiBaseUrl = typeof agent?.openaiBaseUrl === 'string' ? agent.openaiBaseUrl.trim() : '';
+  const openaiApiKey = typeof agent?.openaiApiKey === 'string' ? agent.openaiApiKey : '';
+  const openaiModel = typeof agent?.openaiModel === 'string' ? agent.openaiModel.trim() : '';
+  const modelSource = agent?.modelSource === 'openai' || agent?.modelSource === 'cloud'
+    ? agent.modelSource
+    : (openaiBaseUrl && openaiModel ? 'openai' : 'cloud');
+  return {
+    modelTier,
+    cloudModelId,
+    modelSource,
+    openaiBaseUrl,
+    openaiApiKey,
+    openaiModel,
+  };
+}
+
+export function botHasRemoteApi(agent, globalOpenai = null, ollamaState = null) {
+  const resolved = resolveBotModel(agent, {});
+  if (resolved.modelSource === 'openai') {
+    if (resolved.openaiBaseUrl && resolved.openaiModel) return true;
+    return Boolean(globalOpenai?.baseUrl && globalOpenai?.model);
+  }
+  return Boolean(ollamaState?.cloudAuth);
+}
+
+export function migrateBotDescription(agent) {
+  const direct = typeof agent?.description === 'string' ? agent.description.trim() : '';
+  if (direct) return direct.slice(0, BOT_DESCRIPTION_MAX_CHARS);
+  const personality = resolveAgentPersonality(agent);
+  const parts = [];
+  const bio = typeof agent?.bio === 'string' ? agent.bio.trim() : '';
+  if (bio) parts.push(bio);
+  if (typeof agent?.personality === 'string' && agent.personality) {
+    const preset = AI_PERSONALITY_PRESETS[agent.personality]?.prompt?.trim();
+    if (preset) parts.push(preset);
+  }
+  if (personality.personalityCustom) parts.push(personality.personalityCustom);
+  return parts.join('\n\n').slice(0, BOT_DESCRIPTION_MAX_CHARS);
+}
+
+export function clampRoutineIntervalMinutes(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 60;
+  return Math.min(BOT_ROUTINE_MAX_INTERVAL_MINUTES, Math.max(BOT_ROUTINE_MIN_INTERVAL_MINUTES, Math.round(n)));
+}
+
+export function normalizeBotRoutine(routine, index = 0) {
+  const triggerType = BOT_ROUTINE_TRIGGER_IDS.includes(routine?.triggerType)
+    ? routine.triggerType
+    : BOT_ROUTINE_DEFAULT_TRIGGER;
+  const id = typeof routine?.id === 'string' && routine.id.trim()
+    ? routine.id.trim()
+    : `rt-${Date.now().toString(36)}-${index}`;
+  const hourRaw = Number(routine?.hour);
+  const minuteRaw = Number(routine?.minute);
+  return {
+    id,
+    name: String(routine?.name || 'Routine').trim().slice(0, BOT_ROUTINE_NAME_MAX_CHARS) || 'Routine',
+    prompt: String(routine?.prompt || '').trim().slice(0, BOT_ROUTINE_PROMPT_MAX_CHARS),
+    enabled: routine?.enabled !== false,
+    triggerType,
+    intervalMinutes: clampRoutineIntervalMinutes(routine?.intervalMinutes),
+    hour: Number.isFinite(hourRaw) ? Math.min(23, Math.max(0, Math.round(hourRaw))) : 8,
+    minute: Number.isFinite(minuteRaw) ? Math.min(59, Math.max(0, Math.round(minuteRaw))) : 0,
+    lastRunAt: Number(routine?.lastRunAt) || 0,
+  };
+}
+
+export function normalizeBotRoutines(routines) {
+  if (!Array.isArray(routines)) return [];
+  return routines.map((routine, index) => normalizeBotRoutine(routine, index));
+}
+
+export function nextRoutineRunAt(routine, now = Date.now()) {
+  if (!routine || routine.enabled === false) return 0;
+  if (routine.triggerType === 'interval') {
+    const last = Number(routine.lastRunAt) || 0;
+    const span = clampRoutineIntervalMinutes(routine.intervalMinutes) * 60_000;
+    return (last > 0 ? last : now) + span;
+  }
+  if (routine.triggerType === 'daily') {
+    const next = new Date(now);
+    next.setHours(Number(routine.hour) || 0, Number(routine.minute) || 0, 0, 0);
+    const last = Number(routine.lastRunAt) || 0;
+    if (next.getTime() <= now || (last > 0 && new Date(last).toDateString() === next.toDateString())) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.getTime();
+  }
+  return 0;
+}
+
+export function formatRoutineRunAt(ts) {
+  const n = Number(ts);
+  if (!n) return '';
+  return new Date(n).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+export function createEmptyBotRoutine() {
+  return normalizeBotRoutine({
+    id: `rt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    name: '',
+    prompt: '',
+    enabled: true,
+    triggerType: 'manual',
+    intervalMinutes: 60,
+    hour: 8,
+    minute: 0,
+  });
+}
+
 export function isValidPersonalityId(personalityId) {
   return Boolean(AI_PERSONALITY_PRESETS[personalityId]);
 }

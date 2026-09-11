@@ -21,7 +21,7 @@ export default function CloudSyncPage() {
               Your local peer-to-peer chats stay as they are; this will be an optional layer when it lands.
             </p>
           </div>
-          <button type="button" className="btn btn-cloud-sync cloud-sync-back" onClick={() => navigate(-1)}>
+          <button type="button" className="btn btn-cloud-sync cloud-sync-back" onClick={() => navigate(-1, { viewTransition: true })}>
             <ArrowLeft size={18} strokeWidth={2} />
             Back
           </button>

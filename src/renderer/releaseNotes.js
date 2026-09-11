@@ -3,6 +3,16 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.1.0': {
+    title: "What's new in BlueTalk 2.1.0",
+    items: [
+      'Bots schreiben Zwischenstände direkt in den Chat statt nur Popups. Rückfragen liegen über der Chatzeile, mit klickbaren Antworten oder Freitext.',
+      'Bots können Dateien aus dem Arbeitsordner anhängen oder als Pfad verlinken. Im Bot-Profil gibt es Arbeitsordner, Denkprozess, Worklog und klarere Routinen.',
+      'Worklog (optional): Denkprozess und Tool-Aufrufe als Seitenpanel — Klick auf „schreibt…“ oder Rechtsklick auf eine Bot-Nachricht.',
+      'Neuer Präsenzstatus: Online, Nicht stören und Offline, sichtbar am Profil und in der Chatliste.',
+      'Einstellungen, Sticker und die Chat-Oberfläche wurden aufgeräumt. Live-Dokumente entfallen.',
+    ],
+  },
   '2.0.0': {
     title: "What's new in BlueTalk 2.0.0",
     items: [

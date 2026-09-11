@@ -12,26 +12,21 @@ function getStickerUrl(message) {
   }
 }
 
-export default function StickerMessage({ message, onExpandImage }) {
+export default function StickerMessage({ message }) {
   const src = getStickerUrl(message);
   if (!src) {
     return <div className="msg-sticker msg-sticker--pending">Sticker wird geladen…</div>;
   }
 
-  const open = () => {
-    onExpandImage?.({
-      src,
-      alt: message.fileName || 'Sticker',
-      defaultFilename: message.fileName || 'sticker.png',
-      base64: message.fileData || '',
-    });
-  };
-
   return (
     <div className="msg-sticker">
-      <button type="button" className="msg-sticker-btn" onClick={open}>
-        <img src={src} alt={message.fileName || 'Sticker'} loading="lazy" />
-      </button>
+      <img
+        src={src}
+        alt=""
+        className="msg-sticker-img"
+        loading="lazy"
+        draggable={false}
+      />
     </div>
   );
 }

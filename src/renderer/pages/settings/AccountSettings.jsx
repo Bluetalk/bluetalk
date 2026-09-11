@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trash2, User } from 'lucide-react';
 import { useApp } from '../../App';
 import { useToast } from '../../components/ToastProvider';
-import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
-import { SETTINGS_ICON_STROKE } from './settingsUtils';
+import SettingsPage from '../../components/settings/SettingsPage';
+import PresenceStatusSlider from '../../components/PresenceStatusSlider';
 
 const MAX_AVATAR_BYTES = 380 * 1024;
 
@@ -149,23 +148,8 @@ export default function AccountSettingsPage() {
   });
 
   return (
-    <div className="page">
-      <SettingsBackHeader
-        title="Konto"
-        subtitle="Profil, Identität und lokale Daten"
-        icon={User}
-      />
-
-      <div className="page-body">
+    <SettingsPage title="Profil">
         <section className="settings-section">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <User size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-              </span>
-              Profil
-            </h3>
-          </div>
           <div className="card flex flex-col gap-3">
             <div className="profile-menu-avatar-row">
               {local.profilePicture ? (
@@ -205,6 +189,10 @@ export default function AccountSettingsPage() {
               />
             </div>
             <div className="input-group">
+              <label>Status</label>
+              <PresenceStatusSlider />
+            </div>
+            <div className="input-group">
               <label htmlFor="account-bio">Bio</label>
               <textarea
                 id="account-bio"
@@ -220,14 +208,7 @@ export default function AccountSettingsPage() {
         </section>
 
         <section className="settings-section">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <User size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-              </span>
-              Identität
-            </h3>
-          </div>
+          <h3 className="settings-section-title">Identität</h3>
           <div className="card flex flex-col gap-3">
             {peerInfo ? (
               <div className="input-group">
@@ -241,14 +222,7 @@ export default function AccountSettingsPage() {
         </section>
 
         <section className="settings-section">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <Trash2 size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-              </span>
-              Daten &amp; Speicher
-            </h3>
-          </div>
+          <h3 className="settings-section-title">Daten</h3>
           <div className="card flex flex-col gap-0">
             <div className="toggle-row">
               <div className="toggle-row-info">
@@ -296,7 +270,6 @@ export default function AccountSettingsPage() {
             </div>
           </div>
         </section>
-      </div>
-    </div>
+    </SettingsPage>
   );
 }

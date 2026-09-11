@@ -10,7 +10,6 @@ const GAME_WINDOW_ROUTES = new Set([
   '/connect-four-game',
   '/chess-game',
   '/tic-tac-toe-game',
-  '/docs-editor',
 ]);
 
 // Natives WebView2-Rechtsklickmenü überall unterdrücken. Eigene Kontextmenüs

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Check, Crown, LogOut, Plus, Shield, Trash2, Users, X } from 'lucide-react';
 import groupChat from '../../shared/group-chat.js';
+import { ModalOverlay } from './ModalOverlay.jsx';
 
 const { getGroupMember, isActiveGroupMember, isGroupAdmin } = groupChat;
 
@@ -115,7 +116,7 @@ export function CreateGroupModal({ open, contacts, peers, onCreate, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose('')}>
+    <ModalOverlay onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose('')}>
       <form className="modal animate-scale group-create-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-label="Neue Gruppe">
         <div className="group-modal-toolbar">
           <div>
@@ -179,7 +180,7 @@ export function CreateGroupModal({ open, contacts, peers, onCreate, onClose }) {
           </button>
         </div>
       </form>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -288,7 +289,7 @@ export function GroupInfoModal({ open, group, ownPeerId, contacts, peers, onUpda
   });
 
   return (
-    <div className="modal-overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+    <ModalOverlay onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <div className="modal animate-scale group-info-modal" role="dialog" aria-modal="true" aria-label="Gruppeninfo">
         <div className="group-modal-toolbar">
           <div>
@@ -427,6 +428,6 @@ export function GroupInfoModal({ open, group, ownPeerId, contacts, peers, onUpda
           </div>
         ) : null}
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

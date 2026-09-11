@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
  * laufen — auch wenn die Liste gerade nicht gemountet ist (No-op über null-Refs).
  * 1:1 aus Chats.jsx extrahiert — Verhalten unverändert.
  */
-export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress }) {
+export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress, typingActive = false }) {
   const endRef = useRef(null);
   const chatMessagesRef = useRef(null);
   const keepChatPinnedRef = useRef(true);
@@ -30,6 +30,7 @@ export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress 
   }, [
     newestTimestamp,
     selectedPeerId,
+    typingActive,
     aiChatProgress?.segments?.length,
     aiChatProgress?.content ? Math.floor(String(aiChatProgress.content).length / 320) : 0,
   ]);

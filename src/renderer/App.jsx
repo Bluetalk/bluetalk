@@ -17,6 +17,7 @@ import { useMessaging } from './app/hooks/useMessaging';
 import { useAiChat } from './app/hooks/useAiChat';
 import { useGamePresence } from './app/hooks/useGamePresence';
 import { usePluginHost } from './app/hooks/usePluginHost';
+import { TYPING_EXPIRE_MS } from '../shared/chat-typing.js';
 
 // Bestehende Importe aus '../App' (Pages/Components) bleiben gültig:
 export { useApp, useAiProgress } from './app/appContext';
@@ -34,8 +35,8 @@ export default function App() {
   const [agentAskUser, setAgentAskUser] = useState(null);
   const [peerGamePresence, setPeerGamePresence] = useState({});
   const [peerUserPresence, setPeerUserPresence] = useState({});
+  const [peerTyping, setPeerTyping] = useState({});
   const [gameInviteKeys, setGameInviteKeys] = useState(() => new Set());
-  const [docInvites, setDocInvites] = useState([]);
   const [theme, setTheme] = useState('dark');
   const [settings, setSettings] = useState({ ...DEFAULT_APP_SETTINGS });
   const messageCacheRef = useRef({});
@@ -77,6 +78,24 @@ export default function App() {
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      setPeerTyping((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [peerId, expiresAt] of Object.entries(next)) {
+          if (Number(expiresAt) <= now) {
+            delete next[peerId];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, Math.min(1000, TYPING_EXPIRE_MS));
+    return () => window.clearInterval(id);
+  }, []);
 
   const {
     applyContactPatch,
@@ -164,8 +183,8 @@ export default function App() {
     setChatLastViewedPeerTs,
     setPeerGamePresence,
     setPeerUserPresence,
+    setPeerTyping,
     setGameInviteKeys,
-    setDocInvites,
     setSettings,
     setTheme,
     setLoadError,
@@ -203,6 +222,8 @@ export default function App() {
   const {
     sendMessage,
     sendReadReceipt,
+    sendTyping,
+    toggleMessageReaction,
     deleteMessage,
     deleteChat,
     deleteGroupChat,
@@ -250,21 +271,13 @@ export default function App() {
     activeAiChatRequestRef,
     sendMessageRef,
     connectToAddress,
+    setAgentAskUser,
   });
 
   const { joinGameFromPresence } = useGamePresence({
     setPeerGamePresence,
     gameInviteKeys,
   });
-
-  /** Entfernt eine Dokument-Einladung aus der Liste im Dokumente-Tab. */
-  const dismissDocInvite = useCallback((roomId) => {
-    setDocInvites((prev) => {
-      const next = (Array.isArray(prev) ? prev : []).filter((entry) => entry?.roomId !== roomId);
-      void window.bluetalk?.store?.set?.('liveDocsInvites', next);
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     if (!window.bluetalk || loadError || !usernameOnboardingGateReady || showUsernameOnboarding) return undefined;
@@ -316,15 +329,16 @@ export default function App() {
     chatLastViewedPeerTs,
     peerGamePresence,
     peerUserPresence,
+    peerTyping,
     gameInviteKeys,
-    docInvites,
-    dismissDocInvite,
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
+    sendTyping,
     cancelAiChat,
     clearAiChatContext,
     sendReadReceipt,
+    toggleMessageReaction,
     loadChatMessages,
     connectToAddress,
     createGroupChat,
@@ -344,6 +358,8 @@ export default function App() {
     acceptMessageRequest,
     setContactBlocked,
     setContactNotificationMute,
+    agentAskUser,
+    setAgentAskUser,
   }), [
     peers,
     contacts,
@@ -360,15 +376,16 @@ export default function App() {
     chatLastViewedPeerTs,
     peerGamePresence,
     peerUserPresence,
+    peerTyping,
+    sendTyping,
     gameInviteKeys,
-    docInvites,
-    dismissDocInvite,
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
     cancelAiChat,
     clearAiChatContext,
     sendReadReceipt,
+    toggleMessageReaction,
     loadChatMessages,
     connectToAddress,
     createGroupChat,
@@ -388,6 +405,8 @@ export default function App() {
     acceptMessageRequest,
     setContactBlocked,
     setContactNotificationMute,
+    agentAskUser,
+    setAgentAskUser,
   ]);
 
   usePluginHost({
@@ -429,8 +448,6 @@ export default function App() {
           dismissVersionWelcome={dismissVersionWelcome}
           loadError={loadError}
           setLoadError={setLoadError}
-          agentAskUser={agentAskUser}
-          setAgentAskUser={setAgentAskUser}
         />
       </AiProgressContext.Provider>
     </AppContext.Provider>

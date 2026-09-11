@@ -22,6 +22,30 @@ fn tool(name: &str, description: &str, parameters: Value) -> Value {
 pub fn agent_tools() -> Vec<Value> {
     vec![
         tool(
+            "message_send",
+            "Schreibt eine sichtbare Chat-Bubble in DIESEN Bot-Chat. NUTZE: für JEDE Nachricht, die der Nutzer sehen soll (Antwort, Zwischenstand, Ergebnis, Fehler). Ohne diesen Aufruf bleibt der Chat leer — Assistant-Text ist unsichtbar. NICHT NUTZEN für Nachrichten an andere Kontakte (dafür send_bluetalk_message).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Text der Chat-Bubble, die der Nutzer sieht."}
+                },
+                "required": ["content"]
+            }),
+        ),
+        tool(
+            "attach_file",
+            "Hängt eine Datei aus dem Arbeitsverzeichnis an DIESEN Bot-Chat. NUTZE: wenn der Nutzer eine Datei sehen, herunterladen oder öffnen soll. as=\"file\" bettet kleine Dateien (max. 8 MB) als Anhang ein; as=\"link\" oder große Dateien erscheinen als klickbarer Pfad. NICHT NUTZEN für Textinhalte — die gehören in message_send oder write_file.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Dateipfad relativ zum Arbeitsverzeichnis oder absolut innerhalb davon."},
+                    "as": {"type": "string", "enum": ["file", "link"], "description": "file = Inhalt anhängen (wenn klein genug), link = nur Pfad verlinken. Standard: file."},
+                    "caption": {"type": "string", "description": "Optionaler Text zur Datei."}
+                },
+                "required": ["path"]
+            }),
+        ),
+        tool(
             "list_files",
             "Listet die Einträge eines Verzeichnisses auf (Dateien und Ordner, alphabetisch sortiert). NUTZE: um herauszufinden, was in einem Ordner liegt, bevor du Dateien liest oder änderst. NICHT NUTZEN: um den Inhalt von Dateien zu sehen — dafür read_file verwenden.",
             json!({
@@ -150,11 +174,16 @@ pub fn agent_tools() -> Vec<Value> {
         ),
         tool(
             "ask_user",
-            "Stellt dem Nutzer eine Rückfrage im Chat und wartet auf die Antwort. NUTZE: wenn eine Entscheidung des Nutzers nötig ist (z. B. welche Variante, ob ein Riskanter Befehl erlaubt ist) oder eine Anforderung mehrdeutig ist. NICHT NUTZEN: für Dinge, die du selbst verantwortlich lösen kannst. Eine Frage pro Schritt.",
+            "Stellt dem Nutzer eine Rückfrage im Chat und wartet auf die Antwort. Die Frage erscheint über der Chatzeile, optional mit Antwort-Buttons. NUTZE: wenn eine Entscheidung nötig ist oder die Anforderung mehrdeutig ist. NICHT NUTZEN für Dinge, die du selbst lösen kannst. Eine Frage pro Schritt.",
             json!({
                 "type": "object",
                 "properties": {
-                    "question": {"type": "string", "description": "Klare, konkrete Frage an den Nutzer."}
+                    "question": {"type": "string", "description": "Klare, konkrete Frage an den Nutzer."},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optionale Antwortmöglichkeiten (max. 8 kurze Labels). Der Nutzer kann auch frei tippen."
+                    }
                 },
                 "required": ["question"]
             }),
@@ -319,14 +348,19 @@ pub fn is_bluetalk_agent_tool(name: &str) -> bool {
 pub fn tool_set_for_tier(tier_id: &str) -> Vec<&'static str> {
     match tier_id {
         "fast" => vec![
+            "message_send",
+            "attach_file",
             "list_files",
             "read_file",
             "extract_file",
             "write_file",
             "run_command",
             "memory",
+            "ask_user",
         ],
         "normal" => vec![
+            "message_send",
+            "attach_file",
             "list_files",
             "search_files",
             "read_file",
@@ -347,6 +381,8 @@ pub fn tool_set_for_tier(tier_id: &str) -> Vec<&'static str> {
             "send_bluetalk_reply",
         ],
         "normal+" => vec![
+            "message_send",
+            "attach_file",
             "list_files",
             "search_files",
             "read_file",
@@ -377,6 +413,8 @@ pub fn tool_set_for_tier(tier_id: &str) -> Vec<&'static str> {
 
 fn agent_tool_names_static() -> Vec<&'static str> {
     vec![
+        "message_send",
+        "attach_file",
         "list_files",
         "search_files",
         "read_file",
@@ -426,6 +464,8 @@ pub fn get_tools_for_tier(tier_id: &str) -> Vec<Value> {
 /// Kurze Prompt-Hinweise pro Tool.
 pub fn tool_prompt_hint(name: &str) -> &'static str {
     match name {
+        "message_send" => "Sichtbare Chat-Bubble in diesen Bot-Chat schreiben (Pflicht für jede Nutzer-Antwort)",
+        "attach_file" => "Datei aus dem Arbeitsverzeichnis an diesen Chat anhängen oder als Pfad verlinken",
         "list_files" => "Verzeichnisinhalt auflisten — Orientierung vor dem Lesen",
         "search_files" => "Dateien per Glob-Muster finden (z. B. \"**/*.js\")",
         "read_file" => "Dateiinhalt als String lesen — Pflicht vor edit_file",
@@ -436,7 +476,7 @@ pub fn tool_prompt_hint(name: &str) -> &'static str {
         "run_command" => "Shell-/CMD-Befehl ausführen (Build, Test, git, npm, …)",
         "web_fetch" => "HTTP/HTTPS-URL abrufen — Live-Doku, APIs, öffentliche Seiten",
         "memory" => "Persistente Notizen lesen/schreiben (über Chats hinweg)",
-        "ask_user" => "Nutzer im Chat eine Rückfrage stellen und auf Antwort warten",
+        "ask_user" => "Rückfrage mit optionalen Antwort-Buttons über der Chatzeile stellen",
         "spawn_subagent" => "Teilaufgabe an isolierten Sub-Agenten delegieren",
         "bluetalk_command" => "BlueTalk-Plugin-Befehl ausführen (Spiele, Theme, …)",
         "list_bluetalk_contacts" => "BlueTalk-Kontakte auflisten (peer_id finden)",
@@ -487,7 +527,7 @@ pub fn build_agent_tools_prompt_section(tier_id: &str) -> String {
         tools.len()
     ));
     section.push_str(
-        "**Regeln:**\n- Handlungsorientierte Anfrage → zuerst passendes Tool aufrufen, dann antworten.\n- Nie behaupten, du könntest keine Dateien/Befehle/URLs nutzen — du hast die Tools oben.\n- Nie Tool-Ergebnisse erfinden oder simulieren.\n- Tools per Function Calling aufrufen — nicht als JSON-Text in der Antwort schreiben.\n\nDeine Tools für diese Modell-Stufe:\n",
+        "**Regeln:**\n- Handlungsorientierte Anfrage → zuerst passendes Tool aufrufen, dann message_send.\n- Jede sichtbare Antwort an den Nutzer NUR über message_send — Assistant-Text ist unsichtbar.\n- Nie behaupten, du könntest keine Dateien/Befehle/URLs nutzen — du hast die Tools oben.\n- Nie Tool-Ergebnisse erfinden oder simulieren.\n- Tools per Function Calling aufrufen — nicht als JSON-Text in der Antwort schreiben.\n\nDeine Tools für diese Modell-Stufe:\n",
     );
     section.push_str(&lines.join("\n"));
     section

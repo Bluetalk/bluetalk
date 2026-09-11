@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import ReactDOM from 'react-dom';
 import {
   Blocks,
-  BookOpen,
   Copy,
   FolderOpen,
   Package,
@@ -12,7 +10,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  Upload,
+  X,
 } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
@@ -56,6 +54,11 @@ function describePermissions(plugin) {
     out.push({ code: String(raw), label });
   }
   return out;
+}
+
+function pluginInitial(plugin) {
+  const name = String(plugin.manifest?.name || plugin.id || '?').trim();
+  return (name[0] || '?').toUpperCase();
 }
 
 function clampMenuPosition(x, y, menuW = 240, menuH = 280) {
@@ -310,91 +313,105 @@ export default function PluginsPage() {
   ) : null;
 
   return (
-    <div className="page page-plugins" onContextMenu={openPageMenu}>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title-row">
-            <span className="page-title-icon" aria-hidden>
-              <Blocks size={18} strokeWidth={ICON_STROKE} />
-            </span>
-            Erweiterungen
-          </h1>
-          <p>
-            Füge Spiele, Tools und Extras hinzu. Aktivierte Erweiterungen erscheinen in der Seitenleiste.
-          </p>
-          {!debugMode ? (
-            <p className="plugin-page-hint text-sm text-muted">Rechtsklick für Installation und Verwaltung</p>
-          ) : null}
-        </div>
-        <div className="page-header-actions">
-          <Link to="/docs/getting-started" className="btn btn-secondary btn-sm">
-            <BookOpen size={15} strokeWidth={ICON_STROKE} />
-            API-Dokumentation
-          </Link>
-          <button type="button" className="btn btn-primary btn-sm" onClick={installFromDialog} disabled={busy === 'install'}>
-            <Plus size={15} strokeWidth={ICON_STROKE} />
-            {busy === 'install' ? 'Wird hinzugefügt…' : 'Hinzufügen'}
-          </button>
-          {debugMode ? (
-            <>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={openDir}>
-                <FolderOpen size={15} strokeWidth={ICON_STROKE} />
-                Ordner
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={rescan} disabled={busy === 'rescan'}>
-                <RefreshCw size={15} strokeWidth={ICON_STROKE} />
-                {busy === 'rescan' ? 'Scan…' : 'Rescan'}
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={reseedBundled} disabled={busy === 'reseed'}>
-                <Package size={15} strokeWidth={ICON_STROKE} />
-                Restore bundled
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={installFromDialog} disabled={busy === 'install'}>
-                <Upload size={15} strokeWidth={ICON_STROKE} />
-                Install folder
-              </button>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="plugin-search-row">
-        <div className="search-bar" style={{ minWidth: 200, maxWidth: 360 }}>
-          <Search size={14} />
-          <input
-            className="input"
-            placeholder="Erweiterungen durchsuchen…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="plugin-grid">
-        {plugins.length === 0 ? (
-          <div className="plugin-empty">
-            <h3>Noch keine Erweiterungen</h3>
-            <p>
-              Klicke auf <strong>Hinzufügen</strong> oder nutze den Rechtsklick, um eine Erweiterung zu installieren.
-            </p>
+    <div className="page page-inset page-plugins" onContextMenu={openPageMenu}>
+      <div className="page-shell">
+        <header className="page-shell-header">
+          <div className="page-shell-copy">
+            <h1>Erweiterungen</h1>
+            <p>Spiele, Tools und Extras. Aktivierte Einträge erscheinen in der Seitenleiste.</p>
           </div>
-        ) : null}
-        {plugins.length > 0 && visiblePlugins.length === 0 ? (
-          <div className="plugin-empty">
-            <h3>Keine Treffer</h3>
-            <p>Keine Erweiterung passt zur Suche.</p>
+          <div className="page-shell-actions">
+            {debugMode ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-icon btn-sm"
+                  onClick={openDir}
+                  title="Ordner öffnen"
+                  aria-label="Ordner öffnen"
+                >
+                  <FolderOpen size={15} strokeWidth={ICON_STROKE} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-icon btn-sm"
+                  onClick={rescan}
+                  disabled={busy === 'rescan'}
+                  title="Erneut scannen"
+                  aria-label="Erneut scannen"
+                >
+                  <RefreshCw size={15} strokeWidth={ICON_STROKE} className={busy === 'rescan' ? 'page-shell-spin is-spinning' : undefined} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-icon btn-sm"
+                  onClick={reseedBundled}
+                  disabled={busy === 'reseed'}
+                  title="Standard wiederherstellen"
+                  aria-label="Standard wiederherstellen"
+                >
+                  <Package size={15} strokeWidth={ICON_STROKE} />
+                </button>
+              </>
+            ) : null}
+            <button type="button" className="btn btn-primary btn-sm" onClick={installFromDialog} disabled={busy === 'install'}>
+              <Plus size={15} strokeWidth={ICON_STROKE} />
+              {busy === 'install' ? 'Wird hinzugefügt…' : 'Hinzufügen'}
+            </button>
           </div>
-        ) : null}
+        </header>
+
+        <div className="page-shell-search">
+          <div className="search-bar">
+            <Search size={14} strokeWidth={ICON_STROKE} aria-hidden />
+            <input
+              className="input"
+              placeholder="Erweiterungen durchsuchen…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search ? (
+              <button
+                type="button"
+                className="search-bar-clear"
+                aria-label="Suche zurücksetzen"
+                onClick={() => setSearch('')}
+              >
+                <X size={13} strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="page-shell-body">
+          <div className="plugin-grid">
+          {plugins.length === 0 ? (
+            <div className="page-empty">
+              <Blocks size={28} strokeWidth={ICON_STROKE} aria-hidden />
+              <p className="empty-state-title">Noch keine Erweiterungen</p>
+              <p>Klicke auf Hinzufügen oder nutze den Rechtsklick, um eine Erweiterung zu installieren.</p>
+            </div>
+          ) : null}
+          {plugins.length > 0 && visiblePlugins.length === 0 ? (
+            <div className="page-empty">
+              <Search size={28} strokeWidth={ICON_STROKE} aria-hidden />
+              <p className="empty-state-title">Keine Treffer</p>
+              <p>Keine Erweiterung passt zur Suche.</p>
+            </div>
+          ) : null}
         {visiblePlugins.map((plugin) => {
           const permissions = describePermissions(plugin);
+          const extraPerms = Math.max(0, permissions.length - 3);
+          const shownPerms = permissions.slice(0, 3);
           return (
           <article
             key={plugin.id}
-            className={`plugin-card ${plugin.enabled ? 'is-enabled' : ''}`}
+            className={`plugin-card${plugin.enabled ? ' is-enabled' : ' is-off'}`}
             onContextMenu={(e) => openPluginMenu(e, plugin)}
           >
             <header className="plugin-card-head">
-              <div>
+              <span className="plugin-card-mark" aria-hidden>{pluginInitial(plugin)}</span>
+              <div className="plugin-card-heading">
                 <h4>
                   {plugin.manifest?.name || plugin.id}
                   {plugin.manifest?.tag ? (
@@ -403,9 +420,14 @@ export default function PluginsPage() {
                 </h4>
                 {debugMode ? (
                   <span className="plugin-card-meta">
-                    v{plugin.manifest?.version || '0.0.0'} · {plugin.manifest?.author || 'Unknown author'}
+                    v{plugin.manifest?.version || '0.0.0'} · {plugin.manifest?.author || 'Unbekannt'}
                   </span>
-                ) : null}
+                ) : (
+                  <span className={`plugin-status ${plugin.enabled ? 'plugin-status--on' : 'plugin-status--off'}`}>
+                    <span className="plugin-status-dot" aria-hidden />
+                    {plugin.enabled ? 'Aktiv' : 'Inaktiv'}
+                  </span>
+                )}
               </div>
               <label className="toggle" onContextMenu={(e) => e.stopPropagation()}>
                 <input
@@ -425,9 +447,9 @@ export default function PluginsPage() {
                 Alpha: Diese Erweiterung ist noch in Entwicklung und funktioniert möglicherweise nicht wie erwartet.
               </p>
             ) : null}
-            {permissions.length || (debugMode && (plugin.hasUi || plugin.hasMain)) ? (
+            {debugMode && (shownPerms.length || plugin.hasUi || plugin.hasMain) ? (
               <div className="plugin-card-caps" aria-label="Berechtigungen">
-                {permissions.map((perm) => (
+                {shownPerms.map((perm) => (
                   <span
                     key={perm.code}
                     className="plugin-cap plugin-cap-perm"
@@ -436,6 +458,9 @@ export default function PluginsPage() {
                     {perm.label}
                   </span>
                 ))}
+                {extraPerms > 0 ? (
+                  <span className="plugin-cap">+{extraPerms}</span>
+                ) : null}
                 {debugMode && plugin.hasUi ? <span className="plugin-cap">UI</span> : null}
                 {debugMode && plugin.hasMain ? <span className="plugin-cap">Main</span> : null}
               </div>
@@ -445,30 +470,26 @@ export default function PluginsPage() {
                 {debugMode ? plugin.lastError : 'Diese Erweiterung konnte nicht geladen werden.'}
               </div>
             ) : null}
-            <footer className="plugin-card-foot">
-              {debugMode ? (
+            {debugMode ? (
+              <footer className="plugin-card-foot">
                 <span className="plugin-card-id">{plugin.id}</span>
-              ) : (
-                <span className={`plugin-status ${plugin.enabled ? 'plugin-status--on' : 'plugin-status--off'}`}>
-                  <span className="plugin-status-dot" aria-hidden />
-                  {plugin.enabled ? 'Aktiv' : 'Inaktiv'}
-                </span>
-              )}
-              {debugMode ? (
                 <button
                   type="button"
-                  className="btn btn-danger btn-sm"
+                  className="btn btn-ghost btn-icon btn-sm"
                   onClick={() => uninstall(plugin)}
                   disabled={busy === `remove:${plugin.id}`}
+                  title="Entfernen"
+                  aria-label="Entfernen"
                 >
                   <Trash2 size={14} strokeWidth={ICON_STROKE} />
-                  {busy === `remove:${plugin.id}` ? 'Removing…' : 'Uninstall'}
                 </button>
-              ) : null}
-            </footer>
+              </footer>
+            ) : null}
           </article>
           );
         })}
+          </div>
+        </div>
       </div>
 
       {menuPortal}

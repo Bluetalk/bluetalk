@@ -42,12 +42,21 @@
   --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
   --shadow-xl: 0 16px 48px rgba(0,0,0,0.5);
 
+  --bot-avatar-hi: #ffffff;
+  --bot-avatar-mid: #f4f4f6;
+  --bot-avatar-lo: #d8d8e0;
+  --bot-avatar-eye: #141416;
+  --bot-avatar-spark: #ffffff;
+  --bot-avatar-sheen: rgba(255, 255, 255, 0.7);
+  --bot-avatar-ring: rgba(0, 0, 0, 0.08);
+  --bot-avatar-drop: rgba(0, 0, 0, 0.28);
+
   /* Theme-unabhängig; wird u.a. von .msg-agent-tool-line referenziert */
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
 }
 
 [data-theme="light"] {

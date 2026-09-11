@@ -379,7 +379,7 @@ function validateIncomingGroupMessage(group, envelope, transportPeerId, selfPeer
   }
   if (!isActiveGroupMember(group, transportPeerId)) return { ok: false, error: 'sender_not_member' };
   if (!isActiveGroupMember(group, selfPeerId)) return { ok: false, error: 'recipient_not_member' };
-  if (!envelope.payload || !['chat', 'file', 'sticker', 'contact-share'].includes(envelope.payload.kind)) {
+  if (!envelope.payload || !['chat', 'file', 'sticker', 'contact-share', 'reaction'].includes(envelope.payload.kind)) {
     return { ok: false, error: 'unsupported_group_payload' };
   }
   return { ok: true };

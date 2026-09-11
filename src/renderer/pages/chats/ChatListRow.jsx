@@ -3,7 +3,7 @@ import { Bot, BellOff, ChevronDown, Pin, Users } from 'lucide-react';
 import {
   formatGamePresenceLabel,
 } from '../../../shared/game-presence.js';
-import { isPeerDoNotDisturb } from '../../../shared/user-presence.js';
+import { peerPresenceKind } from './peerPresence.js';
 import { isContactNotificationMuted } from '../../contactNotificationMute';
 import {
   CHAT_ICON_STROKE,
@@ -28,7 +28,7 @@ function ChatListRowInner({
   isParentActive,
   selectedSubagent,
   aiPending,
-  ollamaSetupComplete,
+  peerTypingActive = false,
   debugMode,
   nested = false,
   onSelect,
@@ -38,11 +38,36 @@ function ChatListRowInner({
 }) {
   const hasSubagents = subagents.length > 0;
   const runningSubagentCount = subagents.filter((seg) => seg.status === 'running').length;
+  const presenceKind = peerPresenceKind(chat, chat.isAiChat, chat.isGroup);
+  const lampKind = presenceKind === 'group'
+    ? (chat.offline ? 'offline' : 'online')
+    : presenceKind === 'game'
+      ? 'online'
+      : presenceKind;
+
+  const avatar = chat.isGroup ? (
+    chat.profilePicture ? (
+      <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
+    ) : (
+      <div className="group-chat-list-avatar" aria-hidden><Users size={19} strokeWidth={CHAT_ICON_STROKE} /></div>
+    )
+  ) : chat.isAiChat ? (
+    <PeerAvatar
+      pictureUrl={chat.profilePicture}
+      name={chat.displayName}
+      size={36}
+      className="peer-avatar-img--bot"
+      botStatus={aiPending ? 'thinking' : chat.botReady ? 'idle' : 'setup'}
+    />
+  ) : (
+    <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
+  );
 
   return (
     <React.Fragment>
       <div
         className={`list-item ${isParentActive ? 'active' : ''}${chat.contact?.blocked ? ' list-item--blocked' : ''}${chat.contact?.blockedByPeer ? ' list-item--blocked-by-peer' : ''}${unreadCount > 0 ? ' list-item--has-unread' : ''}${chat.isAiChat ? ' list-item--ai' : ''}${chat.isGroup ? ' list-item--group' : ''}${nested ? ' list-item--nested' : ''}${hasSubagents ? ' list-item--expandable' : ''}${subagentsExpanded ? ' list-item--expanded' : ''}`}
+        title={chat.displayName}
         onClick={() => onSelect(chat.id)}
         onContextMenu={(e) => onContextMenu(e, chat)}
       >
@@ -63,31 +88,13 @@ function ChatListRowInner({
             />
           </button>
         ) : null}
-        {chat.isGroup ? (
-          chat.profilePicture ? (
-            <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
-          ) : (
-            <div className="group-chat-list-avatar" aria-hidden><Users size={19} strokeWidth={CHAT_ICON_STROKE} /></div>
-          )
-        ) : chat.isAiChat ? (
-          chat.profilePicture ? (
-            <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
-          ) : (
-            <div className="ai-chat-list-avatar" aria-hidden>
-              <Bot size={20} strokeWidth={CHAT_ICON_STROKE} />
-            </div>
-          )
-        ) : (
-          <PeerAvatar pictureUrl={chat.profilePicture} name={chat.displayName} size={36} />
-        )}
+        <span className="list-item-avatar-wrap">
+          {avatar}
+          <span className={`chat-header-presence-dot is-${lampKind}`} aria-hidden />
+        </span>
         <div className="list-item-info">
           <div className="list-item-name-row">
             <div className="list-item-name">{chat.displayName}</div>
-            {chat.isAgent ? (
-              <span className="ai-agent-badge" title="Agent-Modus — kann Dateien, Befehle und BlueTalk-Werkzeuge nutzen">
-                Agent
-              </span>
-            ) : null}
             {chat.pinned && (
               <span className="chat-pin-badge" title="Angehefteter Chat">
                 <Pin size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
@@ -99,7 +106,7 @@ function ChatListRowInner({
               </span>
             )}
           </div>
-          <div className="list-item-sub">
+          <div className={`list-item-sub${(!chat.isGroup && (aiPending || peerTypingActive)) ? ' list-item-sub--typing' : ''}`}>
             {chat.isGroup
               ? (chat.lastMessage
                 ? `${chat.lastMessage.from === 'self' ? 'Du' : (chat.lastMessage.sender || 'Mitglied')}: ${getLastPreview(chat.lastMessage, debugMode).replace(/^You: |^Du: /, '')}`
@@ -108,12 +115,16 @@ function ChatListRowInner({
               ? (aiPending
                 ? (runningSubagentCount > 0
                   ? `${runningSubagentCount} Sub-Agent${runningSubagentCount === 1 ? '' : 'en'} aktiv…`
-                  : 'Antwort wird erstellt…')
+                  : 'schreibt…')
                 : (hasSubagents && !subagentsExpanded
                   ? `${subagents.length} Sub-Agent${subagents.length === 1 ? '' : 'en'}`
-                  : (ollamaSetupComplete
-                    ? 'Agent · bereit'
-                    : 'Einrichtung nötig')))
+                  : chat.lastMessage
+                    ? getLastPreview(chat.lastMessage, debugMode)
+                    : (chat.botReady
+                      ? 'Bot · bereit'
+                      : 'API einrichten')))
+              : peerTypingActive
+                ? 'schreibt…'
               : chat.gamePresence
                 ? formatGamePresenceLabel(chat.gamePresence)
                 : getLastPreview(chat.lastMessage, debugMode)}
@@ -142,22 +153,13 @@ function ChatListRowInner({
                   <span className="spinner spinner--sm" aria-hidden />
                 </span>
               ) : (
-                <span className="ai-chat-list-badge" title="KI-Chat">KI</span>
+                <span className="ai-chat-list-badge" title="Bot">Bot</span>
               )
-            ) : (
-              <>
-              {chat.gamePresence ? (
-                <span className="game-presence-list-badge" title={formatGamePresenceLabel(chat.gamePresence)}>
-                  {chat.gamePresence.game === 'poker' ? '♠' : chat.gamePresence.game === 'connect-four' ? '🔴' : chat.gamePresence.game === 'chess' ? '♟' : chat.gamePresence.game === 'tic-tac-toe' ? '✕' : '🎴'}
-                </span>
-              ) : null}
-              {!chat.offline && isPeerDoNotDisturb(chat.userPresence) ? (
-                <span className="dnd-dot" title="Nicht stören" />
-              ) : (
-                <span className={chat.offline ? 'offline-dot' : 'online-dot'} />
-              )}
-              </>
-            )}
+            ) : chat.gamePresence ? (
+              <span className="game-presence-list-badge" title={formatGamePresenceLabel(chat.gamePresence)}>
+                {chat.gamePresence.game === 'poker' ? '♠' : chat.gamePresence.game === 'connect-four' ? '🔴' : chat.gamePresence.game === 'chess' ? '♟' : chat.gamePresence.game === 'tic-tac-toe' ? '✕' : '🎴'}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

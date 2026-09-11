@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import { ModalOverlay } from '../../../components/ModalOverlay.jsx';
 import { CHAT_ICON_STROKE } from '../messageHelpers.jsx';
 
 /**
@@ -31,9 +32,9 @@ export function ConnectDialog({ open, onClose, connectToAddress, onConnected, se
       onClose();
       setConnectAddress('');
     } catch (err) {
-      const msg = err.message || 'Connection failed';
+      const msg = err.message || 'Verbindung fehlgeschlagen';
       setWarning(msg);
-      toast({ variant: 'error', title: 'Connection failed', message: msg });
+      toast({ variant: 'error', title: 'Verbindung fehlgeschlagen', message: msg });
     } finally {
       setConnecting(false);
     }
@@ -42,19 +43,19 @@ export function ConnectDialog({ open, onClose, connectToAddress, onConnected, se
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <ModalOverlay onClick={onClose}>
       <div className="modal animate-scale" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
-          <h3 style={{ margin: 0 }}>Connect to Peer</h3>
+          <h3 style={{ margin: 0 }}>Mit Peer verbinden</h3>
           <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Schließen">
             <X size={16} strokeWidth={CHAT_ICON_STROKE} />
           </button>
         </div>
         <div className="input-group">
-          <label>Address or IP</label>
+          <label>Adresse oder IP</label>
           <input
             className="input font-mono"
-            placeholder="e.g. 192.168.1.42 or 192.168.1.42:8080"
+            placeholder="z. B. 192.168.1.42 oder 192.168.1.42:8080"
             value={connectAddress}
             onChange={(e) => setConnectAddress(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
@@ -62,17 +63,17 @@ export function ConnectDialog({ open, onClose, connectToAddress, onConnected, se
           />
         </div>
         <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>Abbrechen</button>
           <button className="btn btn-primary" onClick={handleConnect} disabled={!connectAddress.trim() || connecting}>
             {connecting ? (
               <span className="spinner-label">
                 <span className="spinner spinner--sm spinner--accent" />
-                <span>Connecting</span>
+                <span>Verbinden…</span>
               </span>
-            ) : 'Connect'}
+            ) : 'Verbinden'}
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

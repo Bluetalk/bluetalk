@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Save, Trash2 } from 'lucide-react';
+import { Save, Trash2 } from 'lucide-react';
 import StickerMessage from '../../components/StickerMessage';
 import { isContactNotificationMuted } from '../../contactNotificationMute';
 import groupChat from '../../../shared/group-chat.js';
@@ -7,25 +7,30 @@ import {
   CHAT_BATCH_SIZE,
   CHAT_ICON_STROKE,
   PeerAvatar,
+  formatDaySeparator,
   formatGenTime,
   formatMessageTime,
   formatMuteExpiry,
   isBareMediaMessage,
+  isStickerMessage,
   isChatEmbedMessage,
+  isMessageClusterContinuation,
+  isSameCalendarDay,
   selfDeliveryLabel,
-  splitThinkingText,
 } from './messageHelpers.jsx';
 import {
   ContactShareMessage,
   FileMessage,
+  FileLinkMessage,
   GamePresenceBanner,
   MessageReplyQuote,
 } from './messageParts.jsx';
-import { ChatMessage, MessageSegments } from './agentBlocks.jsx';
+import { ChatMessage } from './agentBlocks.jsx';
+import { MessageReactions } from './MessageReactions.jsx';
 
 const { getGroupMember } = groupChat;
 
-// Einladungen erscheinen im Spiele-/Dokumente-Tab, nicht im Verlauf.
+// Spiel-Einladungen erscheinen im Spiele-Tab, nicht im Verlauf.
 const INVITE_MESSAGE_KINDS = new Set([
   'poker-invite',
   'uno-invite',
@@ -46,7 +51,7 @@ const INVITE_MESSAGE_KINDS = new Set([
  * - chat: { selectedPeer, selectedContact, isAiChatSelected, isGroupSelected, ownPeerId }
  * - data: { msgs, readUpToId, hasMoreMessages, loadingMessages, loadingMore }
  * - ui: { debugMode, settings, contactById, peers, selectionMode,
- *   selectedMessageIds, aiChatPending, liveAiProgress }
+ *   selectedMessageIds, aiChatPending, liveAiProgress, peerTypingActive }
  * - scroll: { chatMessagesRef, endRef, onScroll }
  * - actions: { onLoadOlder(), onToggleSelectMessage(id),
  *   onOpenMessageContextMenu(e, m), onExpandImage(payload), onSaveFile(m),
@@ -65,18 +70,27 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
     selectionMode,
     selectedMessageIds,
     aiChatPending,
-    liveAiProgress,
+    peerTypingActive = false,
+    liveAiProgress = null,
+    workLogEnabled = false,
   } = ui;
+
+  const visibleMsgs = msgs.filter((m) => !INVITE_MESSAGE_KINDS.has(m.kind));
 
   return (
     <div className={`chat-messages${isAiChatSelected ? ' chat-messages--ai' : ''}`} ref={scroll.chatMessagesRef} onScroll={scroll.onScroll}>
-      {false ? (
+      {isAiChatSelected && visibleMsgs.length === 0 && !aiChatPending && !peerTypingActive ? (
         <div className="empty-state ai-chat-ready-placeholder">
-          <Bot size={36} strokeWidth={1.5} aria-hidden />
-          <p>KI-Chat ist eingerichtet. Die Chat-Unterhaltung wird als Nächstes implementiert.</p>
+          <PeerAvatar
+            pictureUrl={selectedPeer.profilePicture}
+            name={selectedPeer.displayName}
+            size={56}
+            className="peer-avatar-img--bot"
+            botStatus={aiChatPending ? 'thinking' : 'idle'}
+          />
+          <p>Schreib dem Bot — Antworten erscheinen wie bei einem Kontakt.</p>
         </div>
-      ) : (
-      <>
+      ) : null}
       {isGroupSelected && !selectedPeer.canSend ? (
         <div className="chat-warning" role="status">
           {getGroupMember(selectedPeer.group, ownPeerId)?.state === 'invited'
@@ -171,16 +185,19 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
         </div>
       )}
 
-      {!loadingMessages && msgs.length === 0 && (
+      {!loadingMessages && msgs.length === 0 && !aiChatPending && !peerTypingActive && (
         <div className="chat-empty">
           <p className="text-muted">No messages yet. Say hello!</p>
         </div>
       )}
 
-      {msgs.map((m, i) => {
-        // Spiel-/Dokument-Einladungen leben im Spiele- bzw. Dokumente-Tab;
-        // Alt-Einträge im Verlauf werden nicht mehr als Karten gerendert.
-        if (INVITE_MESSAGE_KINDS.has(m.kind)) return null;
+      {visibleMsgs.map((m, i) => {
+        const prev = visibleMsgs[i - 1];
+        const next = visibleMsgs[i + 1];
+        const clusteredWithPrev = isMessageClusterContinuation(prev, m);
+        const clusteredWithNext = isMessageClusterContinuation(m, next);
+        const showDaySep = typeof m.timestamp === 'number'
+          && (!prev || !isSameCalendarDay(prev.timestamp, m.timestamp));
         const isSelf = m.from === 'self';
         const bubbleName = isSelf ? (settings.displayName || 'You') : (m.sender || selectedPeer.displayName);
         const senderContact = isGroupSelected && !isSelf ? contactById.get(m.senderPeerId || m.from) : null;
@@ -189,34 +206,58 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
           : isGroupSelected
             ? (senderContact?.profilePicture || '')
             : selectedPeer.profilePicture;
+        const stickerMessage = isStickerMessage(m);
         const bareMedia = isBareMediaMessage(m);
         const embedMessage = isChatEmbedMessage(m, debugMode);
-        const isAiAgentMessage = isAiChatSelected && !isSelf;
-        const outsideBubble = bareMedia || embedMessage;
+        const isLegacyAgentMessage = isAiChatSelected && !isSelf && m.via !== 'message_send'
+          && Boolean(m.segments || m.thinking || m.toolEvents);
+        const isBotBubble = isAiChatSelected && !isSelf && !isLegacyAgentMessage;
+        const outsideBubble = bareMedia || embedMessage || stickerMessage;
         const delivery = selfDeliveryLabel(m);
         const seen = isSelf && readUpToId && m.messageId && readUpToId === m.messageId ? 'Seen' : '';
         const isSelected = Boolean(m.messageId && selectedMessageIds.has(m.messageId));
         const aiStats = !isSelf && m.aiStats && typeof m.aiStats === 'object' ? m.aiStats : null;
+        const showAvatar = isGroupSelected && !isLegacyAgentMessage && !isBotBubble && !selectionMode && !clusteredWithNext;
+        const showAvatarSpacer = isGroupSelected && !isLegacyAgentMessage && !isBotBubble && !selectionMode && clusteredWithNext;
+        const showSender = isGroupSelected && !isSelf && !clusteredWithPrev;
+        const showTime = !clusteredWithNext;
+        const showMeta = Boolean(
+          showTime
+          || delivery.pending
+          || delivery.text
+          || seen
+          || aiStats?.tps > 0
+          || aiStats?.genTimeMs > 0
+          || m.aiStopped
+        );
         return (
-          <div
-            key={m.messageId || `${m.timestamp || i}-${m.from || 'msg'}-${i}`}
-            className={[
-              'msg-row',
-              isSelf ? 'msg-row-self' : 'msg-row-other',
-              outsideBubble && 'msg-row--bare',
-              isAiAgentMessage && 'msg-row--ai-agent',
-              embedMessage && 'msg-row--embed',
-              selectionMode && 'msg-row--selectable',
-              isSelected && 'msg-row--selected',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            onClick={
-              selectionMode && m.messageId
-                ? () => actions.onToggleSelectMessage(m.messageId)
-                : undefined
-            }
-          >
+          <React.Fragment key={m.messageId || `${m.timestamp || i}-${m.from || 'msg'}-${i}`}>
+            {showDaySep ? (
+              <div className="msg-day-sep" role="separator">
+                <span>{formatDaySeparator(m.timestamp)}</span>
+              </div>
+            ) : null}
+            <div
+              className={[
+                'msg-row',
+                isSelf ? 'msg-row-self' : 'msg-row-other',
+                outsideBubble && 'msg-row--bare',
+                stickerMessage && 'msg-row--sticker',
+                isLegacyAgentMessage && 'msg-row--ai-agent',
+                embedMessage && 'msg-row--embed',
+                selectionMode && 'msg-row--selectable',
+                isSelected && 'msg-row--selected',
+                clusteredWithPrev && 'msg-row--cluster-follow',
+                clusteredWithNext && 'msg-row--cluster-lead',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={
+                selectionMode && m.messageId
+                  ? () => actions.onToggleSelectMessage(m.messageId)
+                  : undefined
+              }
+            >
             {selectionMode && m.messageId ? (
               <label className="msg-select-check" onClick={(e) => e.stopPropagation()}>
                 <input
@@ -227,16 +268,19 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 />
               </label>
             ) : null}
-            {!selectionMode && !isAiAgentMessage ? (
+            {showAvatar ? (
               <PeerAvatar pictureUrl={bubblePic} name={bubbleName} size={28} className="msg-avatar" />
+            ) : showAvatarSpacer ? (
+              <span className="msg-avatar-spacer" aria-hidden />
             ) : null}
+            <div className="msg-stack">
+            {showSender ? <div className="msg-sender">{bubbleName}</div> : null}
             <div
-              className={['msg', isSelf ? 'msg-self' : isAiAgentMessage ? 'msg--ai-agent' : 'msg-other', bareMedia && 'msg--bare-media', embedMessage && 'msg--embed', 'animate-in']
+              className={['msg', isSelf ? 'msg-self' : isLegacyAgentMessage ? 'msg--ai-agent' : 'msg-other', bareMedia && 'msg--bare-media', stickerMessage && 'msg--sticker', embedMessage && 'msg--embed', 'animate-in']
                 .filter(Boolean)
                 .join(' ')}
               onContextMenu={selectionMode ? undefined : (e) => actions.onOpenMessageContextMenu(e, m)}
             >
-              {!isSelf && !selectionMode && <div className="msg-sender">{m.sender || m.from}</div>}
               {m.replyTo && m.kind !== 'chat' ? (
                 <MessageReplyQuote replyTo={m.replyTo} isSelf={isSelf} />
               ) : null}
@@ -247,8 +291,10 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                   onExpandImage={actions.onExpandImage}
                   onSaveToDisk={actions.onSaveFile}
                 />
+              ) : m.kind === 'file-link' ? (
+                <FileLinkMessage message={m} />
               ) : m.kind === 'sticker' ? (
-                <StickerMessage message={m} onExpandImage={actions.onExpandImage} />
+                <StickerMessage message={m} />
               ) : m.kind === 'contact-share' ? (
                 <ContactShareMessage
                   message={m}
@@ -259,11 +305,12 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 <ChatMessage
                   message={m}
                   onExpandImage={actions.onExpandImage}
-                  onOpenSubagent={isAiChatSelected ? actions.openSubagentForSelectedChat : undefined}
+                  onOpenSubagent={isLegacyAgentMessage ? actions.openSubagentForSelectedChat : undefined}
                 />
               )}
+              {showMeta ? (
               <div className={`msg-meta${isSelf ? ' msg-meta--self' : ''}`}>
-                <span className="msg-time">{formatMessageTime(m.timestamp)}</span>
+                {showTime ? <span className="msg-time">{formatMessageTime(m.timestamp)}</span> : null}
                 {delivery.pending ? (
                   <span className="msg-delivery msg-delivery-pending">
                     <span className="spinner spinner--sm spinner--accent" />
@@ -282,53 +329,50 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                   <span className="msg-ai-stat msg-ai-stat--stopped">Gestoppt</span>
                 ) : null}
               </div>
+              ) : null}
+            </div>
+            <MessageReactions
+              message={m}
+              hidden={Boolean(selectionMode)}
+              onReact={actions.onReact}
+            />
             </div>
           </div>
+          </React.Fragment>
         );
       })}
-      {isAiChatSelected && aiChatPending ? (
-        <div className="msg-row msg-row-other msg-row--ai-agent msg-row--ai-agent-live">
-          <div className="msg msg--ai-agent msg--ai-agent-live animate-in">
-            {(() => {
-              const split = splitThinkingText(liveAiProgress?.content || '');
-              const thinking = [liveAiProgress?.thinking || '', split.thinking].filter(Boolean).join('\n\n');
-              const content = split.content || liveAiProgress?.content || '';
-              const toolEvents = Array.isArray(liveAiProgress?.toolEvents) ? liveAiProgress.toolEvents : [];
-              const segments = Array.isArray(liveAiProgress?.segments) ? liveAiProgress.segments : null;
-              const hasAnything = thinking || content || toolEvents.length || (segments && segments.length);
-              return (
-                <>
-                  <MessageSegments
-                    segments={segments}
-                    content={content}
-                    thinking={thinking}
-                    toolEvents={toolEvents}
-                    live
-                    onOpenSubagent={(segment) => actions.openSubagentChat(selectedPeer.id, segment.id)}
-                  />
-                  {!hasAnything ? (
-                    <div className="spinner-label">
-                      <span className="spinner spinner--sm" />
-                      <span>Antwort wird erstellt...</span>
-                    </div>
-                  ) : null}
-                </>
-              );
-            })()}
-            <div className="msg-meta msg-ai-live-meta">
-              {typeof liveAiProgress?.tps === 'number' && liveAiProgress.tps > 0 ? (
-                <span className="msg-ai-stat">{liveAiProgress.tps.toFixed(1)} t/s</span>
-              ) : null}
-              {typeof liveAiProgress?.genTimeMs === 'number' && liveAiProgress.genTimeMs > 0 ? (
-                <span className="msg-ai-stat">gen {formatGenTime(liveAiProgress.genTimeMs)}</span>
-              ) : null}
+      {(isAiChatSelected && (aiChatPending || liveAiProgress)) || peerTypingActive ? (
+        <div className="msg-row msg-row-other">
+          <div className="msg-stack">
+            <div
+              className={['msg', 'msg-other', 'msg-bot-typing', workLogEnabled && 'msg-bot-typing--log'].filter(Boolean).join(' ')}
+              aria-live="polite"
+              role={workLogEnabled ? 'button' : undefined}
+              tabIndex={workLogEnabled ? 0 : undefined}
+              title={workLogEnabled ? 'Worklog öffnen' : undefined}
+              onClick={workLogEnabled ? () => actions.onOpenWorklog?.() : undefined}
+              onContextMenu={workLogEnabled ? (event) => {
+                event.preventDefault();
+                actions.onOpenWorklog?.();
+              } : undefined}
+              onKeyDown={workLogEnabled ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  actions.onOpenWorklog?.();
+                }
+              } : undefined}
+            >
+              <span className="msg-bot-typing-dots" aria-hidden>
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="sr-only">{selectedPeer?.displayName || 'Kontakt'} schreibt…</span>
             </div>
           </div>
         </div>
       ) : null}
       <div ref={scroll.endRef} />
-      </>
-      )}
     </div>
   );
 }

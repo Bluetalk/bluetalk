@@ -18,6 +18,7 @@
     "allow-library-list-media",
     "allow-library-get-media-data",
     "allow-file-save-as",
+    "allow-file-open-path",
     "allow-notify-show",
     "allow-agent-pick-folder",
     "allow-app-clear-cache",
@@ -86,6 +87,7 @@
     "allow-ollama-start-cloud-sign-in",
     "allow-ollama-confirm-cloud-auth",
     "allow-ollama-reset-and-delete",
+    "allow-ollama-run-routine",
     "allow-agent-send-message-reply",
     "allow-agent-connect-peer-reply"
   ]

@@ -1,20 +1,20 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
 
 const ICON_STROKE = 1.75;
 
-export default function SettingsNavRow({ to, icon: Icon, title, subtitle }) {
+export default function SettingsNavRow({ to, icon: Icon, title }) {
   return (
-    <Link to={to} className="settings-nav-row">
+    <NavLink
+      to={to}
+      end
+      viewTransition
+      className={({ isActive }) => `settings-nav-row${isActive ? ' is-active' : ''}`}
+    >
       <span className="settings-nav-row-icon" aria-hidden>
         <Icon size={16} strokeWidth={ICON_STROKE} />
       </span>
-      <span className="settings-nav-row-copy">
-        <span className="settings-nav-row-title">{title}</span>
-        {subtitle ? <span className="settings-nav-row-subtitle">{subtitle}</span> : null}
-      </span>
-      <ChevronRight size={16} strokeWidth={ICON_STROKE} className="settings-nav-row-chevron" aria-hidden />
-    </Link>
+      <span className="settings-nav-row-title">{title}</span>
+    </NavLink>
   );
 }

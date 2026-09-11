@@ -12,7 +12,11 @@ const ALLOWED_EVENTS = new Set([
   'updater:state',
   'ollama:state',
   'ollama:ask-user',
+  'ollama:ask-user-done',
   'ollama:chat-progress',
+  'bot:message',
+  'bot:worklog',
+  'bot:typing',
   'app:data-cleared',
   'plugins:event',
   'plugins:changed',
@@ -36,10 +40,6 @@ const ALLOWED_EVENTS = new Set([
   'ticTacToe:windowMaximized',
   'ticTacToe:state',
   'ticTacToe:fromChild',
-  'docs:windowMaximized',
-  'docs:state',
-  'docs:fromChild',
-  'docs:presence',
 ]);
 
 function subscribe(channel, callback) {
@@ -89,14 +89,6 @@ function gameBridge(game, route) {
   };
 }
 
-const docsBridge = {
-  ...gameBridge('docs', '/docs-editor'),
-  pushPresence: (payload) => call('game_window_push_presence', { game: 'docs', payload }),
-  // The docs editor window exports documents through the native save dialog.
-  saveAs: (payload) => call('file_save_as', { payload }),
-  onPeerPresence: (callback) => subscribe('docs:presence', callback),
-};
-
 const api = Object.freeze({
   window: Object.freeze({
     minimize: () => call('window_minimize'),
@@ -144,6 +136,7 @@ const api = Object.freeze({
     getHosted: () => call('file_get_hosted'),
     request: (peerId, fileId) => call('file_request', { peerId, fileId }),
     saveAs: (payload) => call('file_save_as', { payload }),
+    openPath: (path) => call('file_open_path', { path }),
   }),
 
   library: Object.freeze({
@@ -191,10 +184,12 @@ const api = Object.freeze({
     abortChat: (requestId) => call('ollama_abort_chat', { requestId }),
     clearAgentContext: (peerId) => call('ollama_clear_agent_context', { peerId }),
     onAskUser: (callback) => subscribe('ollama:ask-user', callback),
+    onAskUserDone: (callback) => subscribe('ollama:ask-user-done', callback),
     replyAskUser: (requestId, answer) => call('ollama_reply_ask_user', { requestId, answer }),
     startCloudSignIn: () => call('ollama_start_cloud_sign_in'),
     confirmCloudAuth: () => call('ollama_confirm_cloud_auth'),
     resetAndDelete: () => call('ollama_reset_and_delete'),
+    runRoutine: (peerId, routineId) => call('ollama_run_routine', { peerId, routineId }),
   }),
 
   agent: Object.freeze({
@@ -211,7 +206,6 @@ const api = Object.freeze({
   connectFour: Object.freeze(gameBridge('connect-four', '/connect-four-game')),
   chess: Object.freeze(gameBridge('chess', '/chess-game')),
   ticTacToe: Object.freeze(gameBridge('ticTacToe', '/tic-tac-toe-game')),
-  docs: Object.freeze(docsBridge),
 
   app: Object.freeze({
     clearCache: () => call('app_clear_cache'),

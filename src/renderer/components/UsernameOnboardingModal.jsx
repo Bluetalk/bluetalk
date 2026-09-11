@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ModalOverlay } from './ModalOverlay.jsx';
 
 export default function UsernameOnboardingModal({ open, onSubmit }) {
   const inputRef = useRef(null);
@@ -25,8 +26,8 @@ export default function UsernameOnboardingModal({ open, onSubmit }) {
   };
 
   return (
-    <div
-      className="modal-overlay modal-overlay-onboarding"
+    <ModalOverlay
+      className="modal-overlay-onboarding"
       role="dialog"
       aria-modal="true"
       aria-labelledby="username-onboarding-title"
@@ -58,6 +59,6 @@ export default function UsernameOnboardingModal({ open, onSubmit }) {
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

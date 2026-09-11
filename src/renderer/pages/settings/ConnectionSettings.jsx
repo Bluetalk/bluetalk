@@ -4,8 +4,6 @@ import {
   Check,
   Copy,
   Globe,
-  Network,
-  Plug,
   RefreshCw,
   ScrollText,
   Stethoscope,
@@ -14,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../App';
 import { useToast } from '../../components/ToastProvider';
-import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
+import SettingsPage from '../../components/settings/SettingsPage';
 import { SETTINGS_ICON_STROKE } from './settingsUtils';
 
 export default function ConnectionSettingsPage() {
@@ -228,23 +226,9 @@ export default function ConnectionSettingsPage() {
   };
 
   return (
-    <div className="page">
-      <SettingsBackHeader
-        title="Verbindung"
-        subtitle="Peers, Netzwerk und Ports"
-        icon={Plug}
-      />
-
-      <div className="page-body">
+    <SettingsPage title="Netzwerk">
         <section className="settings-section">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <Plug size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-              </span>
-              Verbindungen
-            </h3>
-          </div>
+          <h3 className="settings-section-title">Verbindungen</h3>
           <div className="card flex flex-col gap-3">
             <div className="input-group">
               <label>Zu Kontakten neu verbinden</label>
@@ -288,14 +272,7 @@ export default function ConnectionSettingsPage() {
 
         {local.debugMode && (
         <section className="settings-section">
-          <div className="section-title">
-            <h3>
-              <span className="section-title-icon" aria-hidden>
-                <Network size={15} strokeWidth={SETTINGS_ICON_STROKE} />
-              </span>
-              Netzwerk
-            </h3>
-          </div>
+          <h3 className="settings-section-title">Diagnose</h3>
           <div className="card flex flex-col gap-3">
             {peerInfo && (
               <>
@@ -509,7 +486,6 @@ export default function ConnectionSettingsPage() {
           </div>
         </section>
         )}
-      </div>
-    </div>
+    </SettingsPage>
   );
 }

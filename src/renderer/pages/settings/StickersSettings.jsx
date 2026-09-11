@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, Smile, Star, Trash2 } from 'lucide-react';
-import SettingsBackHeader from '../../components/settings/SettingsBackHeader';
+import { Plus, Star, Trash2 } from 'lucide-react';
+import SettingsPage from '../../components/settings/SettingsPage';
 import { useToast } from '../../components/ToastProvider';
 import {
   addSticker,
@@ -105,7 +105,7 @@ export default function StickersSettingsPage() {
   };
 
   return (
-    <div className="page">
+    <SettingsPage title="Sticker">
       <input
         type="file"
         hidden
@@ -113,112 +113,92 @@ export default function StickersSettingsPage() {
         accept="image/png,image/webp,image/gif,image/jpeg"
         onChange={(e) => void handleFileChange(e)}
       />
-      <SettingsBackHeader
-        title="Sticker"
-        subtitle="Erstellen, verwalten und Favoriten"
-        icon={Smile}
-      />
 
-      <div className="page-body">
-        <section className="settings-section">
-          <div className="card stickers-settings-overview">
-            <div className="stickers-settings-stats">
-              <div>
-                <span className="stickers-settings-stat-value">{totalStickers}</span>
-                <span className="stickers-settings-stat-label">Sticker</span>
-              </div>
-              <div>
-                <span className="stickers-settings-stat-value">{packs.length}</span>
-                <span className="stickers-settings-stat-label">Packs</span>
-              </div>
-              <div>
-                <span className="stickers-settings-stat-value">{favorites.length}</span>
-                <span className="stickers-settings-stat-label">Favoriten</span>
-              </div>
-              <div>
-                <span className="stickers-settings-stat-value">{formatStickerSize(totalSize)}</span>
-                <span className="stickers-settings-stat-label">Speicher</span>
-              </div>
-            </div>
-          </div>
-        </section>
+      <div className="stickers-studio-stats">
+        <div>
+          <span className="stickers-settings-stat-value">{totalStickers}</span>
+          <span className="stickers-settings-stat-label">Sticker</span>
+        </div>
+        <div>
+          <span className="stickers-settings-stat-value">{packs.length}</span>
+          <span className="stickers-settings-stat-label">Packs</span>
+        </div>
+        <div>
+          <span className="stickers-settings-stat-value">{favorites.length}</span>
+          <span className="stickers-settings-stat-label">Favoriten</span>
+        </div>
+        <div>
+          <span className="stickers-settings-stat-value">{formatStickerSize(totalSize)}</span>
+          <span className="stickers-settings-stat-label">Speicher</span>
+        </div>
+      </div>
 
-        <section className="settings-section">
-          <h3 className="settings-section-title">Packs</h3>
-          <div className="card">
-            <div className="stickers-settings-pack-tabs">
-              {packs.map((pack) => (
-                <button
-                  key={pack.id}
-                  type="button"
-                  className={`stickers-settings-pack-tab${pack.id === selectedPackId ? ' active' : ''}`}
-                  onClick={() => setSelectedPackId(pack.id)}
-                >
-                  {pack.name}
-                  <span className="stickers-settings-pack-count">{pack.stickers?.length || 0}</span>
-                </button>
-              ))}
-            </div>
-            <div className="stickers-settings-pack-actions">
-              <div className="stickers-settings-new-pack">
-                <input
-                  type="text"
-                  placeholder="Neues Pack…"
-                  value={newPackName}
-                  onChange={(e) => setNewPackName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleCreatePack();
-                  }}
-                />
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleCreatePack()}>
-                  Pack erstellen
-                </button>
-              </div>
-              {selectedPack && selectedPack.id !== DEFAULT_PACK_ID ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm stickers-settings-delete-pack"
-                  onClick={() => void handleDeletePack(selectedPack.id)}
-                >
-                  <Trash2 size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
-                  Pack löschen
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </section>
-
-        {selectedPack ? (
-          <section className="settings-section">
-            <div className="settings-section-header-row">
-              <h3 className="settings-section-title">{selectedPack.name}</h3>
+      <div className="stickers-studio">
+        <aside className="stickers-studio-packs">
+          <div className="stickers-studio-packs-list">
+            {packs.map((pack) => (
               <button
+                key={pack.id}
                 type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleAddSticker}
-                disabled={loading}
+                className={`stickers-studio-pack${pack.id === selectedPackId ? ' is-active' : ''}`}
+                onClick={() => setSelectedPackId(pack.id)}
               >
-                <Plus size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
-                Sticker hinzufügen
+                <span className="stickers-studio-pack-name">{pack.name}</span>
+                <span className="stickers-studio-pack-count">{pack.stickers?.length || 0}</span>
               </button>
-            </div>
-            <div className="card">
-              <div className="stickers-settings-grid">
+            ))}
+          </div>
+          <div className="stickers-studio-new-pack">
+            <input
+              type="text"
+              placeholder="Neues Pack…"
+              value={newPackName}
+              onChange={(e) => setNewPackName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleCreatePack();
+              }}
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleCreatePack()}>
+              Anlegen
+            </button>
+          </div>
+        </aside>
+
+        <div className="stickers-studio-main">
+          {selectedPack ? (
+            <>
+              <div className="stickers-studio-toolbar">
+                <h3 className="settings-section-heading">{selectedPack.name}</h3>
+                <div className="stickers-studio-toolbar-actions">
+                  {selectedPack.id !== DEFAULT_PACK_ID ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm stickers-settings-delete-pack"
+                      onClick={() => void handleDeletePack(selectedPack.id)}
+                    >
+                      <Trash2 size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                      Pack löschen
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAddSticker}
+                    disabled={loading}
+                  >
+                    <Plus size={14} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
+                    Hinzufügen
+                  </button>
+                </div>
+              </div>
+              <div className="stickers-studio-grid">
                 {(selectedPack.stickers || []).map((sticker) => {
                   const src = getStickerDataUrl(sticker);
                   const isFav = favorites.includes(sticker.id);
                   return (
-                    <div key={sticker.id} className="stickers-settings-item">
-                      <div className="stickers-settings-item-preview">
-                        {src ? <img src={src} alt="" loading="lazy" /> : null}
-                      </div>
-                      <div className="stickers-settings-item-meta">
-                        <span className="stickers-settings-item-name" title={sticker.name}>
-                          {sticker.name || sticker.fileName}
-                        </span>
-                        <span className="stickers-settings-item-size">{formatStickerSize(sticker.fileSize || 0)}</span>
-                      </div>
-                      <div className="stickers-settings-item-actions">
+                    <div key={sticker.id} className="stickers-studio-item">
+                      {src ? <img src={src} alt="" loading="lazy" draggable={false} /> : null}
+                      <div className="stickers-studio-item-actions">
                         <button
                           type="button"
                           className={`btn btn-ghost btn-icon btn-sm${isFav ? ' is-fav' : ''}`}
@@ -245,10 +225,10 @@ export default function StickersSettingsPage() {
                   </p>
                 ) : null}
               </div>
-            </div>
-          </section>
-        ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
-    </div>
+    </SettingsPage>
   );
 }

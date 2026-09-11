@@ -1,10 +1,10 @@
 // Haupt-Renderbaum (Router, Routen, Modals), ausgelagert aus App.jsx.
 // Reine Präsentations-Hülle: sämtlicher State kommt per Props aus App().
 import React, { lazy, Suspense } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Navigate, Routes, Route } from 'react-router-dom';
 
 import ChatsPage from '../pages/Chats';
-import SettingsPage from '../pages/Settings';
+import SettingsLayout from '../pages/Settings';
 import AccountSettingsPage from '../pages/settings/AccountSettings';
 import ConnectionSettingsPage from '../pages/settings/ConnectionSettings';
 import UpdatesSettingsPage from '../pages/settings/UpdatesSettings';
@@ -15,7 +15,6 @@ import NewConnectionsPage from '../pages/NewConnections';
 import CloudSyncPage from '../pages/CloudSync';
 import LibraryPage from '../pages/Library';
 import GamesPage from '../pages/Games';
-import DocumentsLauncherPage from '../pages/DocumentsLauncher';
 import NotFoundPage from '../pages/NotFound';
 import PluginsPage from '../pages/Plugins';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -23,13 +22,11 @@ import { ToastProvider } from '../components/ToastProvider';
 import PluginScreenHost from '../plugins/PluginScreenHost';
 import VersionWelcomeModal from '../components/VersionWelcomeModal';
 import UsernameOnboardingModal from '../components/UsernameOnboardingModal';
-import AgentAskUserModal from '../components/AgentAskUserModal';
 import TitleBar from './TitleBar';
 import Sidebar from './Sidebar';
 import { InboundToastBridge, PluginRuntimeToastBridge } from './bridges';
 
 const PluginTabView = lazy(() => import('../plugins/PluginTabView'));
-const DocsPage = lazy(() => import('../docs/DocsPage'));
 
 function ContentFallback() {
   return (
@@ -48,8 +45,6 @@ export default function AppShell({
   dismissVersionWelcome,
   loadError,
   setLoadError,
-  agentAskUser,
-  setAgentAskUser,
 }) {
   return (
     <ToastProvider solidBottomRight>
@@ -58,14 +53,6 @@ export default function AppShell({
           <InboundToastBridge toastRef={inboundToastRef} />
           <PluginRuntimeToastBridge />
           <Routes>
-            <Route
-              path="/docs/*"
-              element={(
-                <Suspense fallback={<ContentFallback />}>
-                  <DocsPage />
-                </Suspense>
-              )}
-            />
             <Route
               path="*"
               element={(
@@ -91,44 +78,34 @@ export default function AppShell({
             ) : null}
             <div className="app-body">
               <Sidebar />
-              <main className="content">
-                <Suspense fallback={<ContentFallback />}>
-                <Routes>
+              <div className="content-frame">
+                <main className="content">
+                  <Suspense fallback={<ContentFallback />}>
+                  <Routes>
                   <Route path="/" element={<ChatsPage />} />
                   <Route path="/new" element={<NewConnectionsPage />} />
                   <Route path="/library" element={<LibraryPage />} />
-                  <Route path="/documents" element={<DocumentsLauncherPage />} />
                   <Route path="/games" element={<GamesPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/settings/account" element={<AccountSettingsPage />} />
-                  <Route path="/settings/connection" element={<ConnectionSettingsPage />} />
-                  <Route path="/settings/updates" element={<UpdatesSettingsPage />} />
-                  <Route path="/settings/application" element={<ApplicationSettingsPage />} />
-                  <Route path="/settings/stickers" element={<StickersSettingsPage />} />
-                  <Route path="/settings/ai" element={<AiSettingsPage />} />
+                  <Route path="/settings" element={<SettingsLayout />}>
+                    <Route index element={<Navigate to="account" replace />} />
+                    <Route path="account" element={<AccountSettingsPage />} />
+                    <Route path="application" element={<ApplicationSettingsPage />} />
+                    <Route path="connection" element={<ConnectionSettingsPage />} />
+                    <Route path="ai" element={<AiSettingsPage />} />
+                    <Route path="stickers" element={<StickersSettingsPage />} />
+                    <Route path="updates" element={<UpdatesSettingsPage />} />
+                  </Route>
                   <Route path="/cloud-sync" element={<CloudSyncPage />} />
                   <Route path="/plugins" element={<PluginsPage />} />
                   <Route path="/plugin/:tabId" element={<PluginTabView />} />
                   <Route path="*" element={<NotFoundPage />} />
-                </Routes>
-                </Suspense>
-              </main>
+                  </Routes>
+                  </Suspense>
+                </main>
+                <div id="shell-profile-slot" className="shell-profile-slot" />
+              </div>
             </div>
             <PluginScreenHost />
-            <AgentAskUserModal
-              open={Boolean(agentAskUser)}
-              question={agentAskUser?.question}
-              onSubmit={(answer) => {
-                const rid = agentAskUser?.requestId;
-                if (rid) window.bluetalk?.ollama?.replyAskUser?.(rid, answer);
-                setAgentAskUser(null);
-              }}
-              onCancel={() => {
-                const rid = agentAskUser?.requestId;
-                if (rid) window.bluetalk?.ollama?.replyAskUser?.(rid, '');
-                setAgentAskUser(null);
-              }}
-            />
           </div>
               )}
             />

@@ -178,9 +178,10 @@ pub struct OllamaManager {
     inner: Mutex<Inner>,
     server: tokio::sync::Mutex<Option<ServerHandle>>,
     aborts: Mutex<HashMap<String, CancelToken>>,
-    ask_registry: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    ask_registry: Mutex<HashMap<String, (String, oneshot::Sender<String>)>>,
     agent_replies: Mutex<HashMap<String, oneshot::Sender<Value>>>,
     memory_cache: Mutex<HashMap<String, Map<String, Value>>>,
+    busy_peers: Mutex<HashSet<String>>,
 }
 
 impl OllamaManager {
@@ -207,6 +208,7 @@ impl OllamaManager {
             ask_registry: Mutex::new(HashMap::new()),
             agent_replies: Mutex::new(HashMap::new()),
             memory_cache: Mutex::new(HashMap::new()),
+            busy_peers: Mutex::new(HashSet::new()),
         });
 
         manager.apply_runtime_mode();
@@ -214,6 +216,11 @@ impl OllamaManager {
         let init = manager.clone();
         tauri::async_runtime::spawn(async move {
             init.init().await;
+        });
+
+        let scheduler = manager.clone();
+        tauri::async_runtime::spawn(async move {
+            OllamaManager::run_routine_scheduler_loop(scheduler).await;
         });
 
         manager
@@ -234,4 +241,5 @@ mod agent;
 mod config;
 mod download;
 mod refresh;
+mod routines;
 mod server;

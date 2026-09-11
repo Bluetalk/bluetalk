@@ -138,6 +138,11 @@ export function useContactsAndSettings({
   const updateSettings = useCallback((newSettings) => {
     setSettings((prev) => {
       const merged = { ...prev, ...newSettings };
+      if (Object.prototype.hasOwnProperty.call(newSettings, 'presenceStatus')) {
+        merged.doNotDisturb = merged.presenceStatus === 'dnd';
+      } else if (Object.prototype.hasOwnProperty.call(newSettings, 'doNotDisturb') && merged.presenceStatus !== 'offline') {
+        merged.presenceStatus = merged.doNotDisturb ? 'dnd' : 'online';
+      }
       if (newSettings.uiResize && typeof newSettings.uiResize === 'object') {
         merged.uiResize = {
           ...(prev.uiResize || {}),
@@ -162,7 +167,10 @@ export function useContactsAndSettings({
             sender: merged.displayName,
           });
         }
-        if (Object.prototype.hasOwnProperty.call(newSettings, 'doNotDisturb')) {
+        if (
+          Object.prototype.hasOwnProperty.call(newSettings, 'doNotDisturb')
+          || Object.prototype.hasOwnProperty.call(newSettings, 'presenceStatus')
+        ) {
           window.bluetalk.peer.broadcast(buildUserPresencePayload(merged));
         }
       }

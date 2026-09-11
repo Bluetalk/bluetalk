@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { MessageCircle, UserPlus } from 'lucide-react';
 import { useApp, useAiProgress } from '../App';
 import { useToast } from '../components/ToastProvider';
 import { CreateGroupModal, GroupInfoModal } from '../components/GroupChatDialogs';
-import { isAiChatPeerId, modelSupportsVision } from '../aiChatConstants';
+import { isAiChatPeerId, botHasRemoteApi, modelSupportsVision, resolveBotModel } from '../aiChatConstants';
+import { isTypingActive } from '../../shared/chat-typing.js';
 import {
   // Präsentations-Bausteine
   contactOutgoingBlocked,
@@ -18,6 +20,7 @@ import {
   // Dialoge & Menüs
   ConnectDialog,
   AiProfileDialog,
+  BotWorklogPanel,
   PeerProfileDialog,
   NicknameDialog,
   ClearContextConfirmDialog,
@@ -61,6 +64,7 @@ export default function ChatsPage() {
     cancelAiChat,
     clearAiChatContext,
     sendReadReceipt,
+    toggleMessageReaction,
     loadChatMessages,
     connectToAddress,
     createGroupChat,
@@ -77,6 +81,10 @@ export default function ChatsPage() {
     updateSettings,
     peerGamePresence,
     peerUserPresence,
+    peerTyping,
+    sendTyping,
+    agentAskUser,
+    setAgentAskUser,
   } = useApp();
   const aiChatProgress = useAiProgress();
 
@@ -93,8 +101,18 @@ export default function ChatsPage() {
 
   const textareaRef = useRef(null);
 
-  const { ollamaState, selectAiModelTier, selectAiCloudModel } = useOllamaAi(toast);
+  const { ollamaState } = useOllamaAi(toast);
   const { aiAgents, setAiAgents, aiAgentsLoaded, updateAiAgent } = useAiAgents(chatMeta);
+  const [openaiGlobal, setOpenaiGlobal] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = await window.bluetalk?.store?.get('aiChat.openai', {});
+      if (!cancelled) setOpenaiGlobal(stored && typeof stored === 'object' ? stored : {});
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const {
     chatListCollapsed,
@@ -115,6 +133,8 @@ export default function ChatsPage() {
     aiAgents,
     peerGamePresence,
     peerUserPresence,
+    openaiGlobal,
+    ollamaState,
   });
 
   const { selectedPeerId, setSelectedPeerId } = useChatSelection({
@@ -144,13 +164,25 @@ export default function ChatsPage() {
 
   const isAiChatSelected = Boolean(selectedPeer?.isAiChat || isAiChatPeerId(selectedPeer?.id));
   const isGroupSelected = Boolean(selectedPeer?.isGroup && selectedPeer.group);
-  const aiChatSupportsVision = modelSupportsVision(
-    ollamaState?.selectedModelTier,
-    ollamaState?.selectedCloudModelId
+  const selectedBot = useMemo(
+    () => (isAiChatSelected ? aiAgents.find((agent) => agent.id === selectedPeer?.id) || null : null),
+    [aiAgents, isAiChatSelected, selectedPeer?.id]
   );
+  const botModel = resolveBotModel(selectedBot, {
+    modelTier: ollamaState?.selectedModelTier,
+    cloudModelId: ollamaState?.selectedCloudModelId,
+  });
+  const aiChatSupportsVision = botModel.modelSource === 'openai'
+    || modelSupportsVision(botModel.modelTier, botModel.cloudModelId);
   const showAiComposerAttach = !isAiChatSelected || aiChatSupportsVision;
-  const aiChatNeedsSetup = isAiChatSelected && !ollamaState?.setupComplete;
+  const aiChatNeedsSetup = isAiChatSelected && !botHasRemoteApi(selectedBot, openaiGlobal, ollamaState);
   const aiChatPending = isAiChatPending(selectedPeer?.id);
+  const peerTypingActive = Boolean(
+    selectedPeer
+    && !isAiChatSelected
+    && !isGroupSelected
+    && isTypingActive(peerTyping?.[selectedPeer.id])
+  );
   const liveAiProgress = aiChatProgress?.peerId === selectedPeer?.id ? aiChatProgress : null;
 
   const selectedContact = useMemo(
@@ -177,6 +209,7 @@ export default function ChatsPage() {
     selectedPeerId,
     newestTimestamp,
     aiChatProgress,
+    typingActive: aiChatPending || peerTypingActive,
   });
 
   const { loadingMessages, loadingMore, loadOlderMessages } = useChatMessagesLoader({
@@ -365,7 +398,7 @@ export default function ChatsPage() {
             selectedPeerId: selectedPeer?.id,
             selectedSubagent,
             debugMode,
-            ollamaSetupComplete: ollamaState?.setupComplete,
+            peerTyping,
           }}
           actions={{
             resolveContact,
@@ -381,10 +414,18 @@ export default function ChatsPage() {
           {!selectedPeer ? (
             <div className="chat-empty">
               <div className="empty-state">
-                <p>Select a conversation to start messaging</p>
-                <button className="btn btn-secondary btn-sm" onClick={() => dialogs.setShowConnect(true)}>
-                  Connect to peer
-                </button>
+                <MessageCircle size={36} strokeWidth={1.5} aria-hidden />
+                <p className="empty-state-title">Chat auswählen</p>
+                <p>Wähle links eine Unterhaltung oder verbinde dich mit jemandem.</p>
+                <div className="empty-state-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => navigate('/new')}>
+                    <UserPlus size={14} strokeWidth={1.75} aria-hidden />
+                    Neue Kontakte
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => dialogs.setShowConnect(true)}>
+                    Peer verbinden
+                  </button>
+                </div>
               </div>
             </div>
           ) : selectedSubagentSegment ? (
@@ -397,7 +438,7 @@ export default function ChatsPage() {
           ) : aiChatNeedsSetup ? (
             <AiSetupView
               selectedPeer={selectedPeer}
-              onShowProfile={() => dialogs.setShowPeerProfile(true)}
+              onShowProfile={dialogs.togglePeerProfile}
               onOpenSettings={() => navigate('/settings/ai')}
             />
           ) : (
@@ -410,6 +451,7 @@ export default function ChatsPage() {
                 showGroupInfo={dialogs.showGroupInfo}
                 showPeerProfile={dialogs.showPeerProfile}
                 ollamaState={ollamaState}
+                selectedBot={selectedBot}
                 aiChatPending={aiChatPending}
                 clearingContext={dialogs.clearingContext}
                 debugMode={debugMode}
@@ -423,7 +465,7 @@ export default function ChatsPage() {
                 }}
                 actions={{
                   onShowGroupInfo: () => dialogs.setShowGroupInfo(true),
-                  onShowPeerProfile: () => dialogs.setShowPeerProfile(true),
+                  onShowPeerProfile: dialogs.togglePeerProfile,
                   onOpenNickname: dialogs.openNicknameDialog,
                   onTogglePinned: togglePinnedState,
                   onOpenDelete: dialogs.openDeleteForPeer,
@@ -433,8 +475,17 @@ export default function ChatsPage() {
                   resetE2eeSession,
                   setContactBlocked,
                   toast,
-                  onSelectTier: selectAiModelTier,
-                  onSelectCloudModel: selectAiCloudModel,
+                  onSelectTier: (tierId) => {
+                    if (selectedPeer?.id) void updateAiAgent(selectedPeer.id, { modelTier: tierId });
+                  },
+                  onSelectCloudModel: (cloudModelId) => {
+                    if (selectedPeer?.id) {
+                      void updateAiAgent(selectedPeer.id, { modelSource: 'cloud', modelTier: 'cloud', cloudModelId });
+                    }
+                  },
+                  onSelectOpenai: () => {
+                    if (selectedPeer?.id) void updateAiAgent(selectedPeer.id, { modelSource: 'openai', modelTier: 'cloud' });
+                  },
                   onOpenCloudSettings: () => navigate('/settings/ai'),
                 }}
               />
@@ -450,7 +501,9 @@ export default function ChatsPage() {
                   selectionMode,
                   selectedMessageIds,
                   aiChatPending,
+                  peerTypingActive,
                   liveAiProgress,
+                  workLogEnabled: Boolean(selectedBot?.workLogEnabled),
                 }}
                 scroll={{ chatMessagesRef, endRef, onScroll: updateChatPinnedState }}
                 actions={{
@@ -464,6 +517,11 @@ export default function ChatsPage() {
                   openSubagentChat,
                   onExportChat: actions.exportPeerChat,
                   onOpenDelete: dialogs.openDeleteForPeer,
+                  onOpenWorklog: dialogs.openBotWorklog,
+                  onReact: (message, emoji) => {
+                    if (!selectedPeer?.id) return;
+                    void toggleMessageReaction(selectedPeer.id, message, emoji);
+                  },
                 }}
               />
 
@@ -479,16 +537,69 @@ export default function ChatsPage() {
                   composerDisabled,
                   showOfflineComposerReconnect,
                   offlineReconnectAddress,
+                  askUser: isAiChatSelected && agentAskUser?.peerId === selectedPeer?.id
+                    ? agentAskUser
+                    : null,
                 }}
                 reply={{ replyToMessage, onClearReply: clearReply }}
                 attachments={attachments}
                 env={{ settings, contacts, peers, debugMode, warning }}
-                actions={{ sendMessage, cancelAiChat, connectToAddress, toast, setWarning }}
+                actions={{
+                  sendMessage,
+                  sendTyping,
+                  cancelAiChat,
+                  connectToAddress,
+                  toast,
+                  setWarning,
+                  onAskReply: (text) => {
+                    const rid = agentAskUser?.requestId;
+                    if (rid) window.bluetalk?.ollama?.replyAskUser?.(rid, text || '');
+                    setAgentAskUser(null);
+                  },
+                }}
                 textareaRef={textareaRef}
               />
             </>
           )}
         </div>
+
+        <AiProfileDialog
+          open={Boolean(dialogs.showPeerProfile && selectedPeer && selectedPeer.isAiChat)}
+          showPeerProfile={dialogs.showPeerProfile}
+          selectedPeerId={selectedPeerId}
+          selectedPeer={selectedPeer}
+          aiAgents={aiAgents}
+          updateAiAgent={updateAiAgent}
+          onClose={dialogs.closePeerProfile}
+          toast={toast}
+          ollamaState={ollamaState}
+          debugMode={debugMode}
+        />
+
+        <BotWorklogPanel
+          open={Boolean(dialogs.showBotWorklog && selectedPeer?.isAiChat && selectedBot?.workLogEnabled)}
+          peerId={selectedPeer?.id}
+          liveProgress={liveAiProgress}
+          onClose={dialogs.closeBotWorklog}
+        />
+
+        <PeerProfileDialog
+          open={Boolean(dialogs.showPeerProfile && selectedPeer && !selectedPeer.isAiChat && !isGroupSelected)}
+          selectedPeer={selectedPeer}
+          selectedContact={selectedContact}
+          onClose={dialogs.closePeerProfile}
+          copyToClipboard={actions.copyToClipboard}
+          actions={{
+            onOpenNickname: dialogs.openNicknameDialog,
+            onTogglePinned: togglePinnedState,
+            onOpenDelete: dialogs.openDeleteForPeer,
+            onStartSelection: startSelectionMode,
+            applyNotificationMute: actions.applyNotificationMute,
+            resetE2eeSession,
+            setContactBlocked,
+            toast,
+          }}
+        />
       </div>
 
       <ConnectDialog
@@ -498,24 +609,6 @@ export default function ChatsPage() {
         onConnected={setSelectedPeerId}
         setWarning={setWarning}
         toast={toast}
-      />
-
-      <AiProfileDialog
-        open={Boolean(dialogs.showPeerProfile && selectedPeer && selectedPeer.isAiChat)}
-        showPeerProfile={dialogs.showPeerProfile}
-        selectedPeerId={selectedPeerId}
-        selectedPeer={selectedPeer}
-        aiAgents={aiAgents}
-        updateAiAgent={updateAiAgent}
-        onClose={dialogs.closePeerProfile}
-        toast={toast}
-      />
-
-      <PeerProfileDialog
-        open={Boolean(dialogs.showPeerProfile && selectedPeer && !selectedPeer.isAiChat)}
-        selectedPeer={selectedPeer}
-        onClose={dialogs.closePeerProfile}
-        copyToClipboard={actions.copyToClipboard}
       />
 
       <NicknameDialog
@@ -576,6 +669,12 @@ export default function ChatsPage() {
         copyToClipboard={actions.copyToClipboard}
         onForward={openForwardDialog}
         onDeleteMessage={actions.handleDeleteMessage}
+        workLogEnabled={Boolean(selectedBot?.workLogEnabled)}
+        onOpenWorklog={dialogs.openBotWorklog}
+        onReact={(message, emoji) => {
+          if (!selectedPeer?.id) return;
+          void toggleMessageReaction(selectedPeer.id, message, emoji);
+        }}
       />
 
       <ForwardDialog

@@ -38,7 +38,9 @@ export function useChatData({ messages, setMessages, setLoadedChats, messageCach
       if (idx < 0) return prev;
       const next = [...list];
       next[idx] = { ...next[idx], ...patch };
-      return { ...prev, [peerId]: next };
+      const updated = { ...prev, [peerId]: next };
+      messageCacheRef.current = updated;
+      return updated;
     });
   }, []);
 

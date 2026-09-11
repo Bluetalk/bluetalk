@@ -7,7 +7,6 @@ export function tabMarkup() {
   return `
     <div class="ts-wrap">
       <header class="ts-head">
-        <h2>Design</h2>
         <p>Farben für hell und dunkel. Änderungen gelten sofort in der ganzen App.</p>
       </header>
 
@@ -15,8 +14,8 @@ export function tabMarkup() {
         <div class="ts-section-head">
           <h3>Vorschau</h3>
           <div class="ts-preview-modes" data-preview-modes>
-            <button type="button" class="ts-mode-btn" data-preview-mode="light">Hell</button>
-            <button type="button" class="ts-mode-btn" data-preview-mode="dark">Dunkel</button>
+            <button type="button" class="ts-mode-btn" data-preview-mode="light" aria-pressed="false">Hell</button>
+            <button type="button" class="ts-mode-btn" data-preview-mode="dark" aria-pressed="false">Dunkel</button>
           </div>
         </div>
         <div class="ts-preview" data-preview>
@@ -67,21 +66,15 @@ export function tabMarkup() {
           <input type="file" accept="application/json,.json" hidden data-import-file />
         </div>
         <button type="button" class="ts-btn ts-btn-danger" data-action="reset">Zurücksetzen</button>
-        <span class="ts-hint">Hell/Dunkel stellst du unter Einstellungen → Anwendung um. Export kopiert JSON in die Zwischenablage.</span>
+        <span class="ts-hint">Die Vorschau folgt dem Farbschema, das du gerade bearbeitest. Hell/Dunkel der App stellst du unter Einstellungen → App um.</span>
       </section>
     </div>
     <style>
       .ts-wrap {
         max-width: 720px;
         margin: 0 auto;
-        padding: 24px 28px 56px;
+        padding: 4px 4px 24px;
         color: var(--fg-0);
-      }
-      .ts-head h2 {
-        margin: 0 0 6px;
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: -0.3px;
       }
       .ts-head p {
         margin: 0;
@@ -135,7 +128,7 @@ export function tabMarkup() {
       }
       .ts-preview {
         border: 1px solid var(--border);
-        border-radius: 16px;
+        border-radius: var(--radius-lg);
         overflow: hidden;
         background: var(--bg-1);
       }
@@ -154,7 +147,7 @@ export function tabMarkup() {
       }
       .ts-preview-nav {
         height: 28px;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         background: var(--bg-2);
       }
       .ts-preview-nav.is-active { background: var(--accent-soft); }
@@ -165,7 +158,7 @@ export function tabMarkup() {
         background: var(--bg-0);
         min-width: 0;
         margin: 8px 8px 8px 0;
-        border-radius: 12px;
+        border-radius: var(--radius-md);
         overflow: hidden;
       }
       .ts-preview-bar {
@@ -199,7 +192,7 @@ export function tabMarkup() {
         font-size: 12px;
         line-height: 1.4;
         padding: 7px 12px;
-        border-radius: 16px;
+        border-radius: var(--radius-lg);
         color: var(--fg-0);
         background: var(--bg-2);
       }
@@ -218,13 +211,13 @@ export function tabMarkup() {
         font-size: 12px;
         color: var(--fg-3);
         padding: 8px 12px;
-        border-radius: 12px;
+        border-radius: var(--radius-md);
         border: 1px solid var(--border);
         background: var(--bg-input, var(--bg-0));
       }
       .ts-preview-send {
         border: 0;
-        border-radius: 12px;
+        border-radius: var(--radius-md);
         padding: 8px 14px;
         font-size: 12px;
         font-weight: 500;
@@ -239,7 +232,7 @@ export function tabMarkup() {
       }
       .ts-preset {
         border: 1px solid var(--border);
-        border-radius: 14px;
+        border-radius: var(--radius-lg);
         padding: 10px 12px 12px;
         background: var(--bg-1);
         color: var(--fg-0);
@@ -255,8 +248,9 @@ export function tabMarkup() {
       }
       .ts-preset:active { transform: scale(0.98); }
       .ts-preset.is-active {
-        border-color: var(--fg-3);
+        border-color: var(--fg-0);
         background: var(--bg-2);
+        box-shadow: 0 0 0 1px var(--fg-0);
       }
       .ts-preset-swatches {
         display: grid;
@@ -266,7 +260,7 @@ export function tabMarkup() {
       }
       .ts-preset-swatch {
         height: 26px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         position: relative;
         overflow: hidden;
       }
@@ -295,11 +289,26 @@ export function tabMarkup() {
       }
       .ts-mode {
         border: 1px solid var(--border);
-        border-radius: 14px;
+        border-radius: var(--radius-lg);
         padding: 16px;
         background: var(--bg-1);
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .ts-mode.is-preview {
+        border-color: var(--fg-3);
+        box-shadow: 0 0 0 1px var(--fg-3);
       }
       .ts-mode h3 { margin-bottom: 14px; }
+      .ts-mode.is-preview h3::after {
+        content: 'Vorschau';
+        margin-left: 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+        vertical-align: middle;
+      }
       .ts-field {
         display: grid;
         grid-template-columns: auto 1fr;
@@ -318,7 +327,7 @@ export function tabMarkup() {
         height: 32px;
         padding: 0;
         border: 1px solid var(--border);
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         background: var(--bg-0);
         cursor: pointer;
       }
@@ -326,7 +335,7 @@ export function tabMarkup() {
         font-family: var(--font-mono);
         font-size: 12px;
         padding: 6px 10px;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         border: 1px solid var(--border);
         background: var(--bg-0);
         color: var(--fg-0);
@@ -344,7 +353,7 @@ export function tabMarkup() {
         gap: 8px;
       }
       .ts-btn {
-        border-radius: 12px;
+        border-radius: var(--radius-md);
         padding: 8px 14px;
         font-size: 13px;
         font-weight: 500;

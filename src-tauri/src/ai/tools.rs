@@ -197,9 +197,11 @@ use fs::{
     tool_edit_file, tool_extract_file, tool_grep_files, tool_list_files, tool_read_file,
     tool_search_files, tool_write_file,
 };
-use interaction::tool_ask_user;
+use interaction::{tool_ask_user, tool_attach_file, tool_message_send};
 use shell::tool_run_command;
 use web::tool_web_fetch;
+
+pub use interaction::is_placeholder_bot_reply;
 
 // ---------------------------------------------------------------------------
 // Tool-Ergebnis-Formatierung (für role:"tool"-Nachrichten)
@@ -212,6 +214,19 @@ pub fn format_tool_result_message_content(tool_name: &str, tool_result: &Value) 
         let trimmed = tool_name.trim();
         if trimmed.is_empty() { "unknown" } else { trimmed }
     };
+
+    if name == "message_send" {
+        if tool_result.get("ignored").and_then(Value::as_bool) == Some(true) {
+            return "[SYSTEM-TOOL-ERGEBNIS]\nTool: message_send\nPlatzhalter ignoriert. Die Nachricht war bereits sichtbar — keine weitere Ausgabe.".to_string();
+        }
+        if tool_result.get("ok").and_then(Value::as_bool) == Some(true) {
+            return "[SYSTEM-TOOL-ERGEBNIS]\nTool: message_send\nDie Nachricht ist im Chat sichtbar. Keine weitere sichtbare Ausgabe. Nur bei wirklich neuem Inhalt erneut message_send.".to_string();
+        }
+    }
+
+    if name == "attach_file" && tool_result.get("ok").and_then(Value::as_bool) == Some(true) {
+        return "[SYSTEM-TOOL-ERGEBNIS]\nTool: attach_file\nDie Datei ist im Chat sichtbar. Keine weitere sichtbare Ausgabe dazu. Weiterarbeiten oder bei neuem Inhalt message_send.".to_string();
+    }
 
     if name == "ask_user"
         && let Some(object) = tool_result.as_object()
@@ -271,6 +286,8 @@ pub async fn execute_tool_call(name: &str, args: &Value, ctx: &ToolCtx) -> Value
         "edit_file" => tool_edit_file(args, ctx).await,
         "run_command" => tool_run_command(args, ctx).await,
         "web_fetch" => tool_web_fetch(args).await,
+        "message_send" => tool_message_send(args, ctx),
+        "attach_file" => tool_attach_file(args, ctx),
         "memory" => {
             let action = arg_str(args, "action");
             let key = arg_str(args, "key");

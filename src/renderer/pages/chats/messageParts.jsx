@@ -1,5 +1,5 @@
 // Extracted from Chats.jsx — presentational/pure chat modules (behaviour unchanged).
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -186,6 +186,48 @@ function FileMessage({ message, bareLayout = false, onExpandImage, onSaveToDisk 
   );
 }
 
+function FileLinkMessage({ message }) {
+  const [opening, setOpening] = useState(false);
+  const open = async () => {
+    const path = String(message.filePath || '').trim();
+    if (!path || opening) return;
+    setOpening(true);
+    try {
+      await window.bluetalk?.file?.openPath?.(path);
+    } catch {
+      /* ignore */
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <div className="msg-file msg-file--other">
+      <button type="button" className="msg-file-row msg-file-save-trigger" onClick={() => void open()}>
+        <div className="msg-file-icon-wrap">
+          <FileTypeIcon mime={message.fileType || ''} fileName={message.fileName} />
+        </div>
+        <div className="msg-file-meta-block">
+          <div className="msg-file-name" title={message.filePath || message.fileName || ''}>
+            {message.fileName || 'Datei'}
+          </div>
+          <div className="msg-file-size">
+            {message.fileSize ? `${formatSize(message.fileSize)} · ` : ''}
+            {opening ? 'Öffnen…' : 'Pfad öffnen'}
+          </div>
+        </div>
+      </button>
+      {message.content && message.content !== message.fileName ? (
+        <div className="msg-file-footer">
+          <div className="msg-file-meta-block msg-file-meta-block--grow">
+            <div className="msg-file-name">{message.content}</div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Stable module-level references so ReactMarkdown does not treat the plugin
 // list as new props on every render.
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -333,6 +375,7 @@ function MessageReplyQuote({ replyTo, isSelf }) {
 export {
   FileTypeIcon,
   FileMessage,
+  FileLinkMessage,
   MARKDOWN_REMARK_PLUGINS,
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_COMPONENTS,

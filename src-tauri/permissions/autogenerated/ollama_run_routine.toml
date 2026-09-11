@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ollama-run-routine"
+description = "Enables the ollama_run_routine command without any pre-configured scope."
+commands.allow = ["ollama_run_routine"]
+
+[[permission]]
+identifier = "deny-ollama-run-routine"
+description = "Denies the ollama_run_routine command without any pre-configured scope."
+commands.deny = ["ollama_run_routine"]

@@ -10,6 +10,25 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes msg-send-in {
+  from { opacity: 0.35; transform: translateY(22px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes send-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.84) rotate(-10deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+@keyframes send-fly {
+  0%   { transform: translate(0, 0); opacity: 1; }
+  45%  { transform: translate(7px, -8px); opacity: 0.15; }
+  46%  { transform: translate(-5px, 6px); opacity: 0; }
+  100% { transform: translate(0, 0); opacity: 1; }
+}
+@keyframes react-pop {
+  from { transform: scale(0.7); opacity: 0.4; }
+  to   { transform: scale(1); opacity: 1; }
+}
 @keyframes list-row-in {
   from { opacity: 0; transform: translateX(-6px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -28,7 +47,42 @@
 }
 
 /* ---------- Page / route transitions ----------
-   Kein Opacity-0-Einstieg: das wirkte wie ein weißes Fenster-Reload. */
+   Kein Opacity-0: sonst scheint der Chrome durch und es wirkt wie ein Reload.
+   View Transitions (WebView2) crossfaden nur das Content-Panel. */
+@keyframes page-enter {
+  from { opacity: 0.9; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes bt-page-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes bt-page-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.content > .page {
+  animation: page-enter 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+html:active-view-transition .content > .page {
+  animation: none;
+}
+
+:root {
+  view-transition-name: none;
+}
+::view-transition-group(bt-page) {
+  overflow: clip;
+  border-radius: var(--radius-lg);
+}
+::view-transition-old(bt-page) {
+  animation: bt-page-out 0.22s ease both;
+}
+::view-transition-new(bt-page) {
+  animation: bt-page-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .page-body {
   scroll-behavior: smooth;
 }
@@ -40,8 +94,21 @@
 .msg-row {
   animation: msg-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.msg-row-self { transform-origin: bottom right; }
+.msg-row-self {
+  transform-origin: bottom right;
+  animation-name: msg-send-in;
+  animation-duration: 0.36s;
+}
 .msg-row-other { transform-origin: bottom left; }
+.chat-send-btn.is-sending {
+  animation: send-pop 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.chat-send-btn.is-sending svg {
+  animation: send-fly 0.34s ease;
+}
+.msg-react-chip {
+  animation: react-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
 
 /* ---------- Sidebar navigation ---------- */
 .sidebar-link {
@@ -138,8 +205,10 @@
    stays fully usable for users who ask for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .content > .page,
-  .content > .page > .page-body,
   .msg-row,
+  .chat-send-btn.is-sending,
+  .chat-send-btn.is-sending svg,
+  .msg-react-chip,
   .sidebar-link.active,
   .context-menu,
   .context-menu-pop,
@@ -152,7 +221,9 @@
   .plugin-grid > .plugin-card,
   .games-grid > .games-launch-card,
   .spinner,
-  .loading-dots i {
+  .loading-dots i,
+  ::view-transition-old(bt-page),
+  ::view-transition-new(bt-page) {
     animation: none !important;
   }
   .btn:hover,

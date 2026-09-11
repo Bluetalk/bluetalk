@@ -43,7 +43,7 @@ export function useAiAgents(chatMeta) {
       if (normalized.length === 0 && meta[AI_CHAT_PEER_ID]?.count > 0) {
         const legacyAgent = {
           id: AI_CHAT_PEER_ID,
-          name: 'KI-Assistent',
+          name: 'Bot',
           createdAt: meta[AI_CHAT_PEER_ID]?.lastMessage?.timestamp || Date.now(),
         };
         await window.bluetalk.store.set('aiChat.agents', [legacyAgent]);
@@ -61,6 +61,13 @@ export function useAiAgents(chatMeta) {
           ? prev
           : normalized
       ));
+      const needsWrite = Array.isArray(stored) && normalized.some((agent) => {
+        const raw = stored.find((entry) => entry?.id === agent.id);
+        return Boolean(raw) && typeof raw.description !== 'string';
+      });
+      if (needsWrite) {
+        await window.bluetalk.store.set('aiChat.agents', normalized);
+      }
       setAiAgentsLoaded(true);
     })();
     return () => {

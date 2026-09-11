@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Blocks } from 'lucide-react';
 import { useApp } from '../App';
 import { pluginRuntime } from './pluginRuntime';
+
+const ICON_STROKE = 1.75;
 
 /**
  * Mounts a plugin-registered tab. The plugin's `render(container, ctx)` callback
@@ -35,7 +38,7 @@ export default function PluginTabView() {
       container.replaceChildren();
       const errorNode = document.createElement('div');
       errorNode.className = 'plugin-error';
-      errorNode.textContent = `Plugin tab failed to render: ${String(e?.message || e)}`;
+      errorNode.textContent = `Plugin-Tab konnte nicht geladen werden: ${String(e?.message || e)}`;
       container.appendChild(errorNode);
     }
     return () => {
@@ -50,24 +53,31 @@ export default function PluginTabView() {
 
   if (!tab) {
     return (
-      <div className="plugin-host-empty">
-        <h2>Plugin tab not available</h2>
-        <p>
-          Die zugehörige Erweiterung ist deaktiviert oder wurde entfernt. Unter Erweiterungen kannst du sie wieder aktivieren.
-        </p>
+      <div className="page page-inset">
+        <div className="page-shell">
+          <div className="page-empty">
+            <Blocks size={28} strokeWidth={ICON_STROKE} aria-hidden />
+            <p className="empty-state-title">Erweiterung nicht verfügbar</p>
+            <p>
+              Die zugehörige Erweiterung ist deaktiviert oder wurde entfernt. Unter Erweiterungen kannst du sie wieder aktivieren.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="plugin-host">
-      {debugMode ? (
-        <div className="plugin-host-header">
-          <span className="plugin-host-title">{tab.label}</span>
-          <span className="plugin-host-sub">from {tab.pluginId}</span>
-        </div>
-      ) : null}
-      <div ref={containerRef} className="plugin-host-body" />
+    <div className="page page-inset page-plugin-host">
+      <div className="page-shell">
+        <header className="page-shell-header">
+          <div className="page-shell-copy">
+            <h1>{tab.label}</h1>
+            {debugMode ? <p>{tab.pluginId}</p> : null}
+          </div>
+        </header>
+        <div ref={containerRef} className="page-shell-body plugin-host-body" />
+      </div>
     </div>
   );
 }

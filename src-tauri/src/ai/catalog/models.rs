@@ -1,6 +1,7 @@
 //! Modell-Stufen (lokal/Cloud), deren Auflösung sowie Katalog-JSON.
 
 use super::*;
+use serde_json::{Map, Value, json};
 
 // ---------------------------------------------------------------------------
 // Modell-Stufen
@@ -170,6 +171,99 @@ pub fn resolve_cloud_model_id(cloud_model_id: &str) -> &'static str {
         Some(model) => model.id,
         None => AI_CLOUD_DEFAULT_MODEL_ID,
     }
+}
+
+/// Modell-Stufe und Cloud-ID eines Bots, mit Fallback auf den globalen State.
+pub fn resolve_bot_model_selection(
+    agent: Option<&Value>,
+    fallback_tier: &str,
+    fallback_cloud: &str,
+) -> (String, String) {
+    let agent_tier = agent
+        .and_then(|entry| entry.get("modelTier"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let agent_cloud = agent
+        .and_then(|entry| entry.get("cloudModelId"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let tier_id = if get_model_tier(agent_tier).is_some_and(|tier| !tier.local) {
+        agent_tier.to_string()
+    } else if get_model_tier(fallback_tier).is_some_and(|tier| !tier.local) {
+        fallback_tier.to_string()
+    } else {
+        "cloud".to_string()
+    };
+    let cloud_id = if is_valid_cloud_model(agent_cloud) {
+        agent_cloud.to_string()
+    } else {
+        resolve_cloud_model_id(fallback_cloud).to_string()
+    };
+    (tier_id, cloud_id)
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenAiCompat {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+pub fn normalize_openai_base_url(raw: &str) -> String {
+    let mut url = raw.trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return String::new();
+    }
+    let lower = url.to_ascii_lowercase();
+    if !lower.contains("/v1") {
+        url.push_str("/v1");
+    }
+    url
+}
+
+fn openai_field<'a>(value: &'a Value, keys: &[&str]) -> &'a str {
+    for key in keys {
+        if let Some(text) = value.get(*key).and_then(Value::as_str) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+    }
+    ""
+}
+
+fn openai_from_value(value: Option<&Value>) -> Option<OpenAiCompat> {
+    let value = value?;
+    let base_url = normalize_openai_base_url(openai_field(value, &["openaiBaseUrl", "baseUrl"]));
+    let model = openai_field(value, &["openaiModel", "model"]).to_string();
+    if base_url.is_empty() || model.is_empty() {
+        return None;
+    }
+    Some(OpenAiCompat {
+        api_key: openai_field(value, &["openaiApiKey", "apiKey"]).to_string(),
+        base_url,
+        model,
+    })
+}
+
+/// Pro-Bot OpenAI-kompatible API, sonst die globale Vorgabe (`aiChat.openai`).
+/// `modelSource: "cloud"` bleibt bei Ollama Cloud, auch wenn API-Felder gesetzt sind.
+pub fn resolve_bot_openai(agent: Option<&Value>, global: &Value) -> Option<OpenAiCompat> {
+    let source = agent
+        .and_then(|value| value.get("modelSource"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if source == "cloud" {
+        return None;
+    }
+    if let Some(own) = openai_from_value(agent) {
+        return Some(own);
+    }
+    if source == "openai" {
+        return openai_from_value(Some(global));
+    }
+    None
 }
 
 /// Effektiver Ollama-Modellname für Tier + Cloud-Auswahl.

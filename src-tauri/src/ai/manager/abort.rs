@@ -41,8 +41,18 @@ impl OllamaManager {
         let cancelled = self.cancel_abort(request_id);
         // Auch eine offene ask_user-Anfrage sofort abbrechen, damit der
         // Agent-Loop nicht an einem wartenden Dialog hängen bleibt.
-        let ask = self.ask_registry.lock().remove(request_id).is_some();
-        if !cancelled && !ask {
+        let ask = {
+            let mut registry = self.ask_registry.lock();
+            registry.remove(request_id)
+        };
+        if let Some((peer_id, _)) = &ask {
+            let _ = self.app.emit_to(
+                "main",
+                "ollama:ask-user-done",
+                json!({ "requestId": request_id, "peerId": peer_id }),
+            );
+        }
+        if !cancelled && ask.is_none() {
             return json!({"ok": false, "error": "not_found"});
         }
         json!({"ok": true})

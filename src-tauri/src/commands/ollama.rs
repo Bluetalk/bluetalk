@@ -171,6 +171,18 @@ pub async fn ollama_reset_and_delete(window: WebviewWindow, manager: Manager<'_>
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn ollama_run_routine(
+    window: WebviewWindow,
+    manager: Manager<'_>,
+    peer_id: String,
+    routine_id: String,
+) -> Result<Value> {
+    require_main(&window)?;
+    let manager = manager.inner().clone();
+    Ok(manager.run_bot_routine(&peer_id, &routine_id).await)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn agent_send_message_reply(
     window: WebviewWindow,
     manager: Manager<'_>,

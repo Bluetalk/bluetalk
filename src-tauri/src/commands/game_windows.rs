@@ -22,7 +22,6 @@ use crate::{
 const MAIN_WINDOW_LABEL: &str = "main";
 const MAX_STATE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ACTION_BYTES: usize = 1024 * 1024;
-const MAX_PRESENCE_BYTES: usize = 128 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AuxiliarySpec {
@@ -37,7 +36,7 @@ struct AuxiliarySpec {
     min_height: u32,
 }
 
-const AUXILIARY_SPECS: [AuxiliarySpec; 6] = [
+const AUXILIARY_SPECS: [AuxiliarySpec; 5] = [
     AuxiliarySpec {
         game: "poker",
         label: "game-poker",
@@ -92,17 +91,6 @@ const AUXILIARY_SPECS: [AuxiliarySpec; 6] = [
         height: 780,
         min_width: 640,
         min_height: 520,
-    },
-    AuxiliarySpec {
-        game: "docs",
-        label: "docs",
-        route: "/docs-editor",
-        event_prefix: "docs",
-        title: "BlueTalk Dokumente",
-        width: 1060,
-        height: 760,
-        min_width: 640,
-        min_height: 480,
     },
 ];
 
@@ -251,20 +239,14 @@ pub fn game_window_send_action(
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn game_window_push_presence(
-    window: WebviewWindow,
-    app: AppHandle,
-    game: String,
-    payload: Value,
+    _window: WebviewWindow,
+    _app: AppHandle,
+    _game: String,
+    _payload: Value,
 ) -> Result<bool> {
-    require_main(&window)?;
-    let spec = spec_for_game(&game)?;
-    if spec.game != "docs" {
-        return Err(AppError::PermissionDenied(
-            "presence relay is restricted to the documents window".into(),
-        ));
-    }
-    validate_payload_size(&payload, MAX_PRESENCE_BYTES, "document presence")?;
-    emit_if_open(&app, spec, "docs:presence", payload)
+    Err(AppError::InvalidInput(
+        "document windows are no longer supported".into(),
+    ))
 }
 
 fn states() -> &'static RwLock<HashMap<&'static str, Value>> {
@@ -444,8 +426,8 @@ mod tests {
             "/poker-game"
         ));
         assert!(trusted_navigation(
-            &Url::parse("http://tauri.localhost/#/docs-editor").unwrap(),
-            "/docs-editor"
+            &Url::parse("http://tauri.localhost/#/poker-game").unwrap(),
+            "/poker-game"
         ));
         assert!(!trusted_navigation(
             &Url::parse("https://example.com/#/poker-game").unwrap(),
@@ -468,10 +450,10 @@ mod tests {
 
     #[test]
     fn app_path_contains_only_the_whitelisted_hash_route() {
-        let docs = spec_for_game("docs").unwrap();
+        let poker = spec_for_game("poker").unwrap();
         assert_eq!(
-            auxiliary_app_path(docs).to_string_lossy(),
-            "index.html#/docs-editor"
+            auxiliary_app_path(poker).to_string_lossy(),
+            "index.html#/poker-game"
         );
     }
 }

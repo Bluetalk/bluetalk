@@ -47,7 +47,7 @@ export function useComposerSend({
         toast({
           variant: 'warning',
           title: 'Anhänge nicht unterstützt',
-          message: 'Das aktuelle Modell kann keine Bilder verarbeiten. Wähle z. B. die Stufe Smart (Gemma 4).',
+          message: 'Das aktuelle Modell kann keine Bilder verarbeiten.',
         });
         return;
       }
@@ -74,23 +74,23 @@ export function useComposerSend({
           if (rawError === 'chat_aborted') return;
           const aiMessage =
             rawError === 'chat_busy'
-              ? 'Die KI antwortet noch auf eine vorherige Nachricht.'
-              : rawError === 'setup_incomplete'
-              ? 'Die KI ist noch nicht eingerichtet. Richte Ollama und ein Modell unter Einstellungen → AI Chat ein.'
+              ? 'Der Bot antwortet noch auf eine vorherige Nachricht.'
+              : rawError === 'setup_incomplete' || rawError === 'api_not_configured'
+              ? 'Hinterlege unter Einstellungen → Bots eine OpenAI-kompatible API oder Ollama Cloud.'
               : rawError === 'ollama_handler_missing'
-                ? 'BlueTalk muss einmal komplett neu gestartet werden, damit der neue Ollama-Chat aktiv ist.'
+                ? 'BlueTalk muss einmal komplett neu gestartet werden.'
               : rawError === 'server_not_running'
-                ? 'Ollama konnte nicht gestartet werden.'
+                ? 'Die gewählte Cloud-API ist nicht erreichbar.'
                 : rawError === 'model_missing'
                   ? 'Das ausgewählte Modell fehlt.'
                   : rawError === 'vision_not_supported'
-                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge. Wähle z. B. die Stufe Smart (Gemma 4).'
+                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge.'
                   : /can't find closing '\}' symbol|looks like object/i.test(rawError)
                     ? 'Tool-Aufruf konnte nicht verarbeitet werden. Bitte BlueTalk neu starten und erneut versuchen.'
-                  : rawError || 'Prüfe Ollama und das ausgewählte Modell.';
+                  : rawError || 'Prüfe API-URL, Schlüssel und Modellname.';
           toast({
             variant: 'error',
-            title: 'KI antwortet nicht',
+            title: 'Bot antwortet nicht',
             message: aiMessage,
           });
         }
@@ -123,23 +123,23 @@ export function useComposerSend({
           const aiPeer = isAiChatPeerId(peerId);
           const aiMessage =
             rawError === 'chat_busy'
-              ? 'Die KI antwortet noch auf eine vorherige Nachricht.'
-              : rawError === 'setup_incomplete'
-              ? 'Die KI ist noch nicht eingerichtet. Richte Ollama und ein Modell unter Einstellungen → AI Chat ein.'
+              ? 'Der Bot antwortet noch auf eine vorherige Nachricht.'
+              : rawError === 'setup_incomplete' || rawError === 'api_not_configured'
+              ? 'Hinterlege unter Einstellungen → Bots eine OpenAI-kompatible API oder Ollama Cloud.'
               : rawError === 'ollama_handler_missing'
-                ? 'BlueTalk muss einmal komplett neu gestartet werden, damit der neue Ollama-Chat aktiv ist.'
+                ? 'BlueTalk muss einmal komplett neu gestartet werden.'
               : rawError === 'server_not_running'
-                ? 'Ollama konnte nicht gestartet werden.'
+                ? 'Die gewählte Cloud-API ist nicht erreichbar.'
                 : rawError === 'model_missing'
                   ? 'Das ausgewählte Modell fehlt.'
                   : rawError === 'vision_not_supported'
-                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge. Wähle z. B. die Stufe Smart (Gemma 4).'
+                    ? 'Das aktuelle Modell unterstützt keine Bild-Anhänge.'
                   : /can't find closing '\}' symbol|looks like object/i.test(rawError)
                     ? 'Tool-Aufruf konnte nicht verarbeitet werden. Bitte BlueTalk neu starten und erneut versuchen.'
-                  : rawError || 'Prüfe Ollama und das ausgewählte Modell.';
+                  : rawError || 'Prüfe API-URL, Schlüssel und Modellname.';
           toast({
             variant: 'error',
-            title: aiPeer ? 'KI antwortet nicht' : 'Message not sent',
+            title: aiPeer ? 'Bot antwortet nicht' : 'Message not sent',
             message: aiPeer ? aiMessage : 'Peer is probably offline.',
           });
         }

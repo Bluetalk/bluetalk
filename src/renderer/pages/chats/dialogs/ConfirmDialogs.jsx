@@ -1,6 +1,8 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import groupChat from '../../../../shared/group-chat.js';
+import { isAiChatPeerId } from '../../../aiChatConstants';
+import { ModalOverlay } from '../../../components/ModalOverlay.jsx';
 import { CHAT_ICON_STROKE } from '../messageHelpers.jsx';
 
 const { isGroupChatId } = groupChat;
@@ -19,8 +21,7 @@ export function ClearContextConfirmDialog({ open, peer, busy, onClose, onConfirm
   if (!open) return null;
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalOverlay
       onClick={() => {
         if (busy) return;
         onClose();
@@ -42,8 +43,8 @@ export function ClearContextConfirmDialog({ open, peer, busy, onClose, onConfirm
           </button>
         </div>
         <p className="text-muted" style={{ margin: '0 0 16px', lineHeight: 1.5 }}>
-          Der gesamte Chatverlauf und der Agent-Kontext (inkl. Erinnerungen) von{' '}
-          <strong>{peer.displayName}</strong> werden gelöscht. Der KI-Agent bleibt erhalten.
+          Der gesamte Chatverlauf und der Bot-Kontext (inkl. Erinnerungen) von{' '}
+          <strong>{peer.displayName}</strong> werden gelöscht. Der Bot bleibt erhalten.
           Dies kann nicht rückgängig gemacht werden.
         </p>
         <div className="modal-actions">
@@ -68,7 +69,7 @@ export function ClearContextConfirmDialog({ open, peer, busy, onClose, onConfirm
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -80,8 +81,7 @@ export function DeleteChatConfirmDialog({ open, peer, targetPeerId, busy, onClos
   if (!open) return null;
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalOverlay
       onClick={() => {
         if (busy) return;
         onClose();
@@ -90,7 +90,7 @@ export function DeleteChatConfirmDialog({ open, peer, targetPeerId, busy, onClos
       <div className="modal modal-danger animate-scale" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
           <h3 style={{ margin: 0 }}>
-            {isGroupChatId(targetPeerId) ? 'Gruppe löschen?' : 'Chat löschen?'}
+            {isGroupChatId(targetPeerId) ? 'Gruppe löschen?' : isAiChatPeerId(targetPeerId) ? 'Bot löschen?' : 'Chat löschen?'}
           </h3>
           <button
             className="btn btn-ghost btn-icon"
@@ -111,6 +111,8 @@ export function DeleteChatConfirmDialog({ open, peer, targetPeerId, busy, onClos
                 ? <>Du verlässt <strong>{peer.displayName}</strong> und entfernst alle Nachrichten auf diesem Gerät. Das kann nicht rückgängig gemacht werden.</>
                 : <>Die Gruppe <strong>{peer.displayName}</strong> und alle Nachrichten auf diesem Gerät werden entfernt. Das kann nicht rückgängig gemacht werden.</>}
             </>
+          ) : isAiChatPeerId(targetPeerId) ? (
+            <>Der Bot <strong>{peer.displayName}</strong> und alle Nachrichten auf diesem Gerät werden entfernt. Das kann nicht rückgängig gemacht werden.</>
           ) : (
             <>Der Chat mit <strong>{peer.displayName}</strong> und alle Nachrichten auf diesem Gerät werden entfernt. Das kann nicht rückgängig gemacht werden.</>
           )}
@@ -133,10 +135,10 @@ export function DeleteChatConfirmDialog({ open, peer, targetPeerId, busy, onClos
                 <span className="spinner spinner--sm spinner--accent" />
                 <span>Wird gelöscht…</span>
               </span>
-            ) : (isGroupChatId(targetPeerId) ? 'Gruppe löschen' : 'Chat löschen')}
+            ) : (isGroupChatId(targetPeerId) ? 'Gruppe löschen' : isAiChatPeerId(targetPeerId) ? 'Bot löschen' : 'Chat löschen')}
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

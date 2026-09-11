@@ -75,6 +75,22 @@ pub async fn file_save_as(
     Ok(json!({"ok": true, "canceled": false, "path": path.to_string_lossy()}))
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn file_open_path(window: WebviewWindow, path: String) -> Result<Value> {
+    require_main(&window)?;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput("empty_path".into()));
+    }
+    let file_path = Path::new(trimmed);
+    if !file_path.is_file() {
+        return Err(AppError::NotFound("file".into()));
+    }
+    tauri_plugin_opener::open_path(trimmed, None::<&str>)
+        .map_err(|error| AppError::Io(std::io::Error::other(error.to_string())))?;
+    Ok(json!({"ok": true, "path": trimmed}))
+}
+
 #[tauri::command]
 pub async fn agent_pick_folder(window: WebviewWindow, app: AppHandle) -> Result<PickFolderResult> {
     require_main(&window)?;
