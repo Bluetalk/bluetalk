@@ -73,10 +73,19 @@ function FileTypeIcon({ mime, fileName, size = 22 }) {
   return <File {...common} />;
 }
 
+function FileSendOverlay() {
+  return (
+    <div className="msg-file-send-overlay" aria-hidden>
+      <span className="msg-file-send-ring" />
+    </div>
+  );
+}
+
 function FileMessage({ message, bareLayout = false, onExpandImage, onSaveToDisk }) {
   const dataUrl = getFileBlobUrl(message);
   const mime = message.fileType || 'application/octet-stream';
   const category = getFileCategory(mime, message.fileName);
+  const sending = message.from === 'self' && message.deliveryStatus === 'pending';
   const imageUrl = category === 'image' ? getImageUrl(message) : '';
   const hasPayload = Boolean(dataUrl && (message.fileData || message.localPreviewUrl));
   const showImagePreview = category === 'image' && !!imageUrl;
@@ -112,9 +121,12 @@ function FileMessage({ message, bareLayout = false, onExpandImage, onSaveToDisk 
   if (bareLayout && showImagePreview) {
     return (
       <div className="msg-bare-media-stack">
-        <button type="button" className="msg-bare-image-link" onClick={openImage}>
-          <img src={imageUrl} alt={message.fileName || 'Bildanhang'} className="msg-file-image" loading="lazy" />
-        </button>
+        <div className={`msg-bare-media-preview${sending ? ' msg-file--sending' : ''}`}>
+          <button type="button" className="msg-bare-image-link" onClick={openImage}>
+            <img src={imageUrl} alt={message.fileName || 'Bildanhang'} className="msg-file-image" loading="lazy" />
+          </button>
+          {sending ? <FileSendOverlay /> : null}
+        </div>
         {(message.fileName || message.fileSize) && (
           <div className="msg-bare-media-caption">
             <span className="msg-bare-caption-name" title={message.fileName || ''}>
@@ -128,7 +140,7 @@ function FileMessage({ message, bareLayout = false, onExpandImage, onSaveToDisk 
   }
 
   return (
-    <div className={`msg-file msg-file--${category}`}>
+    <div className={`msg-file msg-file--${category}${sending ? ' msg-file--sending' : ''}`}>
       {showImagePreview && (
         <button type="button" className="msg-file-image-link" onClick={openImage}>
           <img src={imageUrl} alt={message.fileName || 'Bildanhang'} className="msg-file-image" loading="lazy" />
@@ -182,6 +194,7 @@ function FileMessage({ message, bareLayout = false, onExpandImage, onSaveToDisk 
           )}
         </div>
       )}
+      {sending ? <FileSendOverlay /> : null}
     </div>
   );
 }

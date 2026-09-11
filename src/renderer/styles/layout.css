@@ -223,7 +223,7 @@
 }
 
 /* ============ Page ============ */
-.page { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.page { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-header { padding: 20px 28px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .page-header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.4px; color: var(--fg-0); }
 .page-header h1.page-title-row { display: flex; align-items: center; gap: 10px; }
@@ -235,7 +235,7 @@
   flex-shrink: 0;
 }
 .page-header p { color: var(--fg-2); font-size: 13px; margin-top: 2px; }
-.page-body { flex: 1; overflow-y: auto; padding: 20px 28px; }
+.page-body { flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: none; padding: 20px 28px; }
 
 /* ============ Split Layout ============ */
 .split-layout { flex: 1; display: flex; overflow: hidden; gap: 8px; padding: 8px; background: var(--bg-1); }
@@ -409,7 +409,7 @@
 }
 .split-list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 .split-list-header h2 { font-size: 14px; font-weight: 600; color: var(--fg-0); }
-.split-list-body { flex: 1; overflow-y: auto; padding: 6px; }
+.split-list-body { flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: none; padding: 6px; }
 .split-list-body--with-agents {
   display: flex;
   flex-direction: column;
@@ -419,7 +419,9 @@
 .split-list-chats {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-x: none;
   padding: 6px;
 }
 .split-list-agents-panel {
@@ -462,7 +464,9 @@
 }
 .split-list-agents-active { display: inline-flex; align-items: center; }
 .split-list-agents-body {
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-x: none;
   padding: 4px 6px 8px;
   min-height: 0;
 }

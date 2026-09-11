@@ -56,7 +56,10 @@
 }
 .ai-chat-setup {
   flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-x: none;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -138,7 +141,7 @@
 }
 .ai-runtime-mode-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 .ai-runtime-mode-option {
@@ -175,7 +178,7 @@
 }
 .ai-model-tier-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 .ai-model-tier {
@@ -547,6 +550,7 @@
 }
 .create-ai-agent-modal-body {
   padding: 18px 20px 8px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;

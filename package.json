@@ -1,7 +1,7 @@
 {
   "name": "bluetalk-v2",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "BlueTalk peer-to-peer desktop client powered by Rust and Tauri",
   "type": "module",
   "author": {

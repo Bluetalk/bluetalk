@@ -34,7 +34,7 @@ export function useComposerSend({
     if (contactOutgoingBlocked(selectedPeer.contact)) return;
     if (showOfflineComposerReconnect) return;
     if (!input.trim() && !pendingFile) return;
-    if (sendingFile) return;
+    if (sendingFile || pendingFile?.launching) return;
     if (isAiChatSelected && aiChatPending) return;
 
     setWarning('');
@@ -52,7 +52,12 @@ export function useComposerSend({
         return;
       }
       setInput('');
-      if (file) setPendingFile(null);
+      if (file) {
+        setPendingFile((prev) => (prev ? { ...prev, launching: true } : null));
+        window.setTimeout(() => {
+          setPendingFile((prev) => (prev?.launching ? null : prev));
+        }, 320);
+      }
       onClearReply();
 
       sendMessage(peerId, {
@@ -149,7 +154,10 @@ export function useComposerSend({
     // File messages: keep progress bar but send async
     if (pendingFile) {
       const file = pendingFile;
-      setPendingFile(null);
+      setPendingFile((prev) => (prev ? { ...prev, launching: true } : null));
+      window.setTimeout(() => {
+        setPendingFile((prev) => (prev?.launching ? null : prev));
+      }, 320);
       let progressTimer = null;
       setFileTransfer({ stage: 'sending', percent: 48, detail: 'Sending attachment…' });
       progressTimer = setInterval(() => {

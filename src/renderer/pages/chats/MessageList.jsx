@@ -249,6 +249,11 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 isSelected && 'msg-row--selected',
                 clusteredWithPrev && 'msg-row--cluster-follow',
                 clusteredWithNext && 'msg-row--cluster-lead',
+                isSelf
+                  && (m.kind === 'file' || m.kind === 'sticker' || bareMedia)
+                  && typeof m.timestamp === 'number'
+                  && Date.now() - m.timestamp < 2000
+                  && 'msg-row--file-send',
               ]
                 .filter(Boolean)
                 .join(' ')}

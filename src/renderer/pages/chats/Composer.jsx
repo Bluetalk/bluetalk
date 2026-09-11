@@ -7,6 +7,7 @@ import {
   COMPOSER_TEXTAREA_MIN_HEIGHT,
   formatSize,
   getComposerTextareaMaxHeight,
+  getFileCategory,
   getMessagePreviewText,
 } from './messageHelpers.jsx';
 import { FileTypeIcon } from './messageParts.jsx';
@@ -175,6 +176,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     if (
       sendingFile
       || readingFile
+      || pendingFile?.launching
       || (!input.trim() && !pendingFile)
       || composerDisabled
     ) return;
@@ -185,7 +187,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
   };
 
   const handleComposerPaste = (event) => {
-    if (composerDisabled || readingFile || sendingFile) return;
+    if (composerDisabled || readingFile || sendingFile || pendingFile?.launching) return;
     if (isAiChatSelected && !aiChatSupportsVision) return;
     const items = event.clipboardData?.items;
     if (!items?.length) return;
@@ -227,18 +229,22 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
       )}
 
       {pendingFile && (
-        <div className="pending-file">
-          <div className="pending-file-icon-wrap" aria-hidden>
-            <FileTypeIcon mime={pendingFile.type} fileName={pendingFile.name} size={20} />
-          </div>
+        <div className={`pending-file${pendingFile.launching ? ' pending-file--launch' : ''}`}>
+          {getFileCategory(pendingFile.type, pendingFile.name) === 'image' && pendingFile.objectUrl ? (
+            <img src={pendingFile.objectUrl} alt="" className="pending-file-thumb" />
+          ) : (
+            <div className="pending-file-icon-wrap" aria-hidden>
+              <FileTypeIcon mime={pendingFile.type} fileName={pendingFile.name} size={20} />
+            </div>
+          )}
           <div className="pending-file-info">
             <div className="pending-file-name">{pendingFile.name}</div>
             <div className="pending-file-meta">{formatSize(pendingFile.size)}</div>
           </div>
           <button
             className="btn btn-ghost btn-icon"
-            onClick={() => !sendingFile && clearPendingFile()}
-            disabled={sendingFile}
+            onClick={() => !sendingFile && !pendingFile.launching && clearPendingFile()}
+            disabled={sendingFile || pendingFile.launching}
             title="Anhang entfernen"
             type="button"
           >
@@ -247,7 +253,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
         </div>
       )}
 
-      {fileTransfer && (
+      {fileTransfer && !pendingFile?.launching && (
         <div
           className="chat-file-progress"
           role="progressbar"
@@ -336,6 +342,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
             && (
               sendingFile
               || readingFile
+              || pendingFile?.launching
               || (!input.trim() && !pendingFile)
               || composerDisabled
             )

@@ -25,6 +25,30 @@
   46%  { transform: translate(-5px, 6px); opacity: 0; }
   100% { transform: translate(0, 0); opacity: 1; }
 }
+@keyframes msg-file-send-in {
+  0%   { opacity: 0.15; transform: translateY(72px) scale(0.78); }
+  62%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes pending-file-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pending-file-launch {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-56px) scale(0.72); }
+}
+@keyframes file-progress-sheen {
+  from { transform: translateX(-120%); }
+  to   { transform: translateX(120%); }
+}
+@keyframes msg-file-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes msg-file-ring-spin {
+  to { transform: rotate(360deg); }
+}
 @keyframes react-pop {
   from { transform: scale(0.7); opacity: 0.4; }
   to   { transform: scale(1); opacity: 1; }
@@ -98,6 +122,18 @@ html:active-view-transition .content > .page {
   transform-origin: bottom right;
   animation-name: msg-send-in;
   animation-duration: 0.36s;
+}
+.msg-row-self.msg-row--file-send {
+  animation-name: msg-file-send-in;
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.22, 1.12, 0.36, 1);
+}
+.pending-file {
+  animation: pending-file-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pending-file--launch {
+  animation: pending-file-launch 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
 }
 .msg-row-other { transform-origin: bottom left; }
 .chat-send-btn.is-sending {
@@ -209,6 +245,11 @@ html:active-view-transition .content > .page {
   .chat-send-btn.is-sending,
   .chat-send-btn.is-sending svg,
   .msg-react-chip,
+  .pending-file,
+  .pending-file--launch,
+  .chat-file-progress-fill::after,
+  .msg-file-send-overlay,
+  .msg-file-send-ring,
   .sidebar-link.active,
   .context-menu,
   .context-menu-pop,

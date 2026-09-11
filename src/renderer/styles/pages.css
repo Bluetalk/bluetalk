@@ -252,9 +252,10 @@
 
 .plugin-grid {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: 12px;
   padding: 0;
   align-content: start;
@@ -623,6 +624,7 @@
 .page-inset {
   padding: 8px;
   background: var(--bg-1);
+  min-width: 0;
   min-height: 0;
 }
 .page-shell {
@@ -676,8 +678,11 @@
 }
 .page-shell-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-x: none;
   padding: 4px 20px 24px;
   display: flex;
   flex-direction: column;
@@ -797,7 +802,7 @@
 }
 .new-people-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr));
   gap: 10px;
 }
 .new-person-card {

@@ -3,6 +3,13 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.1.1': {
+    title: "What's new in BlueTalk 2.1.1",
+    items: [
+      'Dateien heben sich beim Senden aus der Chatzeile in den Verlauf; während der Übertragung liegt ein Fortschritt über dem Anhang.',
+      'Einstellungen lassen sich wieder vertikal scrollen. Listen und Grids rutschen nicht mehr ungewollt zur Seite.',
+    ],
+  },
   '2.1.0': {
     title: "What's new in BlueTalk 2.1.0",
     items: [
