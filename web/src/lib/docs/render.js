@@ -1,22 +1,26 @@
 import { marked } from 'marked';
 
-marked.setOptions({ gfm: true });
-
 function slugify(text) {
   return String(text || '')
     .toLowerCase()
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
-    .trim();
+    .replace(/^-|-$/g, '');
 }
 
+marked.use({
+  gfm: true,
+  renderer: {
+    heading({ text, tokens, depth }) {
+      const inner = this.parser.parseInline(tokens);
+      return `<h${depth} id="${slugify(text)}">${inner}</h${depth}>\n`;
+    },
+  },
+});
+
 export function renderDocsMarkdown(markdown) {
-  const html = marked.parse(String(markdown || ''), { gfm: true, async: false });
-  return String(html).replace(/<h([23])>([\s\S]*?)<\/h\1>/g, (_, level, inner) => {
-    const text = inner.replace(/<[^>]+>/g, '').trim();
-    return `<h${level} id="${slugify(text)}">${inner}</h${level}>`;
-  });
+  return String(marked.parse(String(markdown || ''), { async: false }));
 }
 
 export function extractToc(markdown) {
