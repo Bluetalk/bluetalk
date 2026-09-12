@@ -5,7 +5,25 @@
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="theme-color" content="#0a0a0a" />
-		<meta name="color-scheme" content="dark" />
+		<meta name="color-scheme" content="dark light" />
+		<script>
+			(function () {
+				try {
+					var t = localStorage.getItem('bt-theme');
+					if (t !== 'light' && t !== 'dark') {
+						t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+					}
+					document.documentElement.setAttribute('data-theme', t);
+					document.documentElement.style.colorScheme = t;
+					if (t === 'light') {
+						var m = document.querySelector('meta[name="theme-color"]');
+						if (m) m.setAttribute('content', '#f4f4f5');
+					}
+				} catch (e) {
+					document.documentElement.setAttribute('data-theme', 'dark');
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

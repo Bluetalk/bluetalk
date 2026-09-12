@@ -13,8 +13,9 @@ marked.use({
   gfm: true,
   renderer: {
     heading({ text, tokens, depth }) {
+      const id = slugify(text);
       const inner = this.parser.parseInline(tokens);
-      return `<h${depth} id="${slugify(text)}">${inner}</h${depth}>\n`;
+      return `<h${depth} id="${id}"><a class="docs-anchor" href="#${id}" aria-label="Abschnitt verlinken">#</a>${inner}</h${depth}>\n`;
     },
   },
 });
