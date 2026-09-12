@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.railpack.com/railpack.schema.json",
+  "deploy": {
+    "startCommand": "node start.mjs"
+  }
+}
