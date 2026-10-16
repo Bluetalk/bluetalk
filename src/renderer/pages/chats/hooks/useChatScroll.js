@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * Scroll-Pinning der Nachrichtenliste: hält das Ende sichtbar, solange der
@@ -11,9 +11,21 @@ export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress,
   const endRef = useRef(null);
   const chatMessagesRef = useRef(null);
   const keepChatPinnedRef = useRef(true);
+  const lastNewestRef = useRef(0);
+  const selectedPeerRef = useRef(selectedPeerId);
+  const [stuckToBottom, setStuckToBottom] = useState(true);
+  const [unseenCount, setUnseenCount] = useState(0);
+
+  if (selectedPeerRef.current !== selectedPeerId) {
+    selectedPeerRef.current = selectedPeerId;
+    lastNewestRef.current = newestTimestamp || 0;
+  }
 
   useEffect(() => {
     keepChatPinnedRef.current = true;
+    lastNewestRef.current = newestTimestamp || 0;
+    setStuckToBottom(true);
+    setUnseenCount(0);
     endRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [selectedPeerId]);
 
@@ -21,11 +33,28 @@ export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress,
     const el = chatMessagesRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    keepChatPinnedRef.current = distanceFromBottom < 96;
+    const atBottom = distanceFromBottom < 96;
+    keepChatPinnedRef.current = atBottom;
+    setStuckToBottom(atBottom);
+    if (atBottom) setUnseenCount(0);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    keepChatPinnedRef.current = true;
+    setStuckToBottom(true);
+    setUnseenCount(0);
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
   useLayoutEffect(() => {
-    if (!keepChatPinnedRef.current) return;
+    const prevNewest = lastNewestRef.current;
+    lastNewestRef.current = newestTimestamp || 0;
+    if (!keepChatPinnedRef.current) {
+      if (newestTimestamp && newestTimestamp > prevNewest) {
+        setUnseenCount((count) => count + 1);
+      }
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: aiChatProgress?.content ? 'auto' : 'smooth' });
   }, [
     newestTimestamp,
@@ -35,5 +64,12 @@ export function useChatScroll({ selectedPeerId, newestTimestamp, aiChatProgress,
     aiChatProgress?.content ? Math.floor(String(aiChatProgress.content).length / 320) : 0,
   ]);
 
-  return { chatMessagesRef, endRef, updateChatPinnedState };
+  return {
+    chatMessagesRef,
+    endRef,
+    updateChatPinnedState,
+    stuckToBottom,
+    unseenCount,
+    jumpToLatest,
+  };
 }

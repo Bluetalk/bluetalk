@@ -15,14 +15,15 @@ use tokio::time::MissedTickBehavior;
 
 use crate::AppState;
 use crate::auth::verify_auth;
+use crate::hub::RegisterSpec;
 use crate::mailbox::PostOutcome;
 use crate::proto::{
-    AUTH_TIMEOUT_SECS, BYTE_BURST, BYTE_RATE, CONTROL_RATE, MAX_WATCH, OPEN_TIMEOUT_SECS,
-    OUTBOUND_CONTROL_CAP, OUTBOUND_DATA_CAP, Outbound, WS_IDLE_SECS, WS_PING_SECS, error, hello,
-    mail, open_failed, post_failed, posted, ready,
+    AUTH_TIMEOUT_SECS, BYTE_BURST, BYTE_RATE, CONTROL_RATE, LEGACY_DEVICE, MAX_WATCH,
+    OPEN_TIMEOUT_SECS, OUTBOUND_CONTROL_CAP, OUTBOUND_DATA_CAP, Outbound, WS_IDLE_SECS,
+    WS_PING_SECS, error, hello, mail, open_failed, post_failed, posted, ready,
 };
 use crate::ratelimit::{IpGuard, TokenBucket};
-use crate::util::{parse_peer_id, short_id, unix_ms, valid_mail_id, valid_name};
+use crate::util::{parse_peer_id, short_id, unix_ms, valid_device_id, valid_mail_id, valid_name};
 
 enum Session {
     WaitAuth { nonce: String },
@@ -366,27 +367,55 @@ async fn handle_auth(
         let _ = enqueue(control_tx, Outbound::Close);
         return false;
     }
+    let device = match v.get("device") {
+        None => LEGACY_DEVICE.to_string(),
+        Some(Value::String(s)) if s == LEGACY_DEVICE || valid_device_id(s) => s.clone(),
+        _ => {
+            let _ = enqueue(control_tx, Outbound::json(error("auth_failed")));
+            let _ = enqueue(control_tx, Outbound::Close);
+            return false;
+        }
+    };
+    let device_name = match v.get("deviceName") {
+        None => String::new(),
+        Some(Value::String(s)) if valid_name(s) => s.clone(),
+        _ => {
+            let _ = enqueue(control_tx, Outbound::json(error("auth_failed")));
+            let _ = enqueue(control_tx, Outbound::Close);
+            return false;
+        }
+    };
     let Ok(peer_id) = verify_auth(pk, sig, &nonce_b64, host) else {
         let _ = enqueue(control_tx, Outbound::json(error("auth_failed")));
         let _ = enqueue(control_tx, Outbound::Close);
         return false;
     };
     let registered = state.hub.register(
-        peer_id.clone(),
-        name,
+        RegisterSpec {
+            peer_id: peer_id.clone(),
+            device: device.clone(),
+            device_name,
+            name,
+        },
         control_tx.clone(),
         data_tx.clone(),
         cancel_tx.clone(),
     );
     if control_tx
-        .send(Outbound::json(ready(&peer_id)))
+        .send(Outbound::json(ready(
+            &peer_id,
+            &registered.device,
+            &registered.other_devices,
+        )))
         .await
         .is_err()
     {
         state.hub.unregister(&peer_id, registered.generation);
         return false;
     }
-    tracing::info!(peer = %short_id(&peer_id), "bereit");
+    tracing::info!(peer = %short_id(&peer_id), device = %device, "bereit");
+    // Wartende Post an dieses Gerät (auch wenn `pushed`: andere Geräte können
+    // live schon beliefert sein; erstes `ack` irgendwo löscht).
     let pending = state.mailbox.list(&peer_id).await;
     for row in pending {
         let msg = mail(&row.id, &row.from, row.ts, &row.body);
@@ -449,7 +478,17 @@ fn handle_open(
     let Some(to) = parse_peer_id(to_raw) else {
         return enqueue(control_tx, Outbound::json(open_failed(tid, "invalid")));
     };
-    match state.hub.open_tunnel(peer_id, generation, tid, &to) {
+    let to_device = match v.get("device") {
+        None => None,
+        Some(Value::String(s)) if s == LEGACY_DEVICE || valid_device_id(s) => Some(s.as_str()),
+        _ => {
+            return enqueue(control_tx, Outbound::json(open_failed(tid, "invalid")));
+        }
+    };
+    match state
+        .hub
+        .open_tunnel(peer_id, generation, tid, &to, to_device)
+    {
         Ok(()) => {
             let hub = state.hub.clone();
             let from = peer_id.to_string();
@@ -496,6 +535,8 @@ async fn handle_post(
             let mut status = "stored";
             let row_ts = unix_ms();
             let msg = Outbound::json(mail(id, from, row_ts, body));
+            // An alle verbundenen Geräte; `pushed` erst nach mind. einer Zustellung,
+            // Löschen bleibt beim ersten `ack` (keine Doppel-Schleife über pushed).
             if state.hub.deliver_control(&to, msg).await {
                 state.mailbox.mark_pushed(from, id).await;
                 status = "delivered";

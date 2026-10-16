@@ -2,8 +2,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Minus, Maximize2, SquareStack, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useApp } from './appContext';
+import ProfileMenu from '../components/ProfileMenu';
+import { useMobileLayout } from '../utils/touch.js';
 
 export default function TitleBar() {
+  const isMobile = useMobileLayout();
   const { peerCount, settings, updateSettings } = useApp();
   const sidebarCollapsed = settings.uiCollapse?.sidebar === true;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -53,8 +56,14 @@ export default function TitleBar() {
         <span className={peerCount > 0 ? 'online-dot' : 'offline-dot'} />
         <span>{peerCount} {peerCount === 1 ? 'Peer' : 'Peers'}</span>
       </div>
-      {__BLUETALK_WEB__ ? null : (
       <div className="titlebar-controls">
+        {isMobile ? (
+          <div className="titlebar-mobile-profile">
+            <ProfileMenu />
+          </div>
+        ) : null}
+      {__BLUETALK_WEB__ ? null : (
+        <>
         <button type="button" onClick={() => window.bluetalk?.window.minimize()} className="tb-btn" title="Minimieren" aria-label="Minimieren">
           <Minus size={14} strokeWidth={2} aria-hidden />
         </button>
@@ -70,8 +79,9 @@ export default function TitleBar() {
         <button type="button" onClick={() => window.bluetalk?.window.close()} className="tb-btn tb-close" title="Schließen" aria-label="Schließen">
           <X size={14} strokeWidth={2} aria-hidden />
         </button>
-      </div>
+        </>
       )}
+      </div>
     </div>
   );
 }

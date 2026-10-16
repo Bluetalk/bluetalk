@@ -3,6 +3,17 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.4.0': {
+    title: "What's new in BlueTalk 2.4.0",
+    items: [
+      'Mehrere Geräte gleichzeitig: Desktop und BlueTalk Web sind mit demselben Cloud-Konto parallel online. Nachrichten kommen auf allen Geräten an, Gesendetes erscheint nach etwa einer Sekunde auch auf den anderen. „Deine Geräte“ steht unter BlueTalk Cloud.',
+      'Anrufe: Auflegen beendet den Anruf jetzt auch beim Gegenüber sofort. Eingehende Anrufe klingeln auf allen Geräten, angenommen wird auf einem.',
+      'Neu: Kamera und Bildschirmübertragung in Anrufen, auch als Videoanruf direkt aus dem Chat. Ende-zu-Ende verschlüsselt.',
+      'Chats: Nachrichten bearbeiten, anheften und im Chat suchen. Klick auf ein Zitat springt zur Nachricht, dazu „Nach unten“ mit Zähler, Trenner „Neue Nachrichten“, Entwürfe pro Chat und @Erwähnungen in Gruppen.',
+      'BlueTalk Web auf dem Handy: eigene Mobil-Ansicht mit Tab-Leiste, Zurück-Geste, langem Drücken für Menüs und Wischen zum Antworten. Lässt sich als App auf den Homescreen legen.',
+      'Bots wurden eingestellt: Bestehende Bot-Chats bleiben lesbar, neue lassen sich nicht mehr anlegen.',
+    ],
+  },
   '2.3.1': {
     title: "What's new in BlueTalk 2.3.1",
     items: [

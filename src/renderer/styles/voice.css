@@ -412,3 +412,43 @@
 [data-theme="dark"] .chat-header-call-btn:hover {
   background: rgba(36, 36, 36, 0.72);
 }
+
+/* Eingehender/ausgehender Anruf auf 360–430 px: Hochformat, Safe-Area, 44-px-Ziele. */
+@media (max-width: 430px) {
+  .call-overlay.call-overlay--incoming,
+  .call-overlay.call-overlay--outgoing {
+    padding: env(safe-area-inset-top, 0px) 12px env(safe-area-inset-bottom, 0px);
+    align-items: stretch;
+    justify-content: flex-end;
+  }
+  .call-overlay-card {
+    width: 100%;
+    max-width: none;
+    min-height: min(100%, 100dvh);
+    justify-content: flex-end;
+    border-radius: 20px 20px 0 0;
+    padding: 28px 20px calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  .call-overlay-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    gap: 16px;
+  }
+  .call-action {
+    min-width: 72px;
+    min-height: 44px;
+  }
+  .call-action-orb {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .call-float-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

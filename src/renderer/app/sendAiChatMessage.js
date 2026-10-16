@@ -4,8 +4,10 @@ import { startTransition } from 'react';
 import { newChatMessageId } from './appHelpers';
 import { normalizeAttachmentFileType } from '../utils/attachmentImage';
 import { toolEventsFromSegments } from '../utils/agentSegments.js';
+import { AI_CHAT_DISCONTINUED } from '../aiChatConstants';
 
 export function sendAiChatMessage(deps, peerId, payload) {
+  if (AI_CHAT_DISCONTINUED) return Promise.resolve({ ok: false, error: 'discontinued' });
   const {
     displayName,
     activeAiChatRequestRef,

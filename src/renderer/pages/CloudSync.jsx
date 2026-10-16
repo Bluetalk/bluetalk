@@ -275,7 +275,33 @@ export default function CloudSyncPage() {
               </div>
             ) : null}
 
-            <CloudAccountPanel toast={toast} localPeerId={status?.peerId || ''} />
+            <CloudAccountPanel
+              toast={toast}
+              localPeerId={status?.peerId || ''}
+              devices={Array.isArray(status?.devices) ? status.devices : []}
+            />
+
+            {Array.isArray(status?.devices) && status.devices.length > 0 ? (
+              <section className="settings-section">
+                <h2 className="settings-section-title">Deine Geräte</h2>
+                <div className="card">
+                  <ul className="cloud-device-list">
+                    {status.devices.map((device) => (
+                      <li key={device.id || device.name} className="cloud-device-row">
+                        <span className={`cloud-device-dot${device.online ? ' is-online' : ''}`} aria-hidden />
+                        <span className="cloud-device-name">
+                          {device.name || device.id || 'Gerät'}
+                          {device.thisDevice ? ' · dieses Gerät' : ''}
+                        </span>
+                        <span className="cloud-device-meta text-muted">
+                          {device.online ? 'Online' : 'Offline'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+            ) : null}
 
             <div className="cloud-sync-metrics">
               <div className="card cloud-sync-metric">

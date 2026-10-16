@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { opusFrameTimestampUs, packLengthPrefixedFrames, unpackLengthPrefixedFrames } from '../src/renderer/calls/frames.js';
+import {
+  AUDIO_MAX_PACKED_FRAMES,
+  opusFrameTimestampUs,
+  packLengthPrefixedFrames,
+  unpackLengthPrefixedFrames,
+} from '../src/renderer/calls/frames.js';
 
 test('packs and unpacks three opus-like frames', () => {
   const a = Uint8Array.from([1, 2, 3]);
@@ -26,6 +31,19 @@ test('opus timestamps are monotone: seq * 60 ms + frame * 20 ms in µs', () => {
 
 test('truncated payload stops without throwing', () => {
   const packed = Uint8Array.from([0, 5, 1, 2]);
+  const frames = unpackLengthPrefixedFrames(packed);
+  assert.equal(frames.length, 0);
+});
+
+test('unpacking stops after the packed-frame cap', () => {
+  const chunks = Array.from({ length: AUDIO_MAX_PACKED_FRAMES + 4 }, () => Uint8Array.from([1]));
+  const packed = packLengthPrefixedFrames(chunks);
+  const frames = unpackLengthPrefixedFrames(packed);
+  assert.equal(frames.length, AUDIO_MAX_PACKED_FRAMES);
+});
+
+test('oversized packed frame is not unpacked', () => {
+  const packed = packLengthPrefixedFrames([new Uint8Array(5000)]);
   const frames = unpackLengthPrefixedFrames(packed);
   assert.equal(frames.length, 0);
 });

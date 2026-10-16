@@ -497,6 +497,7 @@ async fn sync_push(
         .await
     {
         Ok(out) => {
+            state.hub.notify_sync(&sess.peer_id, out.latest_seq);
             let results: Vec<Value> = out
                 .results
                 .iter()

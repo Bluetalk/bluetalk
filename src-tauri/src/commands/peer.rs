@@ -87,6 +87,18 @@ pub async fn peer_send(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn peer_send_to(
+    window: WebviewWindow,
+    peers: State<'_, Arc<PeerService>>,
+    peer_id: String,
+    device: String,
+    data: Value,
+) -> Result<bool> {
+    require_main(&window)?;
+    peers.send_to(&peer_id, &device, data).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn peer_send_many(
     window: WebviewWindow,
     peers: State<'_, Arc<PeerService>>,

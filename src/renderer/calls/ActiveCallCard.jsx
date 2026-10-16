@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Cloud, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { Cloud, Mic, MicOff, Maximize2, Monitor, PhoneOff, Video, VideoOff } from 'lucide-react';
 import { CHAT_ICON_STROKE, PeerAvatar } from '../pages/chats/messageHelpers.jsx';
 import { formatDurationMs } from '../voice/format.js';
+import { videoControlHint } from './callState.js';
 
 function qualityFromRtt(rttMs) {
   if (rttMs == null) return { label: 'Verbinden…', kind: 'unknown' };
@@ -18,8 +19,16 @@ export function ActiveCallCard({
   connectedAt,
   rttMs,
   muted,
+  localCamera = false,
+  localScreen = false,
+  hasVideo = false,
+  videoCapable = false,
+  peerVideoCapable = false,
   onToggleMute,
+  onToggleCamera,
+  onToggleScreen,
   onHangup,
+  onExpand,
   getLevels,
 }) {
   const [elapsed, setElapsed] = useState(() => Date.now() - (connectedAt || Date.now()));
@@ -38,9 +47,11 @@ export function ActiveCallCard({
   const viaCloud = transport === 'relay';
   const captureH = 4 + Math.min(1, levels.capture * 3) * 16;
   const playH = 4 + Math.min(1, levels.playback * 3) * 16;
+  const canVideo = Boolean(videoCapable && peerVideoCapable);
+  const videoHint = videoControlHint(videoCapable, peerVideoCapable);
 
   return (
-    <div className="call-float" role="status" aria-label="Aktiver Sprachanruf">
+    <div className="call-float" role="status" aria-label={hasVideo ? 'Aktiver Videoanruf' : 'Aktiver Sprachanruf'}>
       <div className="call-float-card">
         <PeerAvatar pictureUrl={picture} name={name} size={28} />
         <div className="call-float-compact">
@@ -78,6 +89,36 @@ export function ActiveCallCard({
               <Mic size={16} strokeWidth={CHAT_ICON_STROKE} />
             )}
           </button>
+          <button
+            type="button"
+            className={`call-float-btn${localCamera ? '' : ' is-muted'}`}
+            onClick={onToggleCamera}
+            disabled={!canVideo}
+            title={videoHint || (localCamera ? 'Kamera aus' : 'Kamera an')}
+          >
+            {localCamera
+              ? <Video size={16} strokeWidth={CHAT_ICON_STROKE} />
+              : <VideoOff size={16} strokeWidth={CHAT_ICON_STROKE} />}
+          </button>
+          <button
+            type="button"
+            className={`call-float-btn${localScreen ? '' : ''}`}
+            onClick={onToggleScreen}
+            disabled={!canVideo}
+            title={videoHint || (localScreen ? 'Bildschirm beenden' : 'Bildschirm teilen')}
+          >
+            <Monitor size={16} strokeWidth={CHAT_ICON_STROKE} />
+          </button>
+          {hasVideo && onExpand ? (
+            <button
+              type="button"
+              className="call-float-btn"
+              onClick={onExpand}
+              title="Video einblenden"
+            >
+              <Maximize2 size={16} strokeWidth={CHAT_ICON_STROKE} />
+            </button>
+          ) : null}
         </div>
         <button
           type="button"

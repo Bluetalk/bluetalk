@@ -7,6 +7,16 @@ pub enum ConnectionDirection {
     Outbound,
 }
 
+/// Eine Sitzung zu einem Gerät eines Peers.
+/// `id` ist `"direct"` bei LAN, sonst die Relay-`deviceId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerDevice {
+    pub id: String,
+    pub name: String,
+    pub transport: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
@@ -19,6 +29,14 @@ pub struct PeerInfo {
     /// Always true for peers returned by the v2 service. Legacy candidates
     /// use separate types and cannot enter this collection.
     pub authenticated_encryption: bool,
+    /// Sitzungs-Schlüssel: `"direct"` (LAN) oder Remote-`deviceId` (Relay).
+    #[serde(default)]
+    pub device_key: String,
+    #[serde(default)]
+    pub device_name: String,
+    /// Aggregierte Geräteliste (bei `peers()`); sonst das aktuelle Gerät.
+    #[serde(default)]
+    pub devices: Vec<PeerDevice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,9 +81,16 @@ pub enum NetworkEvent {
         peer_id: String,
         reason: String,
     },
+    /// Geräteliste eines Peers hat sich geändert (weitere/letzte Sitzung).
+    PeerDevices {
+        peer_id: String,
+        devices: Vec<PeerDevice>,
+    },
     PeerDiscovered(DiscoveredPeer),
     Message {
         from_peer_id: String,
+        #[serde(default)]
+        from_device: String,
         message_id: String,
         sent_at_ms: i64,
         payload: serde_json::Value,

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, startTransition } from 'react';
 import { encryptChatPayload } from '../../chatCrypto';
 import { waitForE2eeIdentity, waitForE2eeSession } from '../e2eePersistence';
 import { newChatMessageId } from '../appHelpers';
-import { isAiChatPeerId } from '../../aiChatConstants';
+import { AI_CHAT_DISCONTINUED, isAiChatPeerId } from '../../aiChatConstants';
+import { sendMessageEdit as dispatchMessageEdit } from '../sendMessageEdit';
 import {
   REACTION_KIND,
   isAllowedReactionEmoji,
@@ -91,6 +92,7 @@ export function useMessaging({
   applyMessagePatch,
   sendE2eeHandshake,
   sendGroupPacket,
+  sendPairwiseEncrypted,
   removeContact,
   leaveGroupChat,
   removeGroup,
@@ -113,6 +115,7 @@ export function useMessaging({
     }
 
     if (isAiChatPeerId(peerId)) {
+      if (AI_CHAT_DISCONTINUED) return Promise.resolve({ ok: false, error: 'discontinued' });
       return sendAiChatMessage({
         displayName: settings.displayName,
         activeAiChatRequestRef,
@@ -327,7 +330,7 @@ export function useMessaging({
     })();
 
     return sendPromise;
-  }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake, sendGroupPacket]);
+  }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake, sendGroupPacket, sendPairwiseEncrypted]);
 
   sendMessageRef.current = sendMessage;
 
@@ -396,6 +399,22 @@ export function useMessaging({
       }
     });
   }, [applyMessagePatch]);
+
+  const sendMessageEdit = useCallback((peerId, payload) => {
+    if (!window.bluetalk || !peerId) return Promise.resolve({ ok: false, error: 'no_peer' });
+    return dispatchMessageEdit({
+      groupsRef,
+      ownPeerIdRef,
+      contactsRef,
+      messageCacheRef,
+      displayName: settings.displayName,
+      setMessages,
+      setChatMeta,
+      sendGroupPacket,
+      sendPairwiseEncrypted,
+      applyMessagePatch,
+    }, peerId, payload);
+  }, [settings.displayName, applyMessagePatch, sendGroupPacket, sendPairwiseEncrypted]);
 
   const sendReadReceipt = useCallback(async (peerId, lastReadMessageId) => {
     if (!window.bluetalk || !peerId || !lastReadMessageId) return;
@@ -625,6 +644,7 @@ export function useMessaging({
 
   return {
     sendMessage,
+    sendMessageEdit,
     sendReadReceipt,
     sendTyping,
     toggleMessageReaction,

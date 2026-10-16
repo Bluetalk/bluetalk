@@ -1,6 +1,9 @@
 /** 20-ms-Opus-Frame; drei Stück ergeben ein 60-ms-Paket. */
 export const OPUS_FRAME_MS = 20;
 export const CALL_PACKET_MS = 60;
+/** Gegnergesteuerte packed Frames: höchstens so viele und so groß. */
+export const AUDIO_MAX_PACKED_FRAMES = 8;
+export const AUDIO_MAX_PACKED_FRAME_BYTES = 4 * 1024;
 
 /**
  * Monotone Decode-Zeit in Mikrosekunden: seq * 60 ms + Frame-Index * 20 ms.
@@ -36,14 +39,16 @@ export function packLengthPrefixedFrames(chunks) {
   return out;
 }
 
-export function unpackLengthPrefixedFrames(packed) {
+export function unpackLengthPrefixedFrames(packed, options = {}) {
   const bytes = toBytes(packed);
+  const maxFrames = Math.max(1, Number(options.maxFrames) || AUDIO_MAX_PACKED_FRAMES);
+  const maxFrameBytes = Math.max(1, Number(options.maxFrameBytes) || AUDIO_MAX_PACKED_FRAME_BYTES);
   const frames = [];
   let offset = 0;
-  while (offset + 2 <= bytes.length) {
+  while (offset + 2 <= bytes.length && frames.length < maxFrames) {
     const len = (bytes[offset] << 8) | bytes[offset + 1];
     offset += 2;
-    if (offset + len > bytes.length) break;
+    if (len > maxFrameBytes || offset + len > bytes.length) break;
     frames.push(bytes.subarray(offset, offset + len));
     offset += len;
   }

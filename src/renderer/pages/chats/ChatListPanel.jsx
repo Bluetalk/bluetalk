@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageCircle, PanelLeftClose, PanelLeftOpen, Search, Users, X } from 'lucide-react';
+import { useMobileLayout } from '../../utils/touch.js';
 import VerticalResizeHandle from '../../components/VerticalResizeHandle';
 import {
   CHAT_ICON_STROKE,
@@ -35,9 +36,11 @@ export function ChatListPanel({
   listState,
   actions,
 }) {
+  const isMobile = useMobileLayout();
   const [search, setSearch] = useState('');
   const [railMotion, setRailMotion] = useState(false);
   const searchInputRef = useRef(null);
+  const collapsedOnMobile = isMobile ? false : collapsed;
 
   const handleToggleCollapse = () => {
     setRailMotion(true);
@@ -72,7 +75,7 @@ export function ChatListPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [collapsed, onToggleCollapse]);
 
-  const filtered = (collapsed ? chats : chats.filter((chat) =>
+  const filtered = (collapsedOnMobile ? chats : chats.filter((chat) =>
     `${chat.displayName} ${chat.baseName} ${chat.id}`.toLowerCase().includes(search.toLowerCase())
   ));
 
@@ -85,14 +88,15 @@ export function ChatListPanel({
     selectedSubagent,
     debugMode,
     peerTyping = {},
+    drafts = {},
   } = listState;
 
   return (
     <div
-      className={`split-list-shell${collapsed ? ' split-list-shell--collapsed' : ''}${railMotion ? ' split-list-shell--motion' : ''}`}
-      style={{ width: collapsed ? CHAT_LIST_WIDTH_COLLAPSED : widthPx, flexShrink: 0 }}
+      className={`split-list-shell${collapsedOnMobile ? ' split-list-shell--collapsed' : ''}${railMotion ? ' split-list-shell--motion' : ''}`}
+      style={isMobile ? { width: '100%', flexShrink: 1, minWidth: 0 } : { width: collapsedOnMobile ? CHAT_LIST_WIDTH_COLLAPSED : widthPx, flexShrink: 0 }}
     >
-      <div className={`split-list split-list--resizable${collapsed ? ' split-list--collapsed' : ''}`}>
+      <div className={`split-list split-list--resizable${collapsedOnMobile ? ' split-list--collapsed' : ''}`}>
         <div className="split-list-header">
           <h2>Chats</h2>
           <div className="split-list-header-actions">
@@ -102,8 +106,8 @@ export function ChatListPanel({
               onClick={onShowCreateGroup}
               title="Neue Gruppe"
               aria-label="Neue Gruppe"
-              aria-hidden={collapsed}
-              tabIndex={collapsed ? -1 : undefined}
+              aria-hidden={collapsedOnMobile}
+              tabIndex={collapsedOnMobile ? -1 : undefined}
             >
               <Users size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             </button>
@@ -111,17 +115,17 @@ export function ChatListPanel({
               type="button"
               className="btn btn-ghost btn-icon btn-sm split-list-collapse-btn"
               onClick={handleToggleCollapse}
-              title={collapsed ? 'Chatliste einblenden' : 'Chatliste einklappen'}
-              aria-label={collapsed ? 'Chatliste einblenden' : 'Chatliste einklappen'}
-              aria-expanded={!collapsed}
+              title={collapsedOnMobile ? 'Chatliste einblenden' : 'Chatliste einklappen'}
+              aria-label={collapsedOnMobile ? 'Chatliste einblenden' : 'Chatliste einklappen'}
+              aria-expanded={!collapsedOnMobile}
             >
-              {collapsed
+              {collapsedOnMobile
                 ? <PanelLeftOpen size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
                 : <PanelLeftClose size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />}
             </button>
           </div>
         </div>
-        <div className="split-list-search-wrap" aria-hidden={collapsed}>
+        <div className="split-list-search-wrap" aria-hidden={collapsedOnMobile}>
           <div className="search-bar">
             <Search size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
             <input
@@ -129,7 +133,7 @@ export function ChatListPanel({
               className="input"
               placeholder="Chats durchsuchen…"
               value={search}
-              tabIndex={collapsed ? -1 : undefined}
+              tabIndex={collapsedOnMobile ? -1 : undefined}
               onChange={(e) => setSearch(e.target.value)}
             />
             {search ? (
@@ -185,7 +189,7 @@ export function ChatListPanel({
                 chatContact={chatContact}
                 unreadCount={unreadCount}
                 subagents={subagents}
-                subagentsExpanded={!collapsed && subagentsExpanded}
+                subagentsExpanded={!collapsedOnMobile && subagentsExpanded}
                 isParentActive={isParentActive}
                 selectedSubagent={selectedSubagent}
                 aiPending={actions.isAiChatPending(chat.id)}
@@ -195,17 +199,20 @@ export function ChatListPanel({
                 onContextMenu={actions.onChatContextMenu}
                 onToggleSubs={actions.onToggleAgentSubs}
                 onOpenSubagent={actions.onOpenSubagent}
+                drafts={drafts}
               />
             );
           })}
         </div>
       </div>
+      {isMobile ? null : (
       <VerticalResizeHandle
         onBegin={onResizeBegin}
         onDelta={onResizeDelta}
         onCommit={onResizeCommit}
         onDoubleClick={onResizeReset}
       />
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+// chatDrafts bewusst nicht: Entwürfe sind Tipp-Zustand pro Gerät
+// (halbfertiger Text, Tastatur) und sollen nicht Desktop↔Handy kreisen.
 const SYNCED_STORE_KEYS = Object.freeze([
   'contacts',
   'settings',

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { DEFAULT_APP_SETTINGS } from '../chatConstants';
 import groupChat from '../../../shared/group-chat.js';
-import { getAccount, startSync, stopSync } from '../../cloudAccount/index.js';
+import { getAccount, requestPull, startSync, stopSync } from '../../cloudAccount/index.js';
 
 const { normalizeGroup } = groupChat;
 
@@ -30,8 +30,12 @@ export function useCloudAccountSync({
         /* Sync startet später nach Login */
       }
     })();
+    const offSync = window.bluetalk?.cloud?.onSync?.(() => {
+      requestPull();
+    });
     return () => {
       cancelled = true;
+      offSync?.();
       stopSync();
     };
   }, []);

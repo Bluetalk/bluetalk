@@ -29,8 +29,14 @@ pub(super) async fn accept_loop(
         tokio::spawn(async move {
             let _permit = permit;
             stream.set_nodelay(true).ok();
-            if let Err(error) =
-                super::complete_inbound_session(inner, stream, remote.to_string()).await
+            if let Err(error) = super::complete_inbound_session(
+                inner,
+                stream,
+                remote.to_string(),
+                super::DIRECT_DEVICE_KEY.to_owned(),
+                String::new(),
+            )
+            .await
             {
                 log::debug!("inbound session from {remote} not registered: {error}");
             }

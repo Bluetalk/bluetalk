@@ -24,6 +24,8 @@ import VersionWelcomeModal from '../components/VersionWelcomeModal';
 import UsernameOnboardingModal from '../components/UsernameOnboardingModal';
 import TitleBar from './TitleBar';
 import Sidebar from './Sidebar';
+import MobileTabBar from './MobileTabBar';
+import { useVisualViewport } from './useVisualViewport';
 import { InboundToastBridge, PluginRuntimeToastBridge } from './bridges';
 
 const PluginTabView = lazy(() => import('../plugins/PluginTabView'));
@@ -46,6 +48,7 @@ export default function AppShell({
   loadError,
   setLoadError,
 }) {
+  useVisualViewport();
   return (
     <ToastProvider solidBottomRight>
       <ErrorBoundary>
@@ -105,6 +108,7 @@ export default function AppShell({
                 <div id="shell-profile-slot" className="shell-profile-slot" />
               </div>
             </div>
+            <MobileTabBar />
             <PluginScreenHost />
           </div>
               )}

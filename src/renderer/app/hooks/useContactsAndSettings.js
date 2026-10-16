@@ -1,5 +1,6 @@
 // Kontakte, Settings, Theme und kleinere App-Aktionen, 1:1 aus App.jsx ausgelagert.
 import { useEffect, useCallback } from 'react';
+import { OWN_PEER_FEATURES } from '../../../shared/chat-features.js';
 import { buildUserPresencePayload } from '../../../shared/user-presence.js';
 
 export function useContactsAndSettings({
@@ -171,6 +172,7 @@ export function useContactsAndSettings({
             bio: merged.bio || '',
             profilePicture: merged.profilePicture || '',
             sender: merged.displayName,
+            features: [...OWN_PEER_FEATURES],
           });
         }
         if (

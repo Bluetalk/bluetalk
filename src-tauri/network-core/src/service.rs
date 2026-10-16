@@ -21,12 +21,17 @@ use tokio::{
 
 use crate::{
     ConnectionDirection, DeliveryResult, DiscoveredPeer, NetworkConfig, NetworkError,
-    NetworkEvent, NetworkEventSink, NetworkIdentity, NetworkInfo, PeerInfo, Result,
+    NetworkEvent, NetworkEventSink, NetworkIdentity, NetworkInfo, PeerDevice, PeerInfo, Result,
     discovery::{self, ReplayCache},
     protocol::{
         self, EstablishedSession, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, WireFrame,
     },
 };
+
+/// LAN/Direktverbindung: eine Sitzung pro Peer.
+pub const DIRECT_DEVICE_KEY: &str = "direct";
+/// Relay ohne device-Feld (Clients ≤ 2.3.x).
+pub const LEGACY_DEVICE_KEY: &str = "legacy";
 
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
 const DISCOVERED_PEER_TTL: Duration = Duration::from_secs(600);
@@ -55,7 +60,7 @@ struct ServiceState {
     started: bool,
     listen_addrs: Vec<SocketAddr>,
     shutdown: Option<watch::Sender<bool>>,
-    peers: HashMap<String, PeerHandle>,
+    peers: HashMap<(String, String), PeerHandle>,
     discovered: HashMap<String, (DiscoveredPeer, Instant)>,
     announce_socket: Option<Arc<UdpSocket>>,
     tasks: Vec<JoinHandle<()>>,
@@ -64,6 +69,8 @@ struct ServiceState {
 #[derive(Clone)]
 struct PeerHandle {
     info: PeerInfo,
+    device_key: String,
+    device_name: String,
     connection_id: String,
     sender: mpsc::Sender<Vec<u8>>,
     queued_bytes: Arc<AtomicUsize>,
@@ -203,7 +210,9 @@ impl PeerNetwork {
                 return Err(NetworkError::NotStarted);
             }
             if let Some(expected) = expected_peer_id {
-                if let Some(existing) = state.peers.get(expected) {
+                if let Some(existing) =
+                    find_session(&state, expected, DIRECT_DEVICE_KEY)
+                {
                     return Ok(existing.info.clone());
                 }
             }
@@ -221,28 +230,38 @@ impl PeerNetwork {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|_| target.to_string());
 
-        self.connect_stream(stream, remote_address, expected_peer_id)
-            .await
+        self.connect_stream(
+            stream,
+            remote_address,
+            expected_peer_id,
+            DIRECT_DEVICE_KEY,
+            "",
+        )
+        .await
     }
 
     /// Initiator-Handshake über einen beliebigen bidirektionalen Stream
     /// (TCP, Relay-Tunnel, Test-Duplex). Gleiche Timeouts wie der TCP-Pfad.
+    /// `device_key` = `"direct"` (LAN) oder Remote-deviceId (Relay).
     pub async fn connect_stream<S>(
         &self,
         mut stream: S,
         remote_address: String,
         expected_peer_id: Option<&str>,
+        device_key: &str,
+        device_name: &str,
     ) -> Result<PeerInfo>
     where
         S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
+        let device_key = normalize_device_key(device_key);
         {
             let state = self.inner.state.lock().expect("network state lock");
             if !state.started {
                 return Err(NetworkError::NotStarted);
             }
             if let Some(expected) = expected_peer_id {
-                if let Some(existing) = state.peers.get(expected) {
+                if let Some(existing) = find_session(&state, expected, &device_key) {
                     return Ok(existing.info.clone());
                 }
             }
@@ -267,12 +286,20 @@ impl PeerNetwork {
             session,
             remote_address,
             ConnectionDirection::Outbound,
+            device_key,
+            device_name.trim().chars().take(64).collect(),
         )
     }
 
     /// Responder-Handshake über einen beliebigen Stream. Nutzt dieselben
     /// Handshake-Permits wie die Accept-Schleife.
-    pub async fn accept_stream<S>(&self, stream: S, remote_address: String) -> Result<PeerInfo>
+    pub async fn accept_stream<S>(
+        &self,
+        stream: S,
+        remote_address: String,
+        device_key: &str,
+        device_name: &str,
+    ) -> Result<PeerInfo>
     where
         S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
@@ -290,25 +317,34 @@ impl PeerNetwork {
             .map_err(|_| {
                 NetworkError::Handshake("too many pending inbound handshakes".to_owned())
             })?;
-        let result = complete_inbound_session(self.inner.clone(), stream, remote_address).await;
+        let result = complete_inbound_session(
+            self.inner.clone(),
+            stream,
+            remote_address,
+            normalize_device_key(device_key),
+            device_name.trim().chars().take(64).collect(),
+        )
+        .await;
         drop(permit);
         result
     }
 
     pub fn disconnect(&self, peer_id: &str) -> Result<()> {
-        let handle = {
+        let handles = {
             let state = self.inner.state.lock().expect("network state lock");
-            state
-                .peers
-                .get(peer_id)
-                .cloned()
-                .ok_or_else(|| NetworkError::PeerNotFound(peer_id.to_owned()))?
+            sessions_for_peer(&state, peer_id)
         };
-        handle.request_close();
+        if handles.is_empty() {
+            return Err(NetworkError::PeerNotFound(peer_id.to_owned()));
+        }
+        for handle in handles {
+            handle.request_close();
+        }
         Ok(())
     }
 
-    /// Queues an application payload for one peer. Fails fast on backpressure.
+    /// Sendet an alle Sitzungen des Peers. Erfolg, wenn mindestens eine
+    /// Sitzung die Nachricht angenommen hat.
     pub fn send(&self, peer_id: &str, payload: serde_json::Value) -> Result<()> {
         let frame = WireFrame::Message {
             message_id: crate::identity::random_hex(12)?,
@@ -316,7 +352,48 @@ impl PeerNetwork {
             payload,
         };
         let encoded = protocol::encode_wire_frame(&frame, self.inner.config.limits.max_frame_bytes)?;
-        self.send_encoded(peer_id, encoded)
+        let handles = {
+            let state = self.inner.state.lock().expect("network state lock");
+            sessions_for_peer(&state, peer_id)
+        };
+        if handles.is_empty() {
+            return Err(NetworkError::PeerNotFound(peer_id.to_owned()));
+        }
+        let mut last_error = None;
+        let mut accepted = false;
+        for handle in handles {
+            match self.send_encoded_to(&handle, encoded.clone()) {
+                Ok(()) => accepted = true,
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if accepted {
+            Ok(())
+        } else {
+            Err(last_error.unwrap_or_else(|| NetworkError::PeerNotFound(peer_id.to_owned())))
+        }
+    }
+
+    /// Sendet nur an die Sitzung `(peer_id, device_key)`.
+    pub fn send_to(
+        &self,
+        peer_id: &str,
+        device_key: &str,
+        payload: serde_json::Value,
+    ) -> Result<()> {
+        let frame = WireFrame::Message {
+            message_id: crate::identity::random_hex(12)?,
+            sent_at_ms: protocol::unix_time_ms(),
+            payload,
+        };
+        let encoded = protocol::encode_wire_frame(&frame, self.inner.config.limits.max_frame_bytes)?;
+        let handle = {
+            let state = self.inner.state.lock().expect("network state lock");
+            find_session(&state, peer_id, &normalize_device_key(device_key))
+                .cloned()
+                .ok_or_else(|| NetworkError::PeerNotFound(peer_id.to_owned()))?
+        };
+        self.send_encoded_to(&handle, encoded)
     }
 
     pub fn send_many(&self, peer_ids: &[String], payload: serde_json::Value) -> Vec<DeliveryResult> {
@@ -336,14 +413,36 @@ impl PeerNetwork {
     pub fn broadcast(&self, payload: serde_json::Value) -> Vec<DeliveryResult> {
         let peer_ids: Vec<String> = {
             let state = self.inner.state.lock().expect("network state lock");
-            state.peers.keys().cloned().collect()
+            let mut ids: Vec<String> = state
+                .peers
+                .keys()
+                .map(|(peer_id, _)| peer_id.clone())
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
         };
         self.send_many(&peer_ids, payload)
     }
 
     pub fn peers(&self) -> Vec<PeerInfo> {
         let state = self.inner.state.lock().expect("network state lock");
-        state.peers.values().map(|handle| handle.info.clone()).collect()
+        aggregated_peers(&state)
+    }
+
+    pub fn has_peer(&self, peer_id: &str) -> bool {
+        let state = self.inner.state.lock().expect("network state lock");
+        state.peers.keys().any(|(id, _)| id == peer_id)
+    }
+
+    pub fn has_direct(&self, peer_id: &str) -> bool {
+        let state = self.inner.state.lock().expect("network state lock");
+        find_session(&state, peer_id, DIRECT_DEVICE_KEY).is_some()
+    }
+
+    pub fn has_session(&self, peer_id: &str, device_key: &str) -> bool {
+        let state = self.inner.state.lock().expect("network state lock");
+        find_session(&state, peer_id, &normalize_device_key(device_key)).is_some()
     }
 
     pub fn discovered_peers(&self) -> Vec<DiscoveredPeer> {
@@ -371,7 +470,7 @@ impl PeerNetwork {
                 .map(|addr| addr.to_string())
                 .collect(),
             started: state.started,
-            connected_peer_count: state.peers.len(),
+            connected_peer_count: unique_peer_count(&state),
             discovery_enabled: state.announce_socket.is_some(),
             max_frame_bytes: self.inner.config.limits.max_frame_bytes,
             outbound_queue_frames: self.inner.config.limits.outbound_queue_frames,
@@ -401,31 +500,24 @@ impl PeerNetwork {
         Ok(())
     }
 
-    fn send_encoded(&self, peer_id: &str, encoded: Vec<u8>) -> Result<()> {
-        let handle = {
-            let state = self.inner.state.lock().expect("network state lock");
-            state
-                .peers
-                .get(peer_id)
-                .cloned()
-                .ok_or_else(|| NetworkError::PeerNotFound(peer_id.to_owned()))?
-        };
+    fn send_encoded_to(&self, handle: &PeerHandle, encoded: Vec<u8>) -> Result<()> {
+        let peer_id = &handle.info.peer_id;
         let byte_budget = self.inner.config.limits.outbound_queue_bytes;
         let queued = handle.queued_bytes.fetch_add(encoded.len(), Ordering::AcqRel);
         if queued + encoded.len() > byte_budget {
             handle.queued_bytes.fetch_sub(encoded.len(), Ordering::AcqRel);
-            return Err(NetworkError::Backpressure(peer_id.to_owned()));
+            return Err(NetworkError::Backpressure(peer_id.clone()));
         }
         let encoded_len = encoded.len();
         match handle.sender.try_send(encoded) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 handle.queued_bytes.fetch_sub(encoded_len, Ordering::AcqRel);
-                Err(NetworkError::Backpressure(peer_id.to_owned()))
+                Err(NetworkError::Backpressure(peer_id.clone()))
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 handle.queued_bytes.fetch_sub(encoded_len, Ordering::AcqRel);
-                Err(NetworkError::PeerNotFound(peer_id.to_owned()))
+                Err(NetworkError::PeerNotFound(peer_id.clone()))
             }
         }
     }
@@ -444,6 +536,96 @@ impl Drop for PeerNetwork {
             task.abort();
         }
     }
+}
+
+fn normalize_device_key(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        DIRECT_DEVICE_KEY.to_owned()
+    } else {
+        trimmed.chars().take(64).collect()
+    }
+}
+
+fn find_session<'a>(
+    state: &'a ServiceState,
+    peer_id: &str,
+    device_key: &str,
+) -> Option<&'a PeerHandle> {
+    state.peers.get(&(peer_id.to_owned(), device_key.to_owned()))
+}
+
+fn sessions_for_peer(state: &ServiceState, peer_id: &str) -> Vec<PeerHandle> {
+    state
+        .peers
+        .iter()
+        .filter(|((id, _), _)| id == peer_id)
+        .map(|(_, handle)| handle.clone())
+        .collect()
+}
+
+fn unique_peer_count(state: &ServiceState) -> usize {
+    let mut ids: Vec<&str> = state.peers.keys().map(|(id, _)| id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.len()
+}
+
+fn devices_of_peer(state: &ServiceState, peer_id: &str) -> Vec<PeerDevice> {
+    let mut devices: Vec<PeerDevice> = state
+        .peers
+        .iter()
+        .filter(|((id, _), _)| id == peer_id)
+        .map(|((_, device_key), handle)| peer_device_of(device_key, handle))
+        .collect();
+    devices.sort_by(|a, b| a.id.cmp(&b.id));
+    devices
+}
+
+fn peer_device_of(device_key: &str, handle: &PeerHandle) -> PeerDevice {
+    PeerDevice {
+        id: device_key.to_owned(),
+        name: handle.device_name.clone(),
+        transport: if device_key == DIRECT_DEVICE_KEY {
+            "direct".to_owned()
+        } else {
+            "relay".to_owned()
+        },
+    }
+}
+
+fn aggregated_peers(state: &ServiceState) -> Vec<PeerInfo> {
+    let mut groups: HashMap<String, Vec<&PeerHandle>> = HashMap::new();
+    for ((peer_id, _), handle) in &state.peers {
+        groups.entry(peer_id.clone()).or_default().push(handle);
+    }
+    let mut peers: Vec<PeerInfo> = groups
+        .into_values()
+        .map(|handles| {
+            let primary = handles
+                .iter()
+                .min_by_key(|handle| {
+                    let direct = if handle.device_key == DIRECT_DEVICE_KEY {
+                        0_u8
+                    } else {
+                        1
+                    };
+                    (direct, handle.info.connected_at_ms)
+                })
+                .copied()
+                .expect("group is non-empty");
+            let mut info = primary.info.clone();
+            let mut devices: Vec<PeerDevice> = handles
+                .iter()
+                .map(|handle| peer_device_of(&handle.device_key, handle))
+                .collect();
+            devices.sort_by(|a, b| a.id.cmp(&b.id));
+            info.devices = devices;
+            info
+        })
+        .collect();
+    peers.sort_by(|a, b| a.peer_id.cmp(&b.peer_id));
+    peers
 }
 
 fn parse_connect_address(raw: &str) -> Result<SocketAddr> {
@@ -473,6 +655,8 @@ async fn complete_inbound_session<S>(
     inner: Arc<Inner>,
     mut stream: S,
     remote_address: String,
+    device_key: String,
+    device_name: String,
 ) -> Result<PeerInfo>
 where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -494,6 +678,8 @@ where
         session,
         remote_address,
         ConnectionDirection::Inbound,
+        device_key,
+        device_name,
     )
 }
 
@@ -658,8 +844,14 @@ mod tests {
         let expected_b = network_b.peer_id();
 
         let (initiated, accepted) = tokio::join!(
-            network_a.connect_stream(client, "relay://test".to_owned(), Some(&expected_b)),
-            network_b.accept_stream(server, "relay://test".to_owned()),
+            network_a.connect_stream(
+                client,
+                "relay://test".to_owned(),
+                Some(&expected_b),
+                "dev-a",
+                "",
+            ),
+            network_b.accept_stream(server, "relay://test".to_owned(), "dev-a", ""),
         );
         let peer = initiated.expect("initiator stream handshake");
         accepted.expect("responder stream handshake");
@@ -702,5 +894,138 @@ mod tests {
             Err(NetworkError::PeerNotFound(_))
         ));
         network.stop().await;
+    }
+
+    #[tokio::test]
+    async fn two_devices_fan_out_and_send_to() {
+        let sink_b = CollectingSink::new();
+        let network_a = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(crate::NoopEventSink),
+        )
+        .unwrap();
+        let network_b = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(sink_b.clone()),
+        )
+        .unwrap();
+        network_a.start().await.unwrap();
+        network_b.start().await.unwrap();
+
+        let (client1, server1) = tokio::io::duplex(256 * 1024);
+        let (client2, server2) = tokio::io::duplex(256 * 1024);
+        let expected_b = network_b.peer_id();
+
+        let (first, _) = tokio::join!(
+            network_a.connect_stream(client1, "relay://d1".to_owned(), Some(&expected_b), "d1", "Eins"),
+            network_b.accept_stream(server1, "relay://d1".to_owned(), "d1", "Eins"),
+        );
+        first.expect("first device");
+
+        let connected_events = {
+            let events = sink_b.events.lock().unwrap();
+            events
+                .iter()
+                .filter(|event| matches!(event, NetworkEvent::PeerConnected(_)))
+                .count()
+        };
+        assert_eq!(connected_events, 1);
+
+        let (second, _) = tokio::join!(
+            network_a.connect_stream(client2, "relay://d2".to_owned(), Some(&expected_b), "d2", "Zwei"),
+            network_b.accept_stream(server2, "relay://d2".to_owned(), "d2", "Zwei"),
+        );
+        second.expect("second device");
+
+        let connected_events = {
+            let events = sink_b.events.lock().unwrap();
+            events
+                .iter()
+                .filter(|event| matches!(event, NetworkEvent::PeerConnected(_)))
+                .count()
+        };
+        assert_eq!(connected_events, 1);
+        sink_b
+            .wait_for(|event| matches!(event, NetworkEvent::PeerDevices { devices, .. } if devices.len() == 2))
+            .await;
+
+        assert_eq!(network_a.peers().len(), 1);
+        assert_eq!(network_a.peers()[0].devices.len(), 2);
+        assert_eq!(network_a.info().connected_peer_count, 1);
+
+        network_a
+            .send(&expected_b, serde_json::json!({"kind": "chat", "text": "all"}))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let fanout = {
+            let events = sink_b.events.lock().unwrap();
+            events
+                .iter()
+                .filter(|event| matches!(event, NetworkEvent::Message { payload, .. } if payload["text"] == "all"))
+                .count()
+        };
+        assert_eq!(fanout, 2);
+
+        network_a
+            .send_to(
+                &expected_b,
+                "d1",
+                serde_json::json!({"kind": "chat", "text": "only-d1"}),
+            )
+            .unwrap();
+        sink_b
+            .wait_for(|event| {
+                matches!(
+                    event,
+                    NetworkEvent::Message {
+                        from_device,
+                        payload,
+                        ..
+                    } if from_device == "d1" && payload["text"] == "only-d1"
+                )
+            })
+            .await;
+
+        network_a.stop().await;
+        network_b.stop().await;
+    }
+
+    #[tokio::test]
+    async fn last_session_emits_peer_disconnected() {
+        let sink_a = CollectingSink::new();
+        let sink_b = CollectingSink::new();
+        let network_a = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(sink_a.clone()),
+        )
+        .unwrap();
+        let network_b = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(sink_b.clone()),
+        )
+        .unwrap();
+        network_a.start().await.unwrap();
+        network_b.start().await.unwrap();
+        let (client, server) = tokio::io::duplex(256 * 1024);
+        let expected_b = network_b.peer_id();
+        let (initiated, accepted) = tokio::join!(
+            network_a.connect_stream(client, "relay://x".to_owned(), Some(&expected_b), "x", ""),
+            network_b.accept_stream(server, "relay://x".to_owned(), "x", ""),
+        );
+        initiated.unwrap();
+        accepted.unwrap();
+        network_a.disconnect(&expected_b).unwrap();
+        sink_a
+            .wait_for(|event| matches!(event, NetworkEvent::PeerDisconnected { .. }))
+            .await;
+        sink_b
+            .wait_for(|event| matches!(event, NetworkEvent::PeerDisconnected { .. }))
+            .await;
+        network_a.stop().await;
+        network_b.stop().await;
     }
 }

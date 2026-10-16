@@ -1,8 +1,9 @@
-import { isAiChatPeerId } from '../../../aiChatConstants';
+import { AI_CHAT_DISCONTINUED, isAiChatPeerId } from '../../../aiChatConstants';
 import {
   contactOutgoingBlocked,
   getMessagePreviewText,
 } from '../messageHelpers.jsx';
+import { collectMentionPeerIds } from '../../../../shared/chat-features.js';
 
 /**
  * Senden-Logik des Composers (Text, KI-Chat inkl. Anhang, Datei-Versand mit
@@ -19,11 +20,16 @@ export function useComposerSend({
   showOfflineComposerReconnect,
   replyToMessage,
   onClearReply,
+  editingMessage,
+  onCancelEdit,
+  mentionMembers,
   pendingFile,
   setPendingFile,
   setFileTransfer,
   sendingFile,
   sendMessage,
+  sendMessageEdit,
+  clearDraft,
   setWarning,
   toast,
   settings,
@@ -35,10 +41,38 @@ export function useComposerSend({
     if (showOfflineComposerReconnect) return;
     if (!input.trim() && !pendingFile) return;
     if (sendingFile || pendingFile?.launching) return;
-    if (isAiChatSelected && aiChatPending) return;
+    if (isAiChatSelected && (aiChatPending || AI_CHAT_DISCONTINUED)) return;
 
     setWarning('');
     const peerId = selectedPeer.id;
+
+    if (editingMessage) {
+      const text = input.trim();
+      if (!text) return;
+      setInput('');
+      onCancelEdit?.();
+      clearDraft?.(peerId);
+      void sendMessageEdit?.(peerId, { refMessageId: editingMessage.messageId, content: text }).then((result) => {
+        if (result?.ok === false) {
+          toast({
+            variant: 'error',
+            title: 'Bearbeiten fehlgeschlagen',
+            message: result.error === 'window_expired'
+              ? 'Nachrichten können nur 24 Stunden lang bearbeitet werden.'
+              : 'Die Änderung konnte nicht gesendet werden.',
+          });
+          return;
+        }
+        if (result?.hint) {
+          toast({
+            variant: 'info',
+            title: 'Nur bei dir sichtbar',
+            message: result.hint,
+          });
+        }
+      });
+      return;
+    }
 
     if (isAiChatSelected) {
       const text = input.trim();
@@ -107,7 +141,11 @@ export function useComposerSend({
     if (input.trim()) {
       const text = input.trim();
       setInput('');
+      clearDraft?.(peerId);
       const payload = { kind: 'chat', content: text };
+      if (mentionMembers?.length) {
+        payload.mentions = collectMentionPeerIds(text, mentionMembers);
+      }
       if (replyToMessage) {
         payload.replyTo = {
           messageId: replyToMessage.messageId,

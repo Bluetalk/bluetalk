@@ -7,6 +7,7 @@ import {
   AI_CHAT_PEER_PREFIX,
   AI_CLOUD_MODELS,
   AI_MODEL_TIERS,
+  AI_CHAT_DISCONTINUED,
   BOT_DEFAULT_NAME,
   isModelTierVisible,
   OLLAMA_DEFAULT_RUNTIME_MODE,
@@ -206,17 +207,22 @@ export default function AiSettingsPage() {
         <section className="settings-section">
           <div className="card bots-hero">
             <div className="bots-hero-copy">
-              <h3>Deine Bots</h3>
-              <p>Name, Beschreibung und API reichen. Der Bot erscheint danach in der Chatliste.</p>
+              <h3>Deine Bots {AI_CHAT_DISCONTINUED ? <span className="chat-retired-badge">Eingestellt</span> : null}</h3>
+              <p>
+                {AI_CHAT_DISCONTINUED
+                  ? 'Bots wurden eingestellt. Bestehende Chats bleiben lesbar, neue Bots und KI-Chats können nicht angelegt werden. Daten bleiben erhalten, bis du sie löschst.'
+                  : 'Name, Beschreibung und API reichen. Der Bot erscheint danach in der Chatliste.'}
+              </p>
             </div>
             <button
               type="button"
               className="btn btn-primary btn-sm"
               onClick={() => setShowCreateModal(true)}
-              disabled={creatingAgent}
+              disabled={creatingAgent || AI_CHAT_DISCONTINUED}
+              title={AI_CHAT_DISCONTINUED ? 'Bots wurden eingestellt' : undefined}
             >
               <Bot size={14} strokeWidth={SETTINGS_ICON_STROKE} />
-              Bot erstellen
+              {AI_CHAT_DISCONTINUED ? 'Eingestellt' : 'Bot erstellen'}
             </button>
           </div>
           {agents.length > 0 ? (
@@ -240,10 +246,14 @@ export default function AiSettingsPage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted bots-empty">Noch keine Bots. Erstelle den ersten mit dem Button oben.</p>
+            <p className="text-sm text-muted bots-empty">
+              {AI_CHAT_DISCONTINUED ? 'Keine gespeicherten Bots.' : 'Noch keine Bots. Erstelle den ersten mit dem Button oben.'}
+            </p>
           )}
         </section>
 
+        {!AI_CHAT_DISCONTINUED ? (
+        <>
         <CreateAiAgentModal
           open={showCreateModal}
           onClose={() => setShowCreateModal(false)}
@@ -493,6 +503,9 @@ export default function AiSettingsPage() {
             </p>
           )}
         </section>
+
+        </>
+        ) : null}
 
         <section className="settings-section">
           <h3 className="settings-section-title">Zurücksetzen</h3>

@@ -22,6 +22,7 @@ import {
   NotificationMuteMenuItems,
 } from '../agentBlocks.jsx';
 import { useContextMenuPosition } from './useContextMenuPosition.js';
+import { ContextMenuBackdrop } from './ContextMenuBackdrop.jsx';
 
 /**
  * Rechtsklick-Menü für die Profilkarte oben rechts (Peer-Chats).
@@ -50,10 +51,12 @@ export function PeerChatContextMenu({ menu, peer, contact, onClose, onStartSelec
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('mousedown', onPointerDown, true);
+    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('blur', onClose);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('mousedown', onPointerDown, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('blur', onClose);
     };
   }, [menu, onClose, ref]);
@@ -61,6 +64,8 @@ export function PeerChatContextMenu({ menu, peer, contact, onClose, onStartSelec
   if (!menu || !peer) return null;
 
   return createPortal(
+    <>
+    <ContextMenuBackdrop open={Boolean(menu)} onClose={onClose} />
     <div
       ref={ref}
       className="chat-list-context-menu context-menu-pop"
@@ -75,7 +80,8 @@ export function PeerChatContextMenu({ menu, peer, contact, onClose, onStartSelec
         onStartSelection={onStartSelection}
         actions={actions}
       />
-    </div>,
+    </div>
+    </>,
     document.body
   );
 }

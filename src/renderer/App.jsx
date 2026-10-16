@@ -239,6 +239,7 @@ export default function App() {
 
   const {
     sendMessage,
+    sendMessageEdit,
     sendReadReceipt,
     sendTyping,
     toggleMessageReaction,
@@ -271,6 +272,7 @@ export default function App() {
     applyMessagePatch,
     sendE2eeHandshake,
     sendGroupPacket,
+    sendPairwiseEncrypted,
     removeContact,
     leaveGroupChat,
     removeGroup,
@@ -352,6 +354,8 @@ export default function App() {
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
+    sendMessageEdit,
+    applyMessagePatch,
     sendTyping,
     cancelAiChat,
     clearAiChatContext,
@@ -400,6 +404,8 @@ export default function App() {
     joinGameFromPresence,
     markPeerChatViewed,
     sendMessage,
+    sendMessageEdit,
+    applyMessagePatch,
     cancelAiChat,
     clearAiChatContext,
     sendReadReceipt,

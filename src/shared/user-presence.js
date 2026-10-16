@@ -1,3 +1,5 @@
+import { OWN_PEER_FEATURES } from './chat-features.js';
+
 export const USER_PRESENCE_KIND = 'user-presence';
 export const USER_PRESENCE_STATUS_ONLINE = 'online';
 export const USER_PRESENCE_STATUS_DND = 'dnd';
@@ -45,6 +47,7 @@ export function buildUserPresencePayload(settings) {
     status: resolveUserPresenceStatus(settings),
     sender: settings?.displayName || '',
     timestamp: Date.now(),
+    features: [...OWN_PEER_FEATURES],
   };
 }
 

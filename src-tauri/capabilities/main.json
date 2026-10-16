@@ -50,6 +50,7 @@
     "allow-peer-reset-all-connections",
     "allow-peer-disconnect",
     "allow-peer-send",
+    "allow-peer-send-to",
     "allow-peer-send-many",
     "allow-peer-broadcast",
     "allow-peer-get-peers",

@@ -29,7 +29,7 @@ function callLogLabel(message) {
   if (outcome === 'busy' ) return 'Besetzt';
   if (outcome === 'failed') return 'Anruf fehlgeschlagen';
   const duration = formatDurationMs(message?.durationMs || 0);
-  return `Sprachanruf · ${duration}`;
+  return `${message?.video ? 'Videoanruf' : 'Sprachanruf'} · ${duration}`;
 }
 
 function iconFor(message) {

@@ -1,15 +1,17 @@
 import React from 'react';
 import { PeerAvatar } from './messageHelpers.jsx';
+import { ChatBackButton } from './ChatBackButton.jsx';
 
 /**
  * Platzhalter-Ansicht für einen Bot, dem noch eine API fehlt.
  *
- * Props: selectedPeer, onShowProfile(), onOpenSettings()
+ * Props: selectedPeer, onShowProfile(), onOpenSettings(), onBack()
  */
-export function AiSetupView({ selectedPeer, onShowProfile, onOpenSettings }) {
+export function AiSetupView({ selectedPeer, onShowProfile, onOpenSettings, onBack }) {
   return (
     <div className="ai-chat-setup-wrap">
       <div className="chat-header chat-header--has-profile">
+        <ChatBackButton onBack={onBack} />
         <button
           type="button"
           className="chat-header-profile-btn"
@@ -38,14 +40,13 @@ export function AiSetupView({ selectedPeer, onShowProfile, onOpenSettings }) {
           className="peer-avatar-img--bot"
           botStatus="setup"
         />
-        <h3>API einrichten</h3>
+        <h3>Bots wurden eingestellt</h3>
         <p className="text-muted">
-          Hinterlege eine OpenAI-kompatible API (URL, Schlüssel, Modell) in den Einstellungen
-          oder direkt im Bot-Profil. Danach kannst du hier chatten.
+          Dieser Chat bleibt lesbar. Neue Nachrichten, Bots und KI-Chats sind nicht mehr möglich.
         </p>
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-secondary"
           onClick={onOpenSettings}
         >
           Zu den Einstellungen

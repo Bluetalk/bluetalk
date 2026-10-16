@@ -86,7 +86,11 @@ export default function ProfileMenu({ variant = 'default' }) {
       }
     };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('pointerdown', onDown);
+    };
   }, [open]);
 
   const initial = (settings.displayName || '?')[0].toUpperCase();

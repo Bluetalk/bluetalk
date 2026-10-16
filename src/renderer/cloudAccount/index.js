@@ -26,6 +26,7 @@ export {
   stopSync,
   fullUpload,
   syncNow,
+  requestPull,
   getSyncState,
   onSyncState,
   resetSyncLocalState,

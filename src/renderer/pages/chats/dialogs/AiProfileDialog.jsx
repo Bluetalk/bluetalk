@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Play, Plus, Trash2, X } from 'lucide-react';
 import {
+  AI_CHAT_DISCONTINUED,
   AI_THINKING_MODES,
   BOT_DEFAULT_NAME,
   BOT_DESCRIPTION_MAX_CHARS,
@@ -168,6 +169,7 @@ export function AiProfileDialog({
   };
 
   const runRoutine = async (routine) => {
+    if (AI_CHAT_DISCONTINUED) return;
     if (!selectedPeer?.id || !routine?.id || runningRoutineId) return;
     if (!String(routine.prompt || '').trim()) {
       toast({ variant: 'info', title: 'Routine', message: 'Gib zuerst einen Auftrag ein.' });
@@ -381,6 +383,8 @@ export function AiProfileDialog({
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
+                disabled={AI_CHAT_DISCONTINUED}
+                title={AI_CHAT_DISCONTINUED ? 'Bots wurden eingestellt' : undefined}
                 onClick={() => setDraft((prev) => ({
                   ...prev,
                   routines: [...prev.routines, createEmptyBotRoutine()],
@@ -390,7 +394,12 @@ export function AiProfileDialog({
                 Hinzufügen
               </button>
             </div>
-            {draft.routines.length === 0 ? (
+            {AI_CHAT_DISCONTINUED ? (
+              <p className="text-sm text-muted" style={{ margin: 0 }}>
+                Bots wurden eingestellt — Routinen laufen nicht mehr.
+              </p>
+            ) : null}
+            {draft.routines.length === 0 && !AI_CHAT_DISCONTINUED ? (
               <p className="text-sm text-muted" style={{ margin: 0 }}>
                 Zeitplan oder Knopfdruck: der Bot schreibt dann selbst in diesen Chat.
               </p>
@@ -472,7 +481,7 @@ export function AiProfileDialog({
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    disabled={Boolean(runningRoutineId)}
+                    disabled={Boolean(runningRoutineId) || AI_CHAT_DISCONTINUED}
                     onClick={() => void runRoutine(routine)}
                   >
                     <Play size={14} strokeWidth={CHAT_ICON_STROKE} />

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-peer-send-to"
+description = "Enables the peer_send_to command without any pre-configured scope."
+commands.allow = ["peer_send_to"]
+
+[[permission]]
+identifier = "deny-peer-send-to"
+description = "Denies the peer_send_to command without any pre-configured scope."
+commands.deny = ["peer_send_to"]

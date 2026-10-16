@@ -5,6 +5,7 @@ import { createPlaybackRing } from './playbackBuffer.js';
 import { decryptCallPayload, encryptCallPayload, importCallKey } from './crypto.js';
 import { addCallWorklets } from './worklets.js';
 import { attachAecOutput } from './aecOutput.js';
+import { AUDIO_MAX_PACKET_BYTES, isSafeSeq } from './callLimits.js';
 
 const PCM_PACKET_SAMPLES_48K = 2880; // 60 ms @ 48 kHz
 const PCM16_SAMPLES = 960; // 60 ms @ 16 kHz
@@ -358,8 +359,9 @@ export async function createAudioPipeline({
 
   async function pushRemotePacket(seq, dataB64) {
     if (closed) return;
+    if (!isSafeSeq(seq)) return;
     const n = Number(seq);
-    if (!Number.isFinite(n) || n < 0) return;
+    if (typeof dataB64 === 'string' && dataB64.length > (AUDIO_MAX_PACKET_BYTES + 64) * 2) return;
     if (n <= lastRecvSeq && seenSeq.has(n)) return;
     if (seenSeq.has(n)) return;
     if (lastRecvSeq >= 0 && n < lastRecvSeq - 8) return;
@@ -371,6 +373,7 @@ export async function createAudioPipeline({
     if (n > lastRecvSeq) lastRecvSeq = n;
     try {
       const plain = await decryptCallPayload(callKey, dataB64, directionRecv, n);
+      if (plain.length > AUDIO_MAX_PACKET_BYTES) return;
       jitter.push(n, plain);
       void pumpFromJitter();
     } catch {

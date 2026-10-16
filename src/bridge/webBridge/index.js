@@ -8,16 +8,29 @@ import {
   openInitiatorSession,
   openResponderSession,
 } from './peerProtocol/index.js';
-import { DEFAULT_RELAY_URL, RelayClient } from './relayClient.js';
+import { defaultRelayUrl, RelayClient } from './relayClient.js';
 import { shouldPurgeEphemeral } from './persistFlags.js';
+import {
+  LEGACY_DEVICE_KEY,
+  SessionTable,
+  aggregatePeerInfo,
+  isValidDeviceId,
+  newDeviceId,
+  normalizeDeviceKey,
+  webDeviceName,
+} from './sessionMap.js';
+import { createTabLock, isAuxiliaryWindow } from './tabLock.js';
 
 const bus = createEventBus();
 const storeApi = createIdbStore();
-const peers = new Map();
+const sessions = new SessionTable();
 let identity = null;
 let relay = null;
 let runtimePromise = null;
 let displayNameCache = 'BlueTalk user';
+let deviceIdCache = '';
+let deviceNameCache = '';
+let tabLock = null;
 
 function unavailable(feature) {
   return async () => {
@@ -85,35 +98,53 @@ async function refreshDisplayName() {
 }
 
 function peerList() {
-  return [...peers.values()].map((entry) => entry.info);
+  return sessions.peerInfos();
 }
 
 function emitPeerList() {
   bus.emit('peers:list-sync', peerList());
 }
 
-function handlePeerMessage(fromPeerId, messageId, sentAtMs, payload) {
+function emitPeerDevices(peerId) {
+  bus.emit('peer:devices', { id: peerId, devices: sessions.devices(peerId) });
+}
+
+function handlePeerMessage(fromPeerId, messageId, sentAtMs, payload, fromDevice) {
   const kind = payload?.kind || '';
   if (kind === 'bt2:file-request' || kind === 'bt2:file-response') return;
   const event = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? { ...payload }
     : { content: payload };
   event.from = fromPeerId;
+  event.fromDevice = fromDevice;
   if (event.timestamp == null) event.timestamp = sentAtMs;
   if (!event.transportMessageId) event.transportMessageId = messageId;
   if (kind === 'file-hosted') bus.emit('peer:file-offered', event);
   bus.emit('peer:message', event);
 }
 
-function forgetPeer(peerId, reason) {
-  if (!peers.has(peerId)) return;
-  peers.delete(peerId);
-  bus.emit('peer:disconnected', { id: peerId, reason });
+function forgetSession(peerId, deviceKey, reason) {
+  if (!sessions.has(peerId, deviceKey)) return;
+  sessions.delete(peerId, deviceKey);
+  const remaining = sessions.forPeer(peerId);
+  emitPeerDevices(peerId);
+  if (!remaining.length) {
+    bus.emit('peer:disconnected', { id: peerId, reason });
+  }
   emitPeerList();
 }
 
-async function attachTunnel({ peerId, initiator, send, remoteAddress, onReady }) {
+async function attachTunnel({
+  peerId,
+  deviceKey,
+  deviceName,
+  initiator,
+  send,
+  remoteAddress,
+  onReady,
+}) {
   if (!identity) throw new Error('identity unavailable');
+  const key = normalizeDeviceKey(deviceKey);
   const name = await refreshDisplayName();
   const opener = initiator ? openInitiatorSession : openResponderSession;
   const { transport, ready } = await opener({
@@ -123,9 +154,15 @@ async function attachTunnel({ peerId, initiator, send, remoteAddress, onReady })
     expectedPeerId: initiator ? peerId : undefined,
     remoteAddress,
     onMessage: (message) => {
-      handlePeerMessage(message.fromPeerId, message.messageId, message.sentAtMs, message.payload);
+      handlePeerMessage(
+        message.fromPeerId,
+        message.messageId,
+        message.sentAtMs,
+        message.payload,
+        key,
+      );
     },
-    onClose: (reason) => forgetPeer(peerId, reason || 'connection closed'),
+    onClose: (reason) => forgetSession(peerId, key, reason || 'connection closed'),
   });
   onReady?.({
     push: (chunk) => transport.push(chunk),
@@ -136,7 +173,7 @@ async function attachTunnel({ peerId, initiator, send, remoteAddress, onReady })
     await peer.close('refusing to connect to self');
     throw new Error('refusing to connect to self');
   }
-  const existing = peers.get(info.id);
+  const existing = sessions.get(info.id, key);
   if (existing) {
     const own = identity.peerId;
     const preferred = own < info.id ? 'outbound' : 'inbound';
@@ -144,13 +181,23 @@ async function attachTunnel({ peerId, initiator, send, remoteAddress, onReady })
       await existing.peer.close('replaced by preferred relay leg');
     } else {
       await peer.close('duplicate');
-      return existing.info;
+      return aggregatePeerInfo(sessions.forPeer(info.id)) || existing.info;
     }
   }
-  peers.set(info.id, { info, peer, transport });
-  bus.emit('peer:connected', info);
+  const first = !sessions.hasAny(info.id);
+  sessions.set({
+    peerId: info.id,
+    deviceKey: key,
+    deviceName: deviceName || '',
+    transport: info.transport || 'relay',
+    info,
+    peer,
+  });
+  const aggregated = aggregatePeerInfo(sessions.forPeer(info.id));
+  if (first) bus.emit('peer:connected', aggregated);
+  emitPeerDevices(info.id);
   emitPeerList();
-  return info;
+  return aggregated;
 }
 
 function watchIdsFromContacts(contacts) {
@@ -169,18 +216,51 @@ async function contacts() {
   return Array.isArray(value) ? value : [];
 }
 
+function requestCloudPull() {
+  void import('../../renderer/cloudAccount/syncEngine.js')
+    .then((mod) => {
+      if (typeof mod.requestPull === 'function') mod.requestPull();
+      else if (typeof mod.syncNow === 'function') void mod.syncNow();
+    })
+    .catch(() => {});
+}
+
 function createRelay() {
   return new RelayClient({
     getIdentity: () => identity,
     getDisplayName: () => displayNameCache,
+    getDeviceId: () => deviceIdCache,
+    getDeviceName: () => deviceNameCache,
     getWatchIds: () => watchCache,
     isBlocked: (peerId) => blockedCache.has(peerId),
-    hasPeer: (peerId) => peers.has(peerId),
+    hasSession: (peerId, deviceKey) => sessions.has(peerId, deviceKey),
     onStatus: (status) => bus.emit('cloud:status', status),
     onPresence: (payload) => bus.emit('cloud:presence', payload),
     onMail: (payload) => bus.emit('cloud:mail', payload),
+    onSync: (payload) => {
+      bus.emit('cloud:sync', payload || {});
+      requestCloudPull();
+    },
     attachTunnel,
   });
+}
+
+function ensureTabLock() {
+  if (tabLock) return tabLock;
+  tabLock = createTabLock({
+    onForeignClaim: () => {
+      relay?.yieldToOtherTab?.();
+    },
+  });
+  return tabLock;
+}
+
+async function ensureCloudDeviceId() {
+  const existing = await storeApi.get('cloudDeviceId', null);
+  if (isValidDeviceId(existing)) return existing;
+  const id = newDeviceId();
+  await storeApi.set('cloudDeviceId', id);
+  return id;
 }
 
 let watchCache = [];
@@ -199,16 +279,20 @@ async function startRuntime() {
   await storeApi.openForPeer(identity.peerId);
   await refreshDisplayName();
   await refreshContactCaches();
+  deviceIdCache = await ensureCloudDeviceId();
+  deviceNameCache = webDeviceName();
   if (!relay) relay = createRelay();
+  if (isAuxiliaryWindow()) return true;
+  ensureTabLock().claim();
   const cloud = await storeApi.get('settings.cloud', null);
   if (cloud && typeof cloud === 'object') {
     try {
       relay.setConfig({
         enabled: cloud.enabled !== false,
-        relayUrl: cloud.relayUrl || DEFAULT_RELAY_URL,
+        relayUrl: cloud.relayUrl || defaultRelayUrl(),
       });
     } catch {
-      relay.setConfig({ enabled: true, relayUrl: DEFAULT_RELAY_URL });
+      relay.setConfig({ enabled: true, relayUrl: defaultRelayUrl() });
     }
   }
   relay.start();
@@ -329,37 +413,49 @@ const rawApi = {
         peerId = address.id || address.peerId || '';
       }
       if (!peerId) throw new Error('connect target needs an address or peer id');
-      if (peers.has(peerId)) return peers.get(peerId).info;
+      if (sessions.hasAny(peerId)) return aggregatePeerInfo(sessions.forPeer(peerId));
       const list = await contacts();
       if (isBlockedContact(list, peerId)) throw new Error('Kontakt ist blockiert.');
       const info = await relay.openPeer(peerId);
-      return info || peers.get(peerId)?.info;
+      return info || aggregatePeerInfo(sessions.forPeer(peerId));
     },
     normalizeAddress: async (raw) => ({ ok: false, error: 'invalid address' }),
     reconnectContacts: async () => {
       await ensureRuntime();
       const list = await contacts();
       for (const contact of list) {
-        if (!contact?.id || contact.blocked || peers.has(contact.id)) continue;
+        if (!contact?.id || contact.blocked || sessions.hasAny(contact.id)) continue;
         relay?.openPeer(contact.id).catch(() => {});
       }
       return { ok: true };
     },
     resetAllConnections: async () => {
-      for (const entry of [...peers.values()]) {
+      for (const entry of sessions.values()) {
         await entry.peer.close('reset');
       }
       await rawApi.peer.reconnectContacts();
       return { ok: true };
     },
     disconnect: async (peerId) => {
-      const entry = peers.get(peerId);
-      if (!entry) return true;
-      await entry.peer.close('closed locally');
+      const list = sessions.forPeer(peerId);
+      if (!list.length) return true;
+      await Promise.all(list.map((entry) => entry.peer.close('closed locally')));
       return true;
     },
     send: async (peerId, data) => {
-      const entry = peers.get(peerId);
+      const list = sessions.forPeer(peerId);
+      if (!list.length) return false;
+      const results = await Promise.all(list.map(async (entry) => {
+        try {
+          return Boolean(await entry.peer.sendPayload(data));
+        } catch {
+          return false;
+        }
+      }));
+      return results.some(Boolean);
+    },
+    sendTo: async (peerId, deviceKey, data) => {
+      const entry = sessions.get(peerId, deviceKey == null ? LEGACY_DEVICE_KEY : deviceKey);
       if (!entry) return false;
       try {
         return Boolean(await entry.peer.sendPayload(data));
@@ -373,7 +469,7 @@ const rawApi = {
         sent: await rawApi.peer.send(peerId, data),
       })),
     ),
-    broadcast: async (data) => rawApi.peer.sendMany([...peers.keys()], data),
+    broadcast: async (data) => rawApi.peer.sendMany(sessions.peerIds(), data),
     getPeers: async () => peerList(),
     refreshDiscovery: async () => undefined,
   }),
@@ -486,14 +582,14 @@ const rawApi = {
       return true;
     },
     wipeAllData: async () => {
-      for (const entry of [...peers.values()]) {
+      for (const entry of sessions.values()) {
         try {
           await entry.peer.close('sign-out');
         } catch {
           /* ignore */
         }
       }
-      peers.clear();
+      sessions.clear();
       try {
         await relay?.stop();
       } catch {
@@ -502,8 +598,12 @@ const rawApi = {
       relay = null;
       identity = null;
       runtimePromise = null;
+      deviceIdCache = '';
+      deviceNameCache = '';
       watchCache = [];
       blockedCache = new Set();
+      tabLock?.close?.();
+      tabLock = null;
       await storeApi.wipeAll();
       bus.emit('app:data-cleared', { scope: 'all' });
       return true;
@@ -521,14 +621,17 @@ const rawApi = {
       await ensureRuntime();
       return relay?.getStatus() || {
         enabled: true,
-        relayUrl: DEFAULT_RELAY_URL,
+        relayUrl: defaultRelayUrl(),
         state: 'offline',
         peerId: identity?.peerId || '',
+        device: deviceIdCache,
         lastError: null,
         latencyMs: null,
         connectedAt: null,
         tunnels: 0,
         onlinePeers: [],
+        ownDevices: [],
+        yielded: false,
       };
     },
     setConfig: async (config) => {
@@ -550,11 +653,13 @@ const rawApi = {
     takeover: async () => {
       await ensureRuntime();
       if (!relay) relay = createRelay();
+      ensureTabLock().claim();
       return relay.takeover();
     },
     onStatus: (callback) => bus.subscribe('cloud:status', callback),
     onPresence: (callback) => bus.subscribe('cloud:presence', callback),
     onMail: (callback) => bus.subscribe('cloud:mail', callback),
+    onSync: (callback) => bus.subscribe('cloud:sync', callback),
   }),
 
   account: Object.freeze({

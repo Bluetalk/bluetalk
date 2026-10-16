@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { isMobileLayout } from '../../../utils/touch.js';
 
 const VIEWPORT_PAD = 8;
 
@@ -25,6 +26,10 @@ export function useContextMenuPosition(menu) {
     }
     const el = ref.current;
     if (!el) return;
+    if (isMobileLayout()) {
+      setPlacement(null);
+      return;
+    }
     const { width, height } = el.getBoundingClientRect();
     const flipX = menu.x + width > window.innerWidth - VIEWPORT_PAD;
     const flipY = menu.y + height > window.innerHeight - VIEWPORT_PAD;

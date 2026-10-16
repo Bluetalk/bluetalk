@@ -53,7 +53,23 @@ impl PeerService {
             .read()
             .await
             .as_ref()
-            .is_some_and(|network| network.peers().iter().any(|peer| peer.peer_id == peer_id))
+            .is_some_and(|network| network.has_peer(peer_id))
+    }
+
+    pub(crate) async fn has_direct(&self, peer_id: &str) -> bool {
+        self.network
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|network| network.has_direct(peer_id))
+    }
+
+    pub(crate) async fn has_session(&self, peer_id: &str, device_key: &str) -> bool {
+        self.network
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|network| network.has_session(peer_id, device_key))
     }
 
     pub(crate) async fn peer_snapshot(&self, peer_id: &str) -> Option<Value> {

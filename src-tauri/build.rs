@@ -21,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "peer_reset_all_connections",
     "peer_disconnect",
     "peer_send",
+    "peer_send_to",
     "peer_send_many",
     "peer_broadcast",
     "peer_get_peers",

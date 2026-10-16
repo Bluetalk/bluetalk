@@ -46,6 +46,9 @@ export function sendGroupChatMessage(deps, peerId, payload) {
     recipientId,
     { status: 'offline' },
   ]));
+  if (outgoing.kind === 'chat' && Array.isArray(outgoing.mentions) && outgoing.mentions.length) {
+    wireContent.mentions = outgoing.mentions.filter(Boolean);
+  }
   const inner = {
     kind: GROUP_MESSAGE_KIND,
     protocolVersion: GROUP_PROTOCOL_VERSION,

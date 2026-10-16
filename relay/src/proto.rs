@@ -24,9 +24,22 @@ pub const CONTROL_RATE: f64 = 50.0;
 pub const BYTE_RATE: f64 = 4.0 * 1024.0 * 1024.0;
 pub const BYTE_BURST: f64 = 16.0 * 1024.0 * 1024.0;
 pub const PROTOCOL: u32 = 1;
+/// Max. gleichzeitige Geräte (Relay-Verbindungen) pro Peer-ID.
+pub const MAX_DEVICES_PER_PEER: usize = 8;
+/// Fallback-Geräte-ID für Clients ohne `device` (≤ 2.3.x).
+pub const LEGACY_DEVICE: &str = "legacy";
+/// Sync-Hinweis an Relay-Verbindungen, gebündelt max. 1×/s pro Konto.
+pub const SYNC_HINT_INTERVAL_MS: u64 = 1000;
+
+/// Verbundenes Gerät (id + Anzeigename), für `ready`/`devices`/`presence`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+}
 
 /// Nachrichten an den WebSocket-Writer (begrenzte mpsc-Queue).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Outbound {
     Text(String),
     Binary(Bytes),
@@ -49,11 +62,13 @@ pub fn hello(nonce_b64: &str, version: &str) -> Value {
     })
 }
 
-pub fn ready(peer_id: &str) -> Value {
+pub fn ready(peer_id: &str, device: &str, other_devices: &[DeviceInfo]) -> Value {
     json!({
         "t": "ready",
         "peerId": peer_id,
         "time": unix_ms(),
+        "device": device,
+        "devices": devices_json(other_devices),
         "limits": {
             "maxFrame": MAX_FRAME_PAYLOAD,
             "maxMailBody": MAX_MAIL_BODY,
@@ -66,12 +81,38 @@ pub fn error(code: &str) -> Value {
     json!({ "t": "error", "code": code })
 }
 
-pub fn presence(peer_id: &str, online: bool) -> Value {
-    json!({ "t": "presence", "peerId": peer_id, "online": online })
+pub fn presence(peer_id: &str, online: bool, devices: &[DeviceInfo]) -> Value {
+    json!({
+        "t": "presence",
+        "peerId": peer_id,
+        "online": online,
+        "devices": devices_json(devices),
+    })
 }
 
-pub fn incoming(tunnel: u32, from: &str, name: &str) -> Value {
-    json!({ "t": "incoming", "tunnel": tunnel, "from": from, "name": name })
+pub fn incoming(tunnel: u32, from: &str, from_device: &str, name: &str) -> Value {
+    json!({
+        "t": "incoming",
+        "tunnel": tunnel,
+        "from": from,
+        "fromDevice": from_device,
+        "name": name,
+    })
+}
+
+pub fn devices_event(devices: &[DeviceInfo]) -> Value {
+    json!({ "t": "devices", "devices": devices_json(devices) })
+}
+
+pub fn sync_hint(latest_seq: i64) -> Value {
+    json!({ "t": "sync", "latestSeq": latest_seq })
+}
+
+fn devices_json(devices: &[DeviceInfo]) -> Vec<Value> {
+    devices
+        .iter()
+        .map(|d| json!({ "id": d.id, "name": d.name }))
+        .collect()
 }
 
 pub fn opened(tunnel: u32) -> Value {

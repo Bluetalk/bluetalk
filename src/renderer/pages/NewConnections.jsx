@@ -3,21 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, Check, Link2, RefreshCw, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
-import { CloudApiError, createCloudApi, httpBaseFromRelayUrl } from '../cloudAccount/api.js';
+import { CloudApiError, createCloudApi, defaultRelayUrl, httpBaseFromRelayUrl } from '../cloudAccount/api.js';
 import { USERNAME_RE, normalizeUsername } from '../cloudAccount/crypto.js';
 import { ConnectDialog } from './chats/dialogs/ConnectDialog.jsx';
 import { CHAT_ICON_STROKE, PeerAvatar } from './chats/messageHelpers.jsx';
-
-const DEFAULT_RELAY = 'wss://bt.henny.dev/v1/ws';
 
 async function cloudBaseUrl() {
   try {
     const status = await window.bluetalk?.cloud?.getStatus?.();
     if (status?.relayUrl) return httpBaseFromRelayUrl(status.relayUrl);
   } catch {
-    /* Standard-Relay */
+    /* Standard-Relay aus Herkunft bzw. öffentlichem Dienst */
   }
-  return httpBaseFromRelayUrl(DEFAULT_RELAY);
+  return httpBaseFromRelayUrl(defaultRelayUrl());
 }
 
 function parseAddQuery(raw) {

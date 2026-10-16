@@ -79,6 +79,16 @@ pub fn valid_name(name: &str) -> bool {
     name.chars().count() <= 64
 }
 
+/// Geräte-ID: 8–64 Zeichen `[A-Za-z0-9_-]`. `"legacy"` ist der Default ohne Feld,
+/// nicht Teil dieser Regex (zu kurz).
+pub fn valid_device_id(id: &str) -> bool {
+    let n = id.len();
+    (8..=64).contains(&n)
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+}
+
 /// UUID (8-4-4-4-12, hex) oder ein knapper druckbarer Bezeichner.
 pub fn valid_mail_id(id: &str) -> bool {
     if id.is_empty() || id.len() > 128 {
@@ -151,6 +161,18 @@ mod tests {
         assert_eq!(normalize_host("example.com:8080"), "example.com:8080");
         assert_eq!(normalize_host("[::1]:443"), "[::1]");
         assert_eq!(normalize_host("[::1]:8080"), "[::1]:8080");
+    }
+
+    #[test]
+    fn device_id_format() {
+        assert!(valid_device_id("testdev-1"));
+        assert!(valid_device_id(&"A".repeat(8)));
+        assert!(valid_device_id(&"x".repeat(64)));
+        assert!(!valid_device_id("legacy"));
+        assert!(!valid_device_id("short"));
+        assert!(!valid_device_id(&"x".repeat(65)));
+        assert!(!valid_device_id("bad device"));
+        assert!(!valid_device_id("dev/ice1"));
     }
 
     #[test]

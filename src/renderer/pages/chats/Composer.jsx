@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useVoiceRecorder } from '../../voice/useVoiceRecorder.js';
 import { VoiceComposerBar, MicSendButton } from '../../voice/VoiceComposerBar.jsx';
@@ -17,7 +17,16 @@ import {
 import { FileTypeIcon } from './messageParts.jsx';
 import { ComposerAttachMenu } from './ComposerAttachMenu.jsx';
 import { BotActionBar } from './BotActionBar.jsx';
+import { MentionAutocomplete } from './MentionAutocomplete.jsx';
 import { useComposerSend } from './hooks/useComposerSend.js';
+import { AI_CHAT_DISCONTINUED } from '../../aiChatConstants';
+import { useMobileLayout } from '../../utils/touch.js';
+import {
+  applyMentionReplacement,
+  filterMentionMembers,
+  findLastEditableOwnMessage,
+  getMentionQueryAtCursor,
+} from '../../../shared/chat-features.js';
 
 const { getGroupMember } = groupChat;
 
@@ -34,12 +43,14 @@ const { getGroupMember } = groupChat;
  *   aiChatPending, aiChatSupportsVision, showAiComposerAttach,
  *   composerDisabled, showOfflineComposerReconnect }
  * - reply: { replyToMessage, onClearReply() }
+ * - edit: { editingMessage, onCancelEdit(), onStartEdit(message) }
+ * - drafts: { saveDraft(peerId, text), clearDraft(peerId), selectedDraft }
  * - attachments: Rückgabe von useAttachments
- * - env: { settings, contacts, peers, debugMode, warning }
- * - actions: { sendMessage, cancelAiChat, connectToAddress, toast, setWarning }
+ * - env: { settings, contacts, peers, debugMode, warning, recentMessages }
+ * - actions: { sendMessage, sendMessageEdit, cancelAiChat, connectToAddress, toast, setWarning }
  * - textareaRef: Ref aus der Seite (Fokus nach "Antworten" im Kontextmenü)
  */
-export function Composer({ chat, reply, attachments, env, actions, textareaRef }) {
+export function Composer({ chat, reply, edit, drafts, attachments, env, actions, textareaRef }) {
   const {
     selectedPeer,
     isAiChatSelected,
@@ -53,6 +64,8 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     askUser = null,
   } = chat;
   const { replyToMessage, onClearReply } = reply;
+  const { editingMessage, onCancelEdit, onStartEdit } = edit || {};
+  const { saveDraft, clearDraft, selectedDraft } = drafts || {};
   const {
     pendingFile,
     setPendingFile,
@@ -63,12 +76,15 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     readingFile,
     sendingFile,
   } = attachments;
-  const { settings, contacts, peers, debugMode, warning } = env;
-  const { sendMessage, sendTyping, cancelAiChat, connectToAddress, toast, setWarning, onAskReply } = actions;
+  const { settings, contacts, peers, debugMode, warning, recentMessages } = env;
+  const { sendMessage, sendMessageEdit, sendTyping, cancelAiChat, connectToAddress, toast, setWarning, onAskReply } = actions;
   const askActive = Boolean(askUser?.requestId);
   const showStop = isAiChatSelected && aiChatPending && !askActive;
 
+  const isMobile = useMobileLayout();
   const [input, setInput] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const skipDraftSaveRef = useRef(false);
   const voice = useVoiceRecorder();
   const typingPeerRef = useRef('');
   const lastTypingSentRef = useRef(0);
@@ -152,6 +168,69 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     return () => window.removeEventListener('resize', onResize);
   }, [adjustTextareaHeight]);
 
+  useEffect(() => {
+    skipDraftSaveRef.current = true;
+    setInput(editingMessage ? String(editingMessage.content || '') : String(selectedDraft || ''));
+    window.setTimeout(() => { skipDraftSaveRef.current = false; }, 0);
+  }, [selectedPeer?.id]);
+
+  useEffect(() => {
+    if (!editingMessage) return;
+    skipDraftSaveRef.current = true;
+    setInput(String(editingMessage.content || ''));
+    window.setTimeout(() => {
+      skipDraftSaveRef.current = false;
+      textareaRef.current?.focus();
+      const el = textareaRef.current;
+      if (el) {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }, 0);
+  }, [editingMessage?.messageId, textareaRef]);
+
+  useEffect(() => {
+    if (skipDraftSaveRef.current || editingMessage || !selectedPeer?.id || !saveDraft) return;
+    saveDraft(selectedPeer.id, input);
+  }, [input, editingMessage, selectedPeer?.id, saveDraft]);
+
+  useEffect(() => {
+    if (!selectedPeer?.id || editingMessage || skipDraftSaveRef.current) return;
+    if (selectedDraft && !input) {
+      skipDraftSaveRef.current = true;
+      setInput(selectedDraft);
+      window.setTimeout(() => { skipDraftSaveRef.current = false; }, 0);
+    }
+  }, [selectedDraft, selectedPeer?.id, editingMessage, input]);
+
+  const mentionMembers = isGroupSelected ? (selectedPeer?.group?.members || []) : [];
+  const mentionQuery = useMemo(
+    () => (isGroupSelected && !editingMessage
+      ? getMentionQueryAtCursor(input, textareaRef.current?.selectionStart ?? input.length)
+      : null),
+    [input, isGroupSelected, editingMessage, textareaRef]
+  );
+  const mentionHits = useMemo(
+    () => (mentionQuery ? filterMentionMembers(mentionMembers, mentionQuery.query, ownPeerId) : []),
+    [mentionQuery, mentionMembers, ownPeerId]
+  );
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionQuery?.query, mentionHits.length]);
+
+  const insertMention = useCallback((member) => {
+    if (!mentionQuery) return;
+    const next = applyMentionReplacement(input, mentionQuery.start, mentionQuery.end, member.displayName || member.name);
+    setInput(next.text);
+    window.setTimeout(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.cursor, next.cursor);
+    }, 0);
+  }, [input, mentionQuery, textareaRef]);
+
   const send = useComposerSend({
     input,
     setInput,
@@ -162,11 +241,16 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
     showOfflineComposerReconnect,
     replyToMessage,
     onClearReply,
+    editingMessage,
+    onCancelEdit,
+    mentionMembers,
     pendingFile,
     setPendingFile,
     setFileTransfer,
     sendingFile,
     sendMessage,
+    sendMessageEdit,
+    clearDraft,
     setWarning,
     toast,
     settings,
@@ -268,11 +352,33 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
 
   return (
     <div className="chat-composer-wrap">
-      {isAiChatSelected ? <BotActionBar askUser={askUser} onReply={onAskReply} /> : null}
+      {isAiChatSelected && !AI_CHAT_DISCONTINUED ? <BotActionBar askUser={askUser} onReply={onAskReply} /> : null}
       <div className="chat-composer-stack">
       {/* Offline wird jetzt allein durch den ausgegrauten Senden-Button und den
           Composer-Platzhalter signalisiert — keine schwebende Statuspille mehr. */}
-      {replyToMessage && (
+      {editingMessage ? (
+        <div className="chat-reply-bar chat-edit-bar">
+          <div className="chat-reply-bar-body">
+            <span className="chat-reply-bar-label">Nachricht bearbeiten</span>
+            <span className="chat-reply-bar-preview">{getMessagePreviewText(editingMessage, debugMode)}</span>
+          </div>
+          <button
+            type="button"
+            className={isMobile
+              ? 'btn btn-ghost btn-sm chat-edit-bar-cancel'
+              : 'btn btn-ghost btn-icon chat-reply-bar-close'}
+            onClick={() => {
+              onCancelEdit?.();
+              setInput(String(selectedDraft || ''));
+            }}
+            aria-label="Bearbeiten abbrechen"
+            title={isMobile ? 'Bearbeiten abbrechen' : 'Bearbeiten abbrechen (Esc)'}
+          >
+            {isMobile ? 'Abbrechen' : <X size={16} strokeWidth={CHAT_ICON_STROKE} />}
+          </button>
+        </div>
+      ) : null}
+      {replyToMessage && !editingMessage && (
         <div className="chat-reply-bar">
           <div className="chat-reply-bar-body">
             <span className="chat-reply-bar-label">
@@ -343,6 +449,14 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
 
       {warning && <div className="chat-warning">{warning}</div>}
 
+      {mentionHits.length > 0 ? (
+        <MentionAutocomplete
+          items={mentionHits.slice(0, 8)}
+          activeIndex={mentionIndex}
+          onSelect={insertMention}
+        />
+      ) : null}
+
       {voiceActive ? (
         <VoiceComposerBar
           phase={voice.phase}
@@ -375,6 +489,9 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
         <textarea
           ref={textareaRef}
           value={input}
+          enterKeyHint="send"
+          autoComplete="off"
+          autoCorrect="on"
           onChange={(e) => {
             const value = e.target.value;
             setInput(value);
@@ -383,6 +500,50 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
           }}
           onPaste={handleComposerPaste}
           onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              if (mentionHits.length) {
+                e.preventDefault();
+                setMentionIndex(0);
+                return;
+              }
+              if (editingMessage) {
+                e.preventDefault();
+                onCancelEdit?.();
+                setInput(String(selectedDraft || ''));
+              }
+              return;
+            }
+            if (mentionHits.length) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setMentionIndex((i) => (i + 1) % mentionHits.length);
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setMentionIndex((i) => (i - 1 + mentionHits.length) % mentionHits.length);
+                return;
+              }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                insertMention(mentionHits[mentionIndex] || mentionHits[0]);
+                return;
+              }
+            }
+            if (
+              !isMobile
+              && e.key === 'ArrowUp'
+              && !input.trim()
+              && !e.shiftKey
+              && !editingMessage
+            ) {
+              const last = findLastEditableOwnMessage(recentMessages);
+              if (last && onStartEdit) {
+                e.preventDefault();
+                onStartEdit(last);
+                return;
+              }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               fireSend();
@@ -390,7 +551,9 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
           }}
           placeholder={
             isAiChatSelected
-              ? askActive
+              ? AI_CHAT_DISCONTINUED
+                ? 'Bots wurden eingestellt — schreibgeschützt'
+              : askActive
                 ? (askUser?.options?.length ? 'Oder selbst antworten…' : 'Antwort schreiben…')
                 : aiChatPending ? 'Bot schreibt…' : 'Nachricht an Bot…'
               : isGroupSelected && !selectedPeer.canSend

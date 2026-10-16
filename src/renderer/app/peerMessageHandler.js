@@ -31,6 +31,20 @@ import {
 } from './messageReactions';
 import { dispatchCallInbound } from '../calls/inbound.js';
 import { sanitizeVoiceMeta } from '../voice/voiceMeta.js';
+import { MESSAGE_EDIT_KIND, isStoreableChatKind, normalizePeerFeatures } from '../../shared/chat-features.js';
+import { applyInboundChatEdit } from './applyInboundChatEdit';
+
+function persistReportedPeerFeatures(upsertContact, contactsRef, fromId, rawFeatures) {
+  const features = normalizePeerFeatures(Array.isArray(rawFeatures) ? rawFeatures : []);
+  const previous = normalizePeerFeatures(
+    contactsRef?.current?.find((contact) => contact?.id === fromId)?.features
+  );
+  if (
+    previous.length === features.length
+    && previous.every((id, index) => id === features[index])
+  ) return;
+  upsertContact({ id: fromId, features });
+}
 
 // Eingehende Inhalte, die eine Desktop-Benachrichtigung auslösen sollen.
 const NOTIFYABLE_KINDS = new Set([
@@ -81,8 +95,8 @@ export function createPeerMessageHandler(deps) {
     const fromId = msg.from;
     const isBlocked = fromId && contactsRef.current.some((c) => c?.id === fromId && c.blocked === true);
 
-    // call-audio kommt ~17×/s — sofort weiterleiten, kein React/Store.
-    if ((msg.kind === 'call-audio' || msg.kind === 'call-signal') && fromId) {
+    // call-audio/video kommt oft — sofort weiterleiten, kein React/Store.
+    if ((msg.kind === 'call-audio' || msg.kind === 'call-video' || msg.kind === 'call-signal') && fromId) {
       if (!isBlocked) dispatchCallInbound(fromId, msg);
       return;
     }
@@ -135,6 +149,7 @@ export function createPeerMessageHandler(deps) {
         name: msg.displayName || msg.sender || fromId,
         bio: msg.bio,
         profilePicture: msg.profilePicture,
+        features: normalizePeerFeatures(Array.isArray(msg.features) ? msg.features : []),
       });
       return;
     }
@@ -192,6 +207,11 @@ export function createPeerMessageHandler(deps) {
       const tid = deliveryTimersRef.current.get(msg.refMessageId);
       if (tid) clearTimeout(tid);
       deliveryTimersRef.current.delete(msg.refMessageId);
+      const cached = messageCacheRef.current?.[fromId];
+      const existing = Array.isArray(cached)
+        ? cached.find((item) => item?.messageId === msg.refMessageId)
+        : null;
+      if (existing?.deliveryStatus === 'delivered') return;
       await applyMessagePatch(fromId, msg.refMessageId, {
         deliveryStatus: 'delivered',
         deliveredAt: typeof msg.receivedAt === 'number' ? msg.receivedAt : Date.now(),
@@ -203,6 +223,7 @@ export function createPeerMessageHandler(deps) {
     if (msg.kind === 'read-receipt' && msg.lastReadMessageId && fromId) {
       if (isBlocked) return;
       setPeerReadReceipts((prev) => {
+        if (prev[fromId] === msg.lastReadMessageId) return prev;
         const next = { ...prev, [fromId]: msg.lastReadMessageId };
         if (window.bluetalk) window.bluetalk.store.set('chatReadReceipts', next);
         return next;
@@ -268,13 +289,16 @@ export function createPeerMessageHandler(deps) {
 
     if (msg.kind === USER_PRESENCE_KIND && fromId) {
       if (isBlocked) return;
+      const features = normalizePeerFeatures(Array.isArray(msg.features) ? msg.features : []);
       setPeerUserPresence((prev) => ({
         ...prev,
         [fromId]: {
           status: parseIncomingUserPresenceStatus(msg.status),
           updatedAt: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
+          features,
         },
       }));
+      persistReportedPeerFeatures(upsertContact, contactsRef, fromId, msg.features);
       return;
     }
 
@@ -361,16 +385,38 @@ export function createPeerMessageHandler(deps) {
     }
 
     if (normalized.kind === 'call-offer' && fromId) {
-      dispatchCallInbound(fromId, normalized);
+      dispatchCallInbound(fromId, {
+        ...normalized,
+        fromDevice: msg.fromDevice || normalized.fromDevice,
+      });
       return;
     }
-    if ((normalized.kind === 'call-audio' || normalized.kind === 'call-signal') && fromId) {
-      if (!isBlocked) dispatchCallInbound(fromId, normalized);
+    if ((normalized.kind === 'call-audio' || normalized.kind === 'call-video' || normalized.kind === 'call-signal') && fromId) {
+      if (!isBlocked) {
+        dispatchCallInbound(fromId, {
+          ...normalized,
+          fromDevice: msg.fromDevice || normalized.fromDevice,
+        });
+      }
       return;
     }
 
     if (GROUP_PROTOCOL_KINDS.includes(normalized.kind)) {
       await handleGroupProtocolFrame(deps, normalized, fromId, wasPairwiseEncrypted);
+      return;
+    }
+
+    if (normalized.kind === MESSAGE_EDIT_KIND && fromId) {
+      await applyInboundChatEdit({
+        chatId: fromId,
+        fromId,
+        payload: normalized,
+        isGroup: false,
+        messageCacheRef,
+        applyMessagePatch,
+        setChatMeta,
+        setMessages,
+      });
       return;
     }
 
@@ -463,6 +509,10 @@ export function createPeerMessageHandler(deps) {
       if (Array.isArray(cached) && cached.some((item) => item?.messageId === normalized.messageId)) {
         return;
       }
+    }
+
+    if (!isStoreableChatKind(normalized.kind)) {
+      return;
     }
 
     const meta = await window.bluetalk.messages.append(fromId, normalized);

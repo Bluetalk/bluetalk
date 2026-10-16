@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "bluetalk"
-version = "2.3.1"
+version = "2.4.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -453,6 +453,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "webview2-com",
+ "windows-core 0.61.2",
  "zeroize",
 ]
 

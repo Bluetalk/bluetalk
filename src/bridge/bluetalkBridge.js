@@ -5,6 +5,7 @@ import { wrapWithSync } from './syncLayer.js';
 const ALLOWED_EVENTS = new Set([
   'peer:connected',
   'peer:disconnected',
+  'peer:devices',
   'peer:message',
   'peer:file-offered',
   'peer:file-received',
@@ -47,6 +48,7 @@ const ALLOWED_EVENTS = new Set([
   'cloud:status',
   'cloud:presence',
   'cloud:mail',
+  'cloud:sync',
 ]);
 
 function subscribe(channel, callback) {
@@ -132,6 +134,7 @@ const core = {
     resetAllConnections: () => call('peer_reset_all_connections'),
     disconnect: (peerId) => call('peer_disconnect', { peerId }),
     send: (peerId, data) => call('peer_send', { peerId, data }),
+    sendTo: (peerId, device, data) => call('peer_send_to', { peerId, device, data }),
     sendMany: (peerIds, data) => call('peer_send_many', { peerIds, data }),
     broadcast: (data) => call('peer_broadcast', { data }),
     getPeers: () => call('peer_get_peers'),
@@ -239,6 +242,7 @@ const core = {
     onStatus: (callback) => subscribe('cloud:status', callback),
     onPresence: (callback) => subscribe('cloud:presence', callback),
     onMail: (callback) => subscribe('cloud:mail', callback),
+    onSync: (callback) => subscribe('cloud:sync', callback),
   }),
 
   account: Object.freeze({

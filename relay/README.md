@@ -4,8 +4,11 @@ Offener Vermittler für **Cloud-Nachrichten** zwischen BlueTalk-Clients.
 Der Relay ist absichtlich dumm: Er prüft die Anmeldung, kennt Peer-IDs und
 leitet Bytes weiter. Klartext von Chats, Spielen oder Dateien sieht er nie.
 
-Protokoll (Nachrichtentypen, Limits, Auth): [`PROTOCOL.md`](PROTOCOL.md).
+Protokoll (Nachrichtentypen, Limits, Auth, mehrere Geräte): [`PROTOCOL.md`](PROTOCOL.md).
 Cloud-Konten, verschlüsselter Sync und BlueTalk Web: [`ACCOUNTS.md`](ACCOUNTS.md).
+Ab 2.4.0 können bis zu acht Geräte derselben Peer-ID gleichzeitig am Relay
+hängen; Clients ohne `device` (2.3.x) bleiben ein Gerät mit `replaced` bei
+Doppel-Login.
 
 ## Sicherheitsmodell
 

@@ -7,7 +7,7 @@ import {
 
 export function peerPresenceKind(peer, isAiChat, isGroup) {
   if (isGroup) return 'group';
-  if (isAiChat) return 'online';
+  if (isAiChat) return 'muted';
   if (peer.contact?.blocked || peer.contact?.blockedByPeer) return 'blocked';
   if (peer.contact?.chatDeletedByPeer) return 'muted';
   if (peer.offline || isPeerAppearingOffline(peer.userPresence)) return 'offline';
@@ -21,7 +21,7 @@ export function peerPresenceLabel(peer, isAiChat, isGroup) {
     const online = Math.max(0, peer.onlineMemberCount - 1);
     return `${peer.activeMemberCount} Mitglieder · ${online} online`;
   }
-  if (isAiChat) return 'Bot';
+  if (isAiChat) return 'Eingestellt';
   if (peer.offline || isPeerAppearingOffline(peer.userPresence)) return 'Offline';
   if (peer.gamePresence) return formatGamePresenceLabel(peer.gamePresence);
   if (isPeerDoNotDisturb(peer.userPresence)) {

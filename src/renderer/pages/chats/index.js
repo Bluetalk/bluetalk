@@ -7,12 +7,17 @@ export * from './agentBlocks.jsx';
 export * from './ChatListRow.jsx';
 export * from './ChatListPanel.jsx';
 export * from './ChatHeader.jsx';
+export * from './ChatBackButton.jsx';
 export * from './MessageList.jsx';
 export * from './MessageReactions.jsx';
 export * from './Composer.jsx';
 export * from './BotActionBar.jsx';
 export * from './ComposerAttachMenu.jsx';
 export * from './AiSetupView.jsx';
+export * from './PinnedMessagesBar.jsx';
+export * from './ChatSearchBar.jsx';
+export * from './JumpToLatestButton.jsx';
+export * from './MentionAutocomplete.jsx';
 
 // Dialoge
 export * from './dialogs/ConnectDialog.jsx';
@@ -44,3 +49,5 @@ export * from './hooks/useOfflineReconnect.js';
 export * from './hooks/useComposerSend.js';
 export * from './hooks/useChatDialogs.js';
 export * from './hooks/useChatActions.js';
+export * from './hooks/useChatSearch.js';
+export * from './hooks/useChatDrafts.js';

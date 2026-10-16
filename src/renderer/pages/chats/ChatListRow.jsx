@@ -1,5 +1,7 @@
 import React from 'react';
 import { Bot, BellOff, ChevronDown, Cloud, Pin, Users } from 'lucide-react';
+import { AI_CHAT_DISCONTINUED } from '../../aiChatConstants';
+import { formatDraftPreview, getDraftText } from '../../../shared/chat-features.js';
 import {
   formatGamePresenceLabel,
 } from '../../../shared/game-presence.js';
@@ -13,6 +15,7 @@ import {
   getLastPreview,
   subagentStatusLabel,
 } from './messageHelpers.jsx';
+import { useLongPress } from '../../utils/touch.js';
 
 /**
  * Eine Zeile der Chatliste inkl. optional ausgeklappter Sub-Agenten-Zeilen.
@@ -35,7 +38,9 @@ function ChatListRowInner({
   onContextMenu,
   onToggleSubs,
   onOpenSubagent,
+  drafts,
 }) {
+  const longPress = useLongPress((event) => onContextMenu(event, chat));
   const hasSubagents = subagents.length > 0;
   const runningSubagentCount = subagents.filter((seg) => seg.status === 'running').length;
   const presenceKind = peerPresenceKind(chat, chat.isAiChat, chat.isGroup);
@@ -70,6 +75,7 @@ function ChatListRowInner({
         title={chat.displayName}
         onClick={() => onSelect(chat.id)}
         onContextMenu={(e) => onContextMenu(e, chat)}
+        {...longPress}
       >
         {hasSubagents ? (
           <button
@@ -112,7 +118,13 @@ function ChatListRowInner({
             )}
           </div>
           <div className={`list-item-sub${(!chat.isGroup && (aiPending || peerTypingActive)) ? ' list-item-sub--typing' : ''}`}>
-            {chat.isGroup
+            {(() => {
+              const draftPreview = formatDraftPreview(getDraftText(drafts, chat.id));
+              if (draftPreview && !aiPending && !peerTypingActive) {
+                return <span className="chat-draft-preview">{draftPreview}</span>;
+              }
+              return null;
+            })() || (chat.isGroup
               ? (chat.lastMessage
                 ? `${chat.lastMessage.from === 'self' ? 'Du' : (chat.lastMessage.sender || 'Mitglied')}: ${getLastPreview(chat.lastMessage, debugMode).replace(/^You: |^Du: /, '')}`
                 : `${chat.activeMemberCount} Mitglieder · Ende-zu-Ende-verschlüsselt`)
@@ -132,7 +144,7 @@ function ChatListRowInner({
                 ? 'schreibt…'
               : chat.gamePresence
                 ? formatGamePresenceLabel(chat.gamePresence)
-                : getLastPreview(chat.lastMessage, debugMode)}
+                : getLastPreview(chat.lastMessage, debugMode))}
           </div>
         </div>
         <div className="chat-list-meta">
@@ -157,6 +169,8 @@ function ChatListRowInner({
                 <span className="ai-chat-list-badge ai-chat-list-badge--pending" title="Antwort wird erstellt">
                   <span className="spinner spinner--sm" aria-hidden />
                 </span>
+              ) : AI_CHAT_DISCONTINUED ? (
+                <span className="chat-retired-badge" title="Bots wurden eingestellt">Eingestellt</span>
               ) : (
                 <span className="ai-chat-list-badge" title="Bot">Bot</span>
               )

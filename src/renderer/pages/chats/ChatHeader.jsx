@@ -3,8 +3,11 @@ import {
   Cloud,
   Forward,
   Phone,
+  Search,
   Trash2,
+  Video,
 } from 'lucide-react';
+import { AI_CHAT_DISCONTINUED } from '../../aiChatConstants';
 import { useCall } from '../../calls/CallProvider.jsx';
 import { PeerChatContextMenu } from './menus/PeerChatContextMenu.jsx';
 import { peerPresenceKind, peerPresenceLabel } from './peerPresence.js';
@@ -12,6 +15,7 @@ import {
   CHAT_ICON_STROKE,
   PeerAvatar,
 } from './messageHelpers.jsx';
+import { ChatBackButton } from './ChatBackButton.jsx';
 
 /**
  * Kopf des aktiven Chats: Profil oben rechts in der Chat-Ansicht, plus Auswahl-Leiste.
@@ -28,6 +32,7 @@ import {
  *   onCopyPeerId(peerId), applyNotificationMute(contactId, mode),
  *   resetE2eeSession, setContactBlocked, toast,
  *   onSelectTier, onSelectCloudModel, onOpenCloudSettings }
+ * - onBack(): Zurück zur Liste im Ein-Spalten-Layout
  */
 export function ChatHeader({
   selectedPeer,
@@ -43,6 +48,8 @@ export function ChatHeader({
   debugMode,
   selection,
   actions,
+  onBack,
+  onOpenSearch,
 }) {
   const [peerMenu, setPeerMenu] = useState(null);
   const { selectionMode, selectedCount } = selection;
@@ -69,6 +76,7 @@ export function ChatHeader({
     <div
       className={`chat-header chat-header--has-profile${selectedPeer.contact?.blocked ? ' chat-header--blocked' : ''}${selectedPeer.contact?.blockedByPeer ? ' chat-header--blocked-by-peer' : ''}`}
     >
+      <ChatBackButton onBack={onBack} />
       {showPeerActions && selectionMode ? (
         <div className="chat-header-actions">
           <div className="chat-selection-bar">
@@ -103,20 +111,49 @@ export function ChatHeader({
           </div>
         </div>
       ) : null}
-      {showCallButton ? (
+      {!selectionMode && onOpenSearch ? (
         <button
           type="button"
           className="chat-header-call-btn"
-          disabled={Boolean(callDisabledReason) || !callApi?.startCall}
-          title={callDisabledReason || 'Sprachanruf'}
-          aria-label={callDisabledReason || 'Sprachanruf starten'}
-          onClick={() => {
-            if (callDisabledReason || !selectedPeer?.id) return;
-            void callApi?.startCall?.(selectedPeer.id);
-          }}
+          title="Im Chat suchen (Strg+F)"
+          aria-label="Im Chat suchen"
+          onClick={onOpenSearch}
         >
-          <Phone size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          <Search size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         </button>
+      ) : null}
+      {showCallButton ? (
+        <div className="chat-header-call-group">
+          <button
+            type="button"
+            className="chat-header-call-btn"
+            disabled={Boolean(callDisabledReason) || !callApi?.startCall}
+            title={callDisabledReason || 'Sprachanruf'}
+            aria-label={callDisabledReason || 'Sprachanruf starten'}
+            onClick={() => {
+              if (callDisabledReason || !selectedPeer?.id) return;
+              void callApi?.startCall?.(selectedPeer.id);
+            }}
+          >
+            <Phone size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="chat-header-call-btn"
+            disabled={Boolean(callDisabledReason) || !callApi?.startCall || callApi?.call?.videoCapable === false}
+            title={
+              callDisabledReason
+                || (callApi?.call?.videoCapable === false ? 'Video auf diesem Gerät nicht verfügbar' : 'Videoanruf')
+            }
+            aria-label={callDisabledReason || 'Videoanruf starten'}
+            onClick={() => {
+              if (callDisabledReason || !selectedPeer?.id) return;
+              void callApi?.startCall?.(selectedPeer.id, { video: true });
+            }}
+          >
+            <Video size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          </button>
+        </div>
       ) : null}
       <button
         type="button"
@@ -146,6 +183,9 @@ export function ChatHeader({
         </span>
         <span className="chat-header-name-row">
           <span className="chat-header-name">{selectedPeer.displayName}</span>
+          {isAiChatSelected && AI_CHAT_DISCONTINUED ? (
+            <span className="chat-retired-badge" title="Bots wurden eingestellt">Eingestellt</span>
+          ) : null}
           {selectedPeer.peer?.transport === 'relay' ? (
             <span className="chat-cloud-badge" title="Über Cloud verbunden">
               <Cloud size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />

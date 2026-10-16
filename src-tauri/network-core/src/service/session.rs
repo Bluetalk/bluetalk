@@ -4,14 +4,19 @@
 use super::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-/// Registers the peer (applying the duplicate-connection tie-break) and spawns
+use super::{devices_of_peer, find_session, normalize_device_key};
+
+/// Registers the session (duplicate tie-break per `(peer, device)`) and spawns
 /// the reader/writer tasks that own the connection.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_session<S>(
     inner: Arc<Inner>,
     stream: S,
     session: EstablishedSession,
     remote_address: String,
     direction: ConnectionDirection,
+    device_key: String,
+    device_name: String,
 ) -> Result<PeerInfo>
 where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -23,7 +28,8 @@ where
         ));
     }
 
-    let info = PeerInfo {
+    let device_key = normalize_device_key(&device_key);
+    let mut info = PeerInfo {
         peer_id: session.remote_peer_id.clone(),
         display_name: session.remote_display_name.clone(),
         remote_address,
@@ -31,26 +37,34 @@ where
         direction,
         protocol_version: PROTOCOL_VERSION,
         authenticated_encryption: true,
+        device_key: device_key.clone(),
+        device_name: device_name.clone(),
+        devices: Vec::new(),
     };
 
     let (sender, receiver) = mpsc::channel::<Vec<u8>>(inner.config.limits.outbound_queue_frames);
     let (close_tx, close_rx) = watch::channel(false);
     let handle = PeerHandle {
         info: info.clone(),
+        device_key: device_key.clone(),
+        device_name: device_name.clone(),
         connection_id: session.connection_id.clone(),
         sender,
         queued_bytes: Arc::new(AtomicUsize::new(0)),
         close: close_tx,
     };
 
-    {
+    let session_key = (info.peer_id.clone(), device_key.clone());
+    let (first_for_peer, devices) = {
         let mut state = inner.state.lock().expect("network state lock");
         if !state.started {
             return Err(NetworkError::NotStarted);
         }
-        if let Some(existing) = state.peers.get(&info.peer_id) {
-            // Both sides resolve simultaneous dials identically: the side with
-            // the lexicographically smaller peer id keeps its outbound leg.
+        let first_for_peer = !state.peers.keys().any(|(id, _)| id == &info.peer_id);
+        if let Some(existing) = state.peers.get(&session_key) {
+            // Beide Seiten lösen gleichzeitige Dials identisch auf: die Seite
+            // mit der lexikografisch kleineren Peer-ID behält den Outbound-Ast.
+            // Gilt pro (peer, device), nicht mehr nur pro Peer.
             let preferred = if own_peer_id < info.peer_id {
                 ConnectionDirection::Outbound
             } else {
@@ -62,10 +76,19 @@ where
                 return Err(NetworkError::DuplicatePeer(info.peer_id.clone()));
             }
         }
-        state.peers.insert(info.peer_id.clone(), handle.clone());
-    }
+        state.peers.insert(session_key, handle.clone());
+        let devices = devices_of_peer(&state, &info.peer_id);
+        (first_for_peer, devices)
+    };
 
-    inner.sink.emit(NetworkEvent::PeerConnected(info.clone()));
+    info.devices = devices.clone();
+    if first_for_peer {
+        inner.sink.emit(NetworkEvent::PeerConnected(info.clone()));
+    }
+    inner.sink.emit(NetworkEvent::PeerDevices {
+        peer_id: info.peer_id.clone(),
+        devices,
+    });
 
     let queued_bytes = handle.queued_bytes.clone();
     let connection_id = session.connection_id.clone();
@@ -75,6 +98,7 @@ where
         stream,
         session,
         peer_id,
+        device_key,
         connection_id,
         receiver,
         queued_bytes,
@@ -90,6 +114,7 @@ async fn run_session<S>(
     stream: S,
     session: EstablishedSession,
     peer_id: String,
+    device_key: String,
     connection_id: String,
     mut outbound: mpsc::Receiver<Vec<u8>>,
     queued_bytes: Arc<AtomicUsize>,
@@ -190,6 +215,7 @@ async fn run_session<S>(
             }) => {
                 sink.emit(NetworkEvent::Message {
                     from_peer_id: peer_id.clone(),
+                    from_device: device_key.clone(),
                     message_id,
                     sent_at_ms,
                     payload,
@@ -202,7 +228,7 @@ async fn run_session<S>(
                     // Routed through the queue so the writer owns the cipher.
                     let handle = {
                         let state = inner.state.lock().expect("network state lock");
-                        state.peers.get(&peer_id).cloned()
+                        find_session(&state, &peer_id, &device_key).cloned()
                     };
                     if let Some(handle) = handle {
                         if handle.connection_id == connection_id {
@@ -233,20 +259,28 @@ async fn run_session<S>(
     writer.abort();
     let _ = writer.await;
 
-    let removed = {
+    let (removed, remaining) = {
         let mut state = inner.state.lock().expect("network state lock");
-        match state.peers.get(&peer_id) {
+        let key = (peer_id.clone(), device_key.clone());
+        match state.peers.get(&key) {
             Some(existing) if existing.connection_id == connection_id => {
-                state.peers.remove(&peer_id);
-                true
+                state.peers.remove(&key);
+                let remaining = devices_of_peer(&state, &peer_id);
+                (true, remaining)
             }
-            _ => false,
+            _ => (false, Vec::new()),
         }
     };
     if removed {
-        sink.emit(NetworkEvent::PeerDisconnected {
-            peer_id,
-            reason: disconnect_reason,
+        sink.emit(NetworkEvent::PeerDevices {
+            peer_id: peer_id.clone(),
+            devices: remaining.clone(),
         });
+        if remaining.is_empty() {
+            sink.emit(NetworkEvent::PeerDisconnected {
+                peer_id,
+                reason: disconnect_reason,
+            });
+        }
     }
 }

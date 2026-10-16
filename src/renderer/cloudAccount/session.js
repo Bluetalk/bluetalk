@@ -1,5 +1,5 @@
 import { getRawApi } from '../../bridge/syncLayer.js';
-import { createCloudApi, httpBaseFromRelayUrl, CloudApiError } from './api.js';
+import { createCloudApi, defaultRelayUrl, httpBaseFromRelayUrl, CloudApiError } from './api.js';
 import {
   deriveKeys,
   importSessionKeys,
@@ -13,7 +13,6 @@ import {
 import { clearSyncPersistence } from './syncLogic.js';
 
 const ACCOUNT_KEY = 'cloudAccount';
-const DEFAULT_RELAY = 'wss://bt.henny.dev/v1/ws';
 
 let account = null;
 let hydrated = false;
@@ -59,7 +58,7 @@ async function relayBaseUrl() {
   } catch {
     /* Standard */
   }
-  return httpBaseFromRelayUrl(DEFAULT_RELAY);
+  return httpBaseFromRelayUrl(defaultRelayUrl());
 }
 
 async function writeAccount(next) {
@@ -130,7 +129,7 @@ export async function updateAccountToken(token, extra = {}) {
 
 export function apiForAccount(next = account) {
   const token = next?.token || '';
-  return createCloudApi(next?.baseUrl || httpBaseFromRelayUrl(DEFAULT_RELAY), () => token);
+  return createCloudApi(next?.baseUrl || httpBaseFromRelayUrl(defaultRelayUrl()), () => token);
 }
 
 function persistenceStore() {

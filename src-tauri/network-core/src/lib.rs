@@ -20,9 +20,9 @@ pub use config::{DiscoveryConfig, NetworkConfig, NetworkLimits, NetworkTimeouts}
 pub use error::{NetworkError, Result};
 pub use event::{
     ConnectionDirection, DeliveryResult, DiscoveredPeer, NetworkEvent, NetworkEventSink,
-    NetworkInfo, NoopEventSink, PeerInfo,
+    NetworkInfo, NoopEventSink, PeerDevice, PeerInfo,
 };
 pub use identity::NetworkIdentity;
 pub use protocol::{PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
-pub use service::PeerNetwork;
+pub use service::{DIRECT_DEVICE_KEY, LEGACY_DEVICE_KEY, PeerNetwork};
 

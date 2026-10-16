@@ -16,11 +16,12 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::{
     CloudShared, ConnCmd, WsOut,
-    config::{CloudConfig, MAX_WATCH_PEERS, auth_host},
+    config::{CloudConfig, MAX_WATCH_PEERS, auth_host, is_valid_device_id},
     mailbox::MailItem,
-    status::CloudState,
+    status::{CloudDevice, CloudState},
     tunnel,
 };
+use bluetalk_network::{DIRECT_DEVICE_KEY, LEGACY_DEVICE_KEY};
 use crate::{
     error::{AppError, Result},
     peer_service::PeerService,
@@ -136,11 +137,13 @@ enum SessionEnd {
 
 struct PendingOpen {
     peer_id: String,
+    device: String,
     reply: oneshot::Sender<Result<Value>>,
 }
 
 struct LiveTunnel {
     peer_id: String,
+    device: String,
     inbound: mpsc::Sender<Vec<u8>>,
     close: watch::Sender<bool>,
 }
@@ -214,12 +217,18 @@ async fn run_session(
     }
     let signature = identity.sign_relay_auth(nonce, &host);
     let name: String = peers.display_name().chars().take(64).collect();
+    let (device_id, device_name) = {
+        let guard = shared.lock();
+        (guard.device_id.clone(), guard.device_name.clone())
+    };
     let auth = json!({
         "t": "auth",
         "publicKey": BASE64.encode(identity.public_key_bytes()),
         "signature": BASE64.encode(signature),
         "name": name,
         "client": format!("BlueTalk/{}", env!("CARGO_PKG_VERSION")),
+        "device": device_id,
+        "deviceName": device_name,
     });
     if ws_tx.send(WsOut::Json(auth)).await.is_err() {
         writer.abort();
@@ -264,6 +273,7 @@ async fn run_session(
         guard.snapshot.state = CloudState::Online;
         guard.snapshot.enabled = true;
         guard.snapshot.relay_url = config.relay_url.clone();
+        guard.snapshot.other_devices = parse_device_list(ready.get("devices"));
         guard.max_mail_body = max_mail_body;
         guard.mail.clear_in_flight();
     }
@@ -281,7 +291,8 @@ async fn run_session(
     let mut tunnels: HashMap<u32, LiveTunnel> = HashMap::new();
     let mut pending_open: HashMap<u32, PendingOpen> = HashMap::new();
     let mut pending_post: HashMap<String, oneshot::Sender<Result<Value>>> = HashMap::new();
-    let mut opening_peers: HashSet<String> = HashSet::new();
+    let mut opening_peers: HashSet<(String, String)> = HashSet::new();
+    let mut remote_devices: HashMap<String, Vec<CloudDevice>> = HashMap::new();
     let (ended_tx, mut ended_rx) = mpsc::channel::<u32>(64);
     let mut next_tunnel_id: u32 = 1;
     let mut ping_n: u32 = 1;
@@ -308,8 +319,19 @@ async fn run_session(
                     let limit = shared.lock().max_mail_body;
                     handle_post(&ws_tx, &mut pending_post, id, to, body, reply, limit).await;
                 }
-                Some(ConnCmd::Open { peer_id: target, reply }) => {
-                    if peers.has_peer(&target).await {
+                Some(ConnCmd::DropPeerTunnels { peer_id: target }) => {
+                    close_tunnels_for_peer(shared, &mut tunnels, &target);
+                    emit_status(app, shared);
+                }
+                Some(ConnCmd::Open { peer_id: target, device, reply }) => {
+                    if peers.has_direct(&target).await {
+                        if let Some(info) = peers.peer_snapshot(&target).await {
+                            let _ = reply.send(Ok(info));
+                            continue;
+                        }
+                    }
+                    let device_key = normalize_remote_device(device.as_deref());
+                    if peers.has_session(&target, &device_key).await {
                         if let Some(info) = peers.peer_snapshot(&target).await {
                             let _ = reply.send(Ok(info));
                             continue;
@@ -322,6 +344,7 @@ async fn run_session(
                         &mut opening_peers,
                         &mut next_tunnel_id,
                         target,
+                        device_key,
                         reply,
                     );
                 }
@@ -362,17 +385,25 @@ async fn run_session(
                             }
                         }
                         "presence" => {
-                            let auto_target = handle_presence(
+                            let auto_targets = handle_presence(
                                 app,
                                 peers,
                                 shared,
+                                &mut remote_devices,
                                 &peer_id,
+                                &device_id,
+                                &mut tunnels,
                                 &value,
-                            );
-                            if let Some(target) = auto_target {
-                                if tunnels.values().any(|tunnel| tunnel.peer_id == target)
-                                    || opening_peers.contains(&target)
-                                    || peers.has_peer(&target).await
+                            )
+                            .await;
+                            for (target, remote_device) in auto_targets {
+                                if peers.has_direct(&target).await
+                                    || peers.has_session(&target, &remote_device).await
+                                    || tunnels.values().any(|tunnel| {
+                                        tunnel.peer_id == target && tunnel.device == remote_device
+                                    })
+                                    || opening_peers
+                                        .contains(&(target.clone(), remote_device.clone()))
                                 {
                                     continue;
                                 }
@@ -384,9 +415,19 @@ async fn run_session(
                                     &mut opening_peers,
                                     &mut next_tunnel_id,
                                     target,
+                                    remote_device,
                                     reply_tx,
                                 );
                             }
+                        }
+                        "devices" => {
+                            shared.lock().snapshot.other_devices =
+                                parse_device_list(value.get("devices"));
+                            emit_status(app, shared);
+                        }
+                        "sync" => {
+                            let latest = value.get("latestSeq").cloned().unwrap_or(Value::Null);
+                            let _ = app.emit("cloud:sync", json!({ "latestSeq": latest }));
                         }
                         "incoming" => {
                             let from = value
@@ -394,8 +435,16 @@ async fn run_session(
                                 .and_then(Value::as_str)
                                 .unwrap_or_default()
                                 .to_owned();
-                            let already = !from.is_empty() && peers.has_peer(&from).await;
-                            if already {
+                            let from_device = normalize_remote_device(
+                                value.get("fromDevice").and_then(Value::as_str),
+                            );
+                            let reject = from.is_empty()
+                                || peers.has_direct(&from).await
+                                || peers.has_session(&from, &from_device).await
+                                || tunnels.values().any(|tunnel| {
+                                    tunnel.peer_id == from && tunnel.device == from_device
+                                });
+                            if reject {
                                 if let Some(id) = value.get("tunnel").and_then(Value::as_u64) {
                                     let _ = ws_tx.try_send(WsOut::Json(
                                         json!({ "t": "reject", "tunnel": id as u32 }),
@@ -461,7 +510,7 @@ async fn run_session(
         let _ = tunnel.close.send(true);
     }
     for (_, pending) in pending_open.drain() {
-        opening_peers.remove(&pending.peer_id);
+        opening_peers.remove(&(pending.peer_id.clone(), pending.device.clone()));
         let _ = pending.reply.send(Err(AppError::Network(
             "Cloud-Tunnel wurde unterbrochen.".to_owned(),
         )));
@@ -475,6 +524,7 @@ async fn run_session(
         let mut guard = shared.lock();
         guard.snapshot.tunnels = 0;
         guard.snapshot.online_peers.clear();
+        guard.snapshot.other_devices.clear();
         guard.snapshot.connected_at = None;
         guard.snapshot.latency_ms = None;
     }
@@ -557,9 +607,10 @@ fn start_open(
     ws_tx: &mpsc::Sender<WsOut>,
     tunnels: &HashMap<u32, LiveTunnel>,
     pending_open: &mut HashMap<u32, PendingOpen>,
-    opening_peers: &mut HashSet<String>,
+    opening_peers: &mut HashSet<(String, String)>,
     next_tunnel_id: &mut u32,
     target: String,
+    device: String,
     reply: oneshot::Sender<Result<Value>>,
 ) {
     if pending_open.len() >= MAX_PENDING_OPENS || tunnels.len() >= MAX_TUNNELS {
@@ -568,28 +619,34 @@ fn start_open(
         )));
         return;
     }
-    if tunnels.values().any(|tunnel| tunnel.peer_id == target) || opening_peers.contains(&target)
+    let key = (target.clone(), device.clone());
+    if tunnels
+        .values()
+        .any(|tunnel| tunnel.peer_id == target && tunnel.device == device)
+        || opening_peers.contains(&key)
     {
         let _ = reply.send(Err(AppError::Conflict(
-            "Cloud-Tunnel zu diesem Peer läuft bereits.".to_owned(),
+            "Cloud-Tunnel zu diesem Gerät läuft bereits.".to_owned(),
         )));
         return;
     }
     let id = alloc_tunnel_id(next_tunnel_id, tunnels, pending_open);
-    opening_peers.insert(target.clone());
+    opening_peers.insert(key);
     pending_open.insert(
         id,
         PendingOpen {
             peer_id: target.clone(),
+            device: device.clone(),
             reply,
         },
     );
-    if ws_tx
-        .try_send(WsOut::Json(json!({ "t": "open", "tunnel": id, "to": target })))
-        .is_err()
-    {
+    let mut open = json!({ "t": "open", "tunnel": id, "to": target });
+    if device != LEGACY_DEVICE_KEY {
+        open["device"] = json!(device);
+    }
+    if ws_tx.try_send(WsOut::Json(open)).is_err() {
         if let Some(pending) = pending_open.remove(&id) {
-            opening_peers.remove(&pending.peer_id);
+            opening_peers.remove(&(pending.peer_id.clone(), pending.device.clone()));
             let _ = pending.reply.send(Err(AppError::Network(
                 "Cloud-Tunnel konnte nicht geöffnet werden.".to_owned(),
             )));
@@ -619,7 +676,7 @@ fn handle_opened(
     ws_tx: &mpsc::Sender<WsOut>,
     tunnels: &mut HashMap<u32, LiveTunnel>,
     pending_open: &mut HashMap<u32, PendingOpen>,
-    opening_peers: &mut HashSet<String>,
+    opening_peers: &mut HashSet<(String, String)>,
     ended_tx: mpsc::Sender<u32>,
     host: &str,
     value: &Value,
@@ -631,7 +688,7 @@ fn handle_opened(
     let Some(pending) = pending_open.remove(&tunnel_id) else {
         return;
     };
-    opening_peers.remove(&pending.peer_id);
+    opening_peers.remove(&(pending.peer_id.clone(), pending.device.clone()));
     attach_tunnel(
         app,
         peers,
@@ -641,6 +698,8 @@ fn handle_opened(
         ended_tx,
         tunnel_id,
         pending.peer_id,
+        pending.device,
+        String::new(),
         host,
         true,
         Some(pending.reply),
@@ -649,14 +708,14 @@ fn handle_opened(
 
 fn handle_open_failed(
     pending_open: &mut HashMap<u32, PendingOpen>,
-    opening_peers: &mut HashSet<String>,
+    opening_peers: &mut HashSet<(String, String)>,
     value: &Value,
 ) {
     let Some(id) = value.get("tunnel").and_then(Value::as_u64) else {
         return;
     };
     if let Some(pending) = pending_open.remove(&(id as u32)) {
-        opening_peers.remove(&pending.peer_id);
+        opening_peers.remove(&(pending.peer_id.clone(), pending.device.clone()));
         let code = value.get("code").and_then(Value::as_str).unwrap_or("failed");
         let _ = pending.reply.send(Err(AppError::Network(format!(
             "Cloud-Tunnel fehlgeschlagen ({code})"
@@ -683,6 +742,7 @@ fn handle_incoming(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
+    let from_device = normalize_remote_device(value.get("fromDevice").and_then(Value::as_str));
     if from.is_empty() || peers.is_blocked(&from) {
         let _ = ws_tx.try_send(WsOut::Json(json!({ "t": "reject", "tunnel": tunnel_id })));
         return;
@@ -701,6 +761,8 @@ fn handle_incoming(
         ended_tx,
         tunnel_id,
         from,
+        from_device,
+        String::new(),
         host,
         false,
         None,
@@ -716,6 +778,8 @@ fn attach_tunnel(
     ended_tx: mpsc::Sender<u32>,
     tunnel_id: u32,
     peer_id: String,
+    device: String,
+    device_name: String,
     host: &str,
     initiator: bool,
     reply: Option<oneshot::Sender<Result<Value>>>,
@@ -727,6 +791,7 @@ fn attach_tunnel(
         tunnel_id,
         LiveTunnel {
             peer_id: peer_id.clone(),
+            device: device.clone(),
             inbound: bridge.inbound,
             close: bridge.close,
         },
@@ -739,10 +804,18 @@ fn attach_tunnel(
     tauri::async_runtime::spawn(async move {
         let outcome = if initiator {
             peers
-                .connect_relay_stream(peer_half, remote, Some(peer_id.as_str()))
+                .connect_relay_stream(
+                    peer_half,
+                    remote,
+                    Some(peer_id.as_str()),
+                    &device,
+                    &device_name,
+                )
                 .await
         } else {
-            peers.accept_relay_stream(peer_half, remote).await
+            peers
+                .accept_relay_stream(peer_half, remote, &device, &device_name)
+                .await
         };
         if outcome.is_err() {
             let _ = close_on_fail.send(true);
@@ -802,17 +875,21 @@ fn forget_local_tunnel(
     shared.lock().snapshot.tunnels = tunnels.len();
 }
 
-fn handle_presence(
+async fn handle_presence(
     app: &AppHandle,
     peers: &Arc<PeerService>,
     shared: &Arc<Mutex<CloudShared>>,
+    remote_devices: &mut HashMap<String, Vec<CloudDevice>>,
     our_id: &str,
+    our_device: &str,
+    tunnels: &mut HashMap<u32, LiveTunnel>,
     value: &Value,
-) -> Option<String> {
+) -> Vec<(String, String)> {
     let Some(peer_id) = value.get("peerId").and_then(Value::as_str) else {
-        return None;
+        return Vec::new();
     };
     let online = value.get("online").and_then(Value::as_bool).unwrap_or(false);
+    let listed = parse_device_list(value.get("devices"));
     {
         let mut guard = shared.lock();
         if online {
@@ -824,12 +901,117 @@ fn handle_presence(
         }
     }
     emit_status(app, shared);
-    let _ = app.emit("cloud:presence", json!({ "peerId": peer_id, "online": online }));
+    let _ = app.emit(
+        "cloud:presence",
+        json!({
+            "peerId": peer_id,
+            "online": online,
+            "devices": listed.iter().map(|device| json!({
+                "id": device.id,
+                "name": device.name,
+            })).collect::<Vec<_>>(),
+        }),
+    );
 
-    if !online || peers.is_blocked(peer_id) || our_id >= peer_id {
-        return None;
+    if !online {
+        remote_devices.remove(peer_id);
+        close_tunnels_for_peer(shared, tunnels, peer_id);
+        emit_status(app, shared);
+        return Vec::new();
     }
-    Some(peer_id.to_owned())
+    if peers.is_blocked(peer_id) || peers.has_direct(peer_id).await {
+        close_tunnels_for_peer(shared, tunnels, peer_id);
+        emit_status(app, shared);
+        return Vec::new();
+    }
+
+    let devices = if listed.is_empty() {
+        vec![CloudDevice {
+            id: LEGACY_DEVICE_KEY.to_owned(),
+            name: String::new(),
+        }]
+    } else {
+        listed
+    };
+    let known_ids: HashSet<&str> = devices.iter().map(|device| device.id.as_str()).collect();
+    let stale: Vec<u32> = tunnels
+        .iter()
+        .filter(|(_, tunnel)| tunnel.peer_id == peer_id && !known_ids.contains(tunnel.device.as_str()))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in &stale {
+        close_local_tunnel(shared, tunnels, *id);
+    }
+    if !stale.is_empty() {
+        emit_status(app, shared);
+    }
+    remote_devices.insert(peer_id.to_owned(), devices.clone());
+
+    devices
+        .into_iter()
+        .filter(|device| we_should_open(our_id, our_device, peer_id, &device.id))
+        .map(|device| (peer_id.to_owned(), device.id))
+        .collect()
+}
+
+fn we_should_open(our_peer: &str, our_device: &str, their_peer: &str, their_device: &str) -> bool {
+    if their_device == LEGACY_DEVICE_KEY {
+        return our_peer < their_peer;
+    }
+    let ours = format!("{our_peer}/{our_device}");
+    let theirs = format!("{their_peer}/{their_device}");
+    ours < theirs
+}
+
+fn normalize_remote_device(raw: Option<&str>) -> String {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) if is_valid_device_id(value) || value == LEGACY_DEVICE_KEY => value.to_owned(),
+        Some(value) if value == DIRECT_DEVICE_KEY => DIRECT_DEVICE_KEY.to_owned(),
+        Some(value) => value.chars().take(64).collect(),
+        None => LEGACY_DEVICE_KEY.to_owned(),
+    }
+}
+
+fn parse_device_list(value: Option<&Value>) -> Vec<CloudDevice> {
+    let Some(Value::Array(items)) = value else {
+        return Vec::new();
+    };
+    let mut devices = Vec::new();
+    for item in items {
+        let Some(id) = item.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if !is_valid_device_id(id) && id != LEGACY_DEVICE_KEY {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .chars()
+            .take(64)
+            .collect();
+        devices.push(CloudDevice {
+            id: id.to_owned(),
+            name,
+        });
+    }
+    devices
+}
+
+fn close_tunnels_for_peer(
+    shared: &Arc<Mutex<CloudShared>>,
+    tunnels: &mut HashMap<u32, LiveTunnel>,
+    peer_id: &str,
+) {
+    let ids: Vec<u32> = tunnels
+        .iter()
+        .filter(|(_, tunnel)| tunnel.peer_id == peer_id)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in ids {
+        close_local_tunnel(shared, tunnels, id);
+    }
 }
 
 fn handle_mail(app: &AppHandle, shared: &Arc<Mutex<CloudShared>>, value: &Value) {
@@ -903,6 +1085,7 @@ fn set_state(
             guard.snapshot.connected_at = None;
             guard.snapshot.tunnels = 0;
             guard.snapshot.online_peers.clear();
+            guard.snapshot.other_devices.clear();
         }
         if let Some(error) = error {
             guard.snapshot.last_error = Some(error);

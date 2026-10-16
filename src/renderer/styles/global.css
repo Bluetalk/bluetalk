@@ -13,6 +13,8 @@
 @import url(./perf.css);
 @import url(./motion.css);
 @import url(./voice.css);
+@import url(./video.css);
+@import url(./mobile.css);
 
 /* ============================================================
    BlueTalk styles are split into the files imported above.

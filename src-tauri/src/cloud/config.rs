@@ -13,6 +13,52 @@ pub const MAX_MAIL_BODY_BYTES: usize = 1024 * 1024;
 pub const MAX_TUNNEL_PAYLOAD: usize = 64 * 1024;
 pub const DUPLEX_BUFFER: usize = 256 * 1024;
 pub const MAX_WATCH_PEERS: usize = 2_000;
+pub const DEVICE_ID_KEY: &str = "cloudDeviceId";
+
+pub fn is_valid_device_id(id: &str) -> bool {
+    let len = id.len();
+    (8..=64).contains(&len)
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+pub fn generate_device_id() -> String {
+    let mut bytes = [0_u8; 16];
+    rand::fill(&mut bytes);
+    hex::encode(bytes)
+}
+
+pub fn local_device_name() -> String {
+    match std::env::consts::OS {
+        "windows" => "Windows".to_owned(),
+        "macos" => "macOS".to_owned(),
+        "linux" => "Linux".to_owned(),
+        other => {
+            let mut name = other.to_owned();
+            if let Some(first) = name.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            name.chars().take(64).collect()
+        }
+    }
+}
+
+/// Dieselbe Store-ID wie der Sync-`origin` (`cloudDeviceId`).
+pub fn load_or_create_device_id(database: &Database) -> String {
+    let stored = database
+        .get(DEVICE_ID_KEY, Value::Null)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned));
+    if let Some(id) = stored.filter(|id| is_valid_device_id(id)) {
+        return id;
+    }
+    let id = generate_device_id();
+    if let Err(error) = database.set(DEVICE_ID_KEY, json!(id.clone())) {
+        log::warn!("cloudDeviceId konnte nicht gespeichert werden: {error}");
+    }
+    id
+}
 
 #[derive(Debug, Clone)]
 pub struct CloudConfig {

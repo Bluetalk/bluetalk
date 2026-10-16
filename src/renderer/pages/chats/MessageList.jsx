@@ -30,6 +30,9 @@ import { isVoiceMessage } from '../../voice/voiceMeta.js';
 import { CallLogLine, isCallLogMessage } from '../../calls/CallLogLine.jsx';
 import { ChatMessage } from './agentBlocks.jsx';
 import { MessageReactions } from './MessageReactions.jsx';
+import { MessageTouch } from './MessageTouch.jsx';
+import { AI_CHAT_DISCONTINUED } from '../../aiChatConstants';
+import { firstUnreadIndex, messageSearchHaystack } from '../../../shared/chat-features.js';
 
 const { getGroupMember } = groupChat;
 
@@ -65,7 +68,7 @@ const INVITE_MESSAGE_KINDS = new Set([
  */
 export function MessageList({ chat, data, ui, scroll, actions }) {
   const { selectedPeer, selectedContact, isAiChatSelected, isGroupSelected, ownPeerId } = chat;
-  const { msgs, readUpToId, hasMoreMessages, loadingMessages, loadingMore } = data;
+  const { msgs, readUpToId, hasMoreMessages, loadingMessages, loadingMore, unreadCutoffTs = 0 } = data;
   const {
     debugMode,
     settings,
@@ -77,12 +80,23 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
     peerTypingActive = false,
     liveAiProgress = null,
     workLogEnabled = false,
+    searchQuery = '',
+    activeSearchId = '',
+    highlightMessageId = '',
   } = ui;
 
   const visibleMsgs = msgs.filter((m) => !INVITE_MESSAGE_KINDS.has(m.kind));
+  const unreadIdx = firstUnreadIndex(visibleMsgs, unreadCutoffTs);
+  const mentionMembers = isGroupSelected ? (selectedPeer?.group?.members || []) : [];
+  const q = String(searchQuery || '').trim().toLowerCase();
 
   return (
     <div className={`chat-messages${isAiChatSelected ? ' chat-messages--ai' : ''}`} ref={scroll.chatMessagesRef} onScroll={scroll.onScroll}>
+      {isAiChatSelected && AI_CHAT_DISCONTINUED ? (
+        <div className="chat-warning chat-notice-discontinued" role="status">
+          Bots wurden eingestellt — dieser Chat ist schreibgeschützt.
+        </div>
+      ) : null}
       {isAiChatSelected && visibleMsgs.length === 0 && !aiChatPending && !peerTypingActive ? (
         <div className="empty-state ai-chat-ready-placeholder">
           <PeerAvatar
@@ -92,7 +106,11 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
             className="peer-avatar-img--bot"
             botStatus={aiChatPending ? 'thinking' : 'idle'}
           />
-          <p>Schreib dem Bot — Antworten erscheinen wie bei einem Kontakt.</p>
+          <p>
+            {AI_CHAT_DISCONTINUED
+              ? 'Dieser Bot-Chat bleibt lesbar, neue Nachrichten sind nicht mehr möglich.'
+              : 'Schreib dem Bot — Antworten erscheinen wie bei einem Kontakt.'}
+          </p>
         </div>
       ) : null}
       {isGroupSelected && !selectedPeer.canSend ? (
@@ -242,6 +260,9 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                   <span>{formatDaySeparator(m.timestamp)}</span>
                 </div>
               ) : null}
+              {i === unreadIdx ? (
+                <div className="chat-unread-sep" role="separator">Neue Nachrichten</div>
+              ) : null}
               <CallLogLine message={m} />
             </React.Fragment>
           );
@@ -254,7 +275,11 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 <span>{formatDaySeparator(m.timestamp)}</span>
               </div>
             ) : null}
-            <div
+            {i === unreadIdx ? (
+              <div className="chat-unread-sep" role="separator">Neue Nachrichten</div>
+            ) : null}
+            <MessageTouch
+              data-message-id={m.messageId || undefined}
               className={[
                 'msg-row',
                 isSelf ? 'msg-row-self' : 'msg-row-other',
@@ -266,6 +291,9 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 isSelected && 'msg-row--selected',
                 clusteredWithPrev && 'msg-row--cluster-follow',
                 clusteredWithNext && 'msg-row--cluster-lead',
+                m.messageId && highlightMessageId === m.messageId && 'msg-row--flash',
+                m.messageId && activeSearchId === m.messageId && 'msg-row--search-active',
+                m.messageId && q && messageSearchHaystack(m).includes(q) && 'msg-row--search-hit',
                 isSelf
                   && (m.kind === 'file' || m.kind === 'sticker' || bareMedia)
                   && typeof m.timestamp === 'number'
@@ -274,6 +302,10 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               ]
                 .filter(Boolean)
                 .join(' ')}
+              disabled={Boolean(selectionMode)}
+              onLongPress={selectionMode ? undefined : (e) => actions.onOpenMessageContextMenu(e, m)}
+              onSwipeReply={selectionMode || !actions.onReply ? undefined : () => actions.onReply(m)}
+              onContextMenu={selectionMode ? undefined : (e) => actions.onOpenMessageContextMenu(e, m)}
               onClick={
                 selectionMode && m.messageId
                   ? () => actions.onToggleSelectMessage(m.messageId)
@@ -301,10 +333,13 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               className={['msg', isSelf ? 'msg-self' : isLegacyAgentMessage ? 'msg--ai-agent' : 'msg-other', bareMedia && 'msg--bare-media', stickerMessage && 'msg--sticker', embedMessage && 'msg--embed', 'animate-in']
                 .filter(Boolean)
                 .join(' ')}
-              onContextMenu={selectionMode ? undefined : (e) => actions.onOpenMessageContextMenu(e, m)}
             >
               {m.replyTo && m.kind !== 'chat' ? (
-                <MessageReplyQuote replyTo={m.replyTo} isSelf={isSelf} />
+                <MessageReplyQuote
+                  replyTo={m.replyTo}
+                  isSelf={isSelf}
+                  onJump={actions.onJumpToMessage}
+                />
               ) : null}
               {m.kind === 'file' && isVoiceMessage(m) ? (
                 <VoicePlayer message={m} />
@@ -328,8 +363,10 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               ) : (
                 <ChatMessage
                   message={m}
+                  mentionMembers={mentionMembers}
                   onExpandImage={actions.onExpandImage}
                   onOpenSubagent={isLegacyAgentMessage ? actions.openSubagentForSelectedChat : undefined}
+                  onJumpToMessage={actions.onJumpToMessage}
                 />
               )}
               {showMeta ? (
@@ -337,6 +374,7 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
                 {showTime ? (
                   <span className="msg-time">
                     {formatMessageTime(m.timestamp)}
+                    {m.edited || m.editedAt ? <span className="msg-edited"> · bearbeitet</span> : null}
                     {m.via === 'cloud' ? (
                       <span className="msg-via-cloud" title="Über Cloud-Postfach">
                         {' '}
@@ -371,7 +409,7 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               onReact={actions.onReact}
             />
             </div>
-          </div>
+          </MessageTouch>
           </React.Fragment>
         );
       })}

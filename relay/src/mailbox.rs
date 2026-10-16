@@ -25,7 +25,9 @@ pub struct MailRow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PostOutcome {
-    /// Neue Nachricht liegt im Postfach. `pushed` setzt der Aufrufer nach Live-Zustellung.
+    /// Neue Nachricht liegt im Postfach. `pushed` setzt der Aufrufer nach der
+    /// ersten Live-Zustellung (an irgendein Gerät); `list` liefert sie trotzdem
+    /// an jedes sich anmeldende Gerät, bis das erste `ack` löscht.
     Stored,
     Duplicate {
         status: &'static str,

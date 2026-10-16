@@ -225,12 +225,44 @@
 
 @media (max-width: 480px) {
   .web-gate {
-    padding: 16px 12px;
-    align-items: flex-start;
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) 12px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    align-items: stretch;
+    justify-content: flex-start;
   }
   .web-gate-card {
+    width: 100%;
     padding: 24px 18px 20px;
     border-radius: var(--radius-lg);
+    box-shadow: none;
+  }
+  .web-gate-form .input,
+  .web-gate-form input.input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .web-gate-tab {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .web-gate-submit {
+    min-height: 48px;
+  }
+  .web-gate-stay {
+    min-height: 44px;
+  }
+  .web-replaced {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .web-replaced-card {
+    width: 100%;
+    max-width: none;
+    border-radius: 16px 16px 0 0;
+    padding: 28px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .web-replaced-actions .btn {
+    min-height: 48px;
+    width: 100%;
   }
 }
 
@@ -244,50 +276,16 @@
   }
 }
 
-/* App-Layout im Browser ab 768 px: Sidebar + Chatliste bleiben bedienbar. */
-@media (max-width: 768px) {
-  html.bluetalk-web .app {
-    height: 100dvh;
+/* Login-Gate: volle Höhe, Safe-Area, 16 px Inputs. App-Layout < 768 px liegt in mobile.css. */
+@media (max-width: 767px) {
+  .web-gate,
+  .web-gate-loading {
+    min-height: 100dvh;
+    min-height: var(--vv-height, 100dvh);
   }
-  html.bluetalk-web .titlebar {
-    height: 36px;
-  }
-  html.bluetalk-web .content-frame {
-    margin: 0 4px 4px 0;
-  }
-  html.bluetalk-web .app-body:not(:has(.sidebar)) .content-frame {
-    margin-left: 4px;
-  }
-  html.bluetalk-web .content {
-    border-radius: var(--radius-md);
-  }
-  html.bluetalk-web .split-layout {
-    padding: 4px;
-    gap: 4px;
-  }
-  html.bluetalk-web .split-list {
-    width: min(220px, 38vw);
-  }
-  html.bluetalk-web .chat-profile-panel,
-  html.bluetalk-web .chat-profile-panel.peer-profile-modal {
-    position: absolute;
-    right: 8px;
-    top: 8px;
-    bottom: 8px;
-    width: min(320px, calc(100% - 16px));
-    min-width: 0;
-    z-index: 30;
-    box-shadow: var(--shadow-xl);
-  }
-  html.bluetalk-web .page-header,
-  html.bluetalk-web .page-body {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-  html.bluetalk-web .page-shell-header,
-  html.bluetalk-web .page-shell-search,
-  html.bluetalk-web .page-shell-body {
-    padding-left: 14px;
-    padding-right: 14px;
+  .web-gate-form .input,
+  .web-gate-form input.input {
+    font-size: 16px !important;
+    min-height: 44px;
   }
 }

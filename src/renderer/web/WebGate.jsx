@@ -87,6 +87,7 @@ export default function WebGate({ children }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [replaced, setReplaced] = useState(false);
+  const [tabTaken, setTabTaken] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add('bluetalk-web');
@@ -152,12 +153,13 @@ export default function WebGate({ children }) {
 
   useEffect(() => {
     if (!window.bluetalk?.cloud?.onStatus) return undefined;
-    const off = window.bluetalk.cloud.onStatus((status) => {
-      setReplaced(status?.state === 'replaced');
-    });
-    window.bluetalk.cloud.getStatus?.().then((status) => {
-      setReplaced(status?.state === 'replaced');
-    }).catch(() => {});
+    const applyStatus = (status) => {
+      const yielded = Boolean(status?.yielded);
+      setTabTaken(yielded);
+      setReplaced(!yielded && status?.state === 'replaced');
+    };
+    const off = window.bluetalk.cloud.onStatus(applyStatus);
+    window.bluetalk.cloud.getStatus?.().then(applyStatus).catch(() => {});
     return () => off?.();
   }, [ready]);
 
@@ -212,6 +214,8 @@ export default function WebGate({ children }) {
 
   const takeover = async () => {
     setBusy(true);
+    setTabTaken(false);
+    setReplaced(false);
     try {
       if (window.bluetalk.cloud.takeover) {
         await window.bluetalk.cloud.takeover();
@@ -274,7 +278,10 @@ export default function WebGate({ children }) {
                 id="web-username"
                 className="input"
                 autoComplete="username"
-                autoCapitalize="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="text"
+                enterKeyHint="next"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
                 spellCheck={false}
@@ -287,6 +294,7 @@ export default function WebGate({ children }) {
                 className="input"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                enterKeyHint={mode === 'login' ? 'go' : 'next'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
@@ -337,19 +345,24 @@ export default function WebGate({ children }) {
   return (
     <>
       {children}
-      {replaced ? (
+      {tabTaken || replaced ? (
         <div className="web-replaced">
           <div className="web-replaced-card">
             <img src={logoUrl} alt="" className="web-gate-logo" width={48} height={48} />
             <ShieldAlert size={28} aria-hidden />
-            <h2>BlueTalk ist auf einem anderen Gerät aktiv</h2>
+            <h2>
+              {tabTaken
+                ? 'BlueTalk ist in einem anderen Tab geöffnet'
+                : 'Dieses Fenster wurde ersetzt'}
+            </h2>
             <p>
-              Nur ein Gerät gleichzeitig. Diese Sitzung wurde ersetzt, weil du dich woanders angemeldet hast.
-              „Hier verwenden“ trennt das andere Gerät und setzt die Chats hier fort.
+              {tabTaken
+                ? 'BlueTalk ist in einem anderen Tab geöffnet — hier fortsetzen.'
+                : 'Dieses Browserfenster wurde durch ein neueres mit derselben Geräte-ID ersetzt. „Hier verwenden“ trennt die andere Sitzung und setzt die Chats hier fort.'}
             </p>
             <div className="web-replaced-actions">
               <button type="button" className="btn btn-primary" onClick={() => void takeover()} disabled={busy}>
-                Hier verwenden
+                {tabTaken ? 'Hier fortsetzen' : 'Hier verwenden'}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => void signOutAndWipe()}>
                 Abmelden

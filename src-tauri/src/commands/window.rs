@@ -71,8 +71,8 @@ pub fn install_main_window_event_forwarder(window: &WebviewWindow) -> Result<()>
     Ok(())
 }
 
-/// WebView2 blockiert getUserMedia ohne PermissionRequested-Handler.
-/// Nur Mikrofon, nur das Hauptfenster (keine Spiel-Webviews).
+/// WebView2 blockiert getUserMedia/getDisplayMedia ohne Handler.
+/// Mikrofon, Kamera und Bildschirmaufnahme — nur das Hauptfenster.
 pub fn install_microphone_permission_handler(window: &WebviewWindow) -> Result<()> {
     require_main(window)?;
     #[cfg(windows)]
@@ -82,11 +82,15 @@ pub fn install_microphone_permission_handler(window: &WebviewWindow) -> Result<(
                 unsafe {
                     use webview2_com::{
                         Microsoft::Web::WebView2::Win32::{
+                            COREWEBVIEW2_PERMISSION_KIND_CAMERA,
                             COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
                             COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                            ICoreWebView2_27,
                         },
                         PermissionRequestedEventHandler,
+                        ScreenCaptureStartingEventHandler,
                     };
+                    use windows_core::Interface;
                     let Ok(core) = webview.controller().CoreWebView2() else {
                         return;
                     };
@@ -98,13 +102,29 @@ pub fn install_microphone_permission_handler(window: &WebviewWindow) -> Result<(
                             };
                             let mut kind = Default::default();
                             args.PermissionKind(&mut kind)?;
-                            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+                            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                                || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                            {
                                 args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
                             }
                             Ok(())
                         })),
                         &mut token,
                     );
+                    if let Ok(core27) = core.cast::<ICoreWebView2_27>() {
+                        let mut screen_token = 0i64;
+                        let _ = core27.add_ScreenCaptureStarting(
+                            &ScreenCaptureStartingEventHandler::create(Box::new(|_, args| {
+                                let Some(args) = args else {
+                                    return Ok(());
+                                };
+                                args.SetCancel(false)?;
+                                args.SetHandled(true)?;
+                                Ok(())
+                            })),
+                            &mut screen_token,
+                        );
+                    }
                 }
             })
             .map_err(|error| {

@@ -13,11 +13,14 @@ Schlüssel, Identität und Chatverlauf sieht er nie im Klartext.
 - **Sync-Log**: verschlüsselte Einträge (Nachrichten, Kontakte, Einstellungen,
   E2EE-Sitzungen) mit Server-Sequenznummer. Geräte pushen Änderungen und
   pullen alles nach ihrer letzten bekannten Sequenz.
-- **Ein aktives Gerät**: Die Relay-Verbindung (WebSocket) der neuesten
-  Anmeldung gewinnt; die alte erhält `{"t":"error","code":"replaced"}`
-  (siehe PROTOCOL.md). Ein ersetzter Client verbindet sich **nicht**
-  automatisch neu, sondern zeigt „BlueTalk ist auf einem anderen Gerät
-  aktiv — Hier verwenden“. Sync-REST-Aufrufe funktionieren unabhängig davon.
+- **Mehrere Geräte**: Bis zu 8 Relay-Verbindungen derselben Peer-ID können
+  parallel online sein (verschiedene `device`-IDs, siehe PROTOCOL.md und
+  `docs/MULTIDEVICE.md`). Gleiche `(peerId, device)` oder das 9. Gerät
+  führen zu `{"t":"error","code":"replaced"}`. Clients ≤ 2.3.x ohne `device`
+  verhalten sich wie bisher (ein Gerät `legacy`, Doppel-Login ersetzt).
+  Nach erfolgreichem `POST /v1/sync/push` schickt der Relay
+  `{"t":"sync","latestSeq":n}` an alle Verbindungen dieser Peer-ID
+  (max. 1×/s). Sync-REST-Aufrufe funktionieren unabhängig vom WebSocket.
 
 ## Kryptografie (Client)
 

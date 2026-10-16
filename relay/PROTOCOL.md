@@ -35,8 +35,10 @@ Zeitpunkte, Größen, IP-Adressen.
 ```
 S→C {"t":"hello","v":1,"nonce":"<base64 32 Byte>","server":"bluetalk-relay/<version>"}
 C→S {"t":"auth","publicKey":"<base64 32 Byte>","signature":"<base64 64 Byte>",
-     "name":"<Anzeigename, optional, ≤64 Zeichen>","client":"BlueTalk/2.2.0"}
-S→C {"t":"ready","peerId":"bt2_…","time":<unix ms>,
+     "name":"<Anzeigename, optional, ≤64 Zeichen>","client":"BlueTalk/2.2.0",
+     "device":"<deviceId, optional>","deviceName":"<optional, ≤64 Zeichen>"}
+S→C {"t":"ready","peerId":"bt2_…","time":<unix ms>,"device":"<deviceId>",
+     "devices":[{"id":"…","name":"…"}, …],
      "limits":{"maxFrame":65536,"maxMailBody":1048576,"maxTunnels":64}}
 ```
 
@@ -54,20 +56,33 @@ sonst gegen den `Host`-Header.
 - Kein gültiges `auth` innerhalb von 10 s → `{"t":"error","code":"auth_timeout"}` + Close.
 - Ungültig → `{"t":"error","code":"auth_failed"}` + Close.
 - Vor `ready` sind nur `auth` und Pings erlaubt.
-- Meldet sich dieselbe Peer-ID erneut an, ersetzt die neue Verbindung die alte;
-  die alte erhält `{"t":"error","code":"replaced"}` und wird geschlossen.
+- `device` optional. Fehlt es (Clients ≤ 2.3.x), gilt `device = "legacy"`.
+  Sonst: `^[A-Za-z0-9_-]{8,64}$`, oder genau `legacy`. Ungültig → `auth_failed`.
+- Verbindungen laufen pro `(peerId, device)`. Gleiche Kombination → die alte
+  erhält `{"t":"error","code":"replaced"}` und wird geschlossen (wie bisher
+  bei Doppel-Login ohne `device`).
+- Max. **8** Geräte je Peer-ID gleichzeitig; das 9. verdrängt die am längsten
+  verbundene Verbindung mit `replaced`.
+- `ready.devices` sind die **anderen** gerade verbundenen eigenen Geräte.
+  Bei Änderung erhält jede eigene Verbindung
+  `{"t":"devices","devices":[{"id","name"}, …]}` (jeweils ohne sich selbst).
 
 ## 2. Präsenz (nur gegenseitig)
 
 ```
 C→S {"t":"watch","peers":["bt2_…", …]}        // ersetzt die Watch-Liste, max. 2000
-S→C {"t":"presence","peerId":"bt2_…","online":true|false}
+S→C {"t":"presence","peerId":"bt2_…","online":true|false,
+     "devices":[{"id":"…","name":"…"}, …]}
 ```
 
-Der Server meldet Peer P an Client C **nur**, wenn P in C's Watch-Liste steht
-**und** C in P's Watch-Liste steht (gegenseitige Kontakte). Nach jedem `watch`
-sendet der Server den aktuellen Stand aller gegenseitigen Peers, danach
-Änderungen (Verbinden/Trennen/Watch-Änderung der Gegenseite).
+Watch-Listen sind **pro Verbindung** (Geräte können leicht unterschiedliche
+Kontaktlisten haben). Der Server meldet Peer P an Verbindung C **nur**, wenn
+P in **dieser** Watch-Liste von C steht **und** mindestens ein Gerät von P
+die Peer-ID von C beobachtet (gegenseitig). `online` = mindestens ein Gerät
+von P verbunden. Nach jedem `watch` sendet der Server den aktuellen Stand
+aller gegenseitigen Peers (inkl. `devices`), danach Änderungen
+(Verbinden/Trennen/Gerätewechsel/Watch-Änderung der Gegenseite). Alte Clients
+ignorieren `devices`.
 
 ## 3. Live-Tunnel
 
@@ -75,14 +90,21 @@ Tunnel-IDs sind pro Verbindung eindeutige `u32 > 0`. Der Öffnende wählt seine
 ID selbst; der Server vergibt die ID für die Gegenseite.
 
 ```
-A→S {"t":"open","tunnel":7,"to":"bt2_B"}
-S→B {"t":"incoming","tunnel":3,"from":"bt2_A","name":"<Name von A>"}
+A→S {"t":"open","tunnel":7,"to":"bt2_B","device":"<deviceId von B, optional>"}
+S→B {"t":"incoming","tunnel":3,"from":"bt2_A","fromDevice":"<deviceId von A>",
+     "name":"<Name von A>"}
 B→S {"t":"accept","tunnel":3}            | {"t":"reject","tunnel":3}
 S→A {"t":"opened","tunnel":7}            | {"t":"open_failed","tunnel":7,"code":"…"}
 ```
 
-`code` ∈ `offline` (B nicht verbunden), `rejected`, `timeout` (B antwortet
+`code` ∈ `offline` (Zielgerät nicht verbunden), `rejected`, `timeout` (B antwortet
 nicht in 15 s), `limit` (zu viele Tunnel), `self`, `invalid`.
+
+- Mit `device`: genau dieses Gerät (`offline`, wenn es nicht verbunden ist).
+- Ohne `device` (alte Clients): das zuletzt verbundene Gerät von B.
+- Tunnel zur **eigenen** Peer-ID sind verboten (`self`), auch zwischen zwei
+  Geräten derselben Identität.
+- Rate- und Tunnel-Limits gelten weiter **pro Verbindung**.
 
 Danach: Binärframes `[tunnelId][bytes]` werden 1:1 an die Gegenseite (mit deren
 Tunnel-ID) weitergereicht, Reihenfolge bleibt erhalten. Daten vor `opened` bzw.
@@ -116,8 +138,12 @@ C→S {"t":"ack","ids":["…", …]}
 - `body` ist ein beliebiger JSON-Wert (serialisiert ≤ 1 MiB), vom Client
   **bereits Ende-zu-Ende-verschlüsselt**. Der Server interpretiert ihn nicht.
 - Jede Post wird gespeichert, bis der Empfänger sie per `ack` bestätigt.
-  `delivered` heißt: an eine aktive Verbindung des Empfängers zugestellt.
-- Nach `ready` schickt der Server alle wartenden Nachrichten (älteste zuerst).
+  Live-`mail` geht an **alle** verbundenen Geräte des Empfängers; die
+  Nachricht wird beim **ersten** `ack` gelöscht. `delivered` heißt: an
+  mindestens eine aktive Verbindung zugestellt.
+- Nach `ready` schickt der Server alle wartenden Nachrichten an das sich
+  anmeldende Gerät (älteste zuerst), auch wenn andere Geräte sie live schon
+  gesehen haben.
 - Doppelte `id` (gleicher Absender) werden ignoriert, aber erneut mit
   `posted` beantwortet (idempotent).
 - Quoten: pro Empfänger 1000 Nachrichten / 128 MiB, pro Absender→Empfänger 300,
@@ -129,6 +155,15 @@ C→S {"t":"ack","ids":["…", …]}
 C→S {"t":"ping","n":123}  →  S→C {"t":"pong","n":123,"time":<unix ms>}
 ```
 
+Nach erfolgreichem `POST /v1/sync/push` eines Kontos (siehe `ACCOUNTS.md`)
+sendet der Server an alle Relay-Verbindungen der zugehörigen Peer-ID
+
+```
+S→C {"t":"sync","latestSeq":<n>}
+```
+
+Gebündelt max. 1×/s je Konto (letzter `latestSeq` geht nicht verloren).
+
 Fehler allgemein: `{"t":"error","code":"…","message":"…"}`, z. B. `rate`
 (Steuernachrichten > 50/s), `invalid`.
 
@@ -136,6 +171,7 @@ HTTP:
 
 - `GET /healthz` → `200 ok`
 - `GET /v1/info` → `{"name":"BlueTalk Cloud Relay","version":"…","protocol":1,"online":<n>}`
+  (`online` = eindeutige Peer-IDs mit mindestens einem Gerät)
 - `GET /info` → kleine Infoseite
 - `GET /` → BlueTalk Web aus `WEB_DIR`, sonst die Infoseite
 - Konto- und Sync-API: siehe `ACCOUNTS.md`

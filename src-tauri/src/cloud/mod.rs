@@ -36,7 +36,11 @@ enum ConnCmd {
     RefreshWatch,
     Open {
         peer_id: String,
+        device: Option<String>,
         reply: oneshot::Sender<Result<Value>>,
+    },
+    DropPeerTunnels {
+        peer_id: String,
     },
     Post {
         id: String,
@@ -55,6 +59,8 @@ struct CloudShared {
     snapshot: StatusSnapshot,
     mail: MailQueue,
     max_mail_body: usize,
+    device_id: String,
+    device_name: String,
 }
 
 pub struct CloudService {
@@ -71,12 +77,18 @@ impl CloudService {
         peers: Arc<PeerService>,
     ) -> Arc<Self> {
         let config = CloudConfig::load(&database);
-        let snapshot = StatusSnapshot::from_config(&config);
+        let device_id = config::load_or_create_device_id(&database);
+        let device_name = config::local_device_name();
+        let mut snapshot = StatusSnapshot::from_config(&config);
+        snapshot.device_id = device_id.clone();
+        snapshot.device_name = device_name.clone();
         let shared = Arc::new(Mutex::new(CloudShared {
             config,
             snapshot,
             mail: MailQueue::default(),
             max_mail_body: config::MAX_MAIL_BODY_BYTES,
+            device_id,
+            device_name,
         }));
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -126,6 +138,15 @@ impl CloudService {
         self.status()
     }
 
+    pub fn drop_relay_tunnels(&self, peer_id: &str) {
+        if peer_id.trim().is_empty() {
+            return;
+        }
+        let _ = self.cmd_tx.try_send(ConnCmd::DropPeerTunnels {
+            peer_id: peer_id.to_owned(),
+        });
+    }
+
     pub fn refresh_watch(&self) {
         let _ = self.cmd_tx.try_send(ConnCmd::RefreshWatch);
     }
@@ -141,6 +162,7 @@ impl CloudService {
         self.cmd_tx
             .send(ConnCmd::Open {
                 peer_id: peer_id.to_owned(),
+                device: None,
                 reply: reply_tx,
             })
             .await

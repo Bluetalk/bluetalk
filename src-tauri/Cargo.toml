@@ -3,7 +3,7 @@ members = [".", "network-core"]
 
 [package]
 name = "bluetalk"
-version = "2.3.1"
+version = "2.4.0"
 description = "Secure peer-to-peer communication with BlueTalk"
 authors = ["Henny263462"]
 edition = "2024"
@@ -54,6 +54,7 @@ zeroize = { version = "1", features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
+windows-core = "0.61"
 
 [dev-dependencies]
 tempfile = "3"

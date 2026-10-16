@@ -31,6 +31,7 @@ import {
   extOf,
   getFileCategory,
 } from './messageHelpers.jsx';
+import { isSafeHttpUrl, openSafeHttpUrl } from '../../../shared/chat-features.js';
 
 function FileTypeIcon({ mime, fileName, size = 22 }) {
   const m = String(mime || '').toLowerCase();
@@ -246,18 +247,38 @@ function FileLinkMessage({ message }) {
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
 const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex];
 const MARKDOWN_COMPONENTS = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    if (typeof href === 'string' && href.startsWith('mention://')) {
+      return <span className="chat-mention">{children}</span>;
+    }
+    if (!isSafeHttpUrl(href)) {
+      return <span>{children}</span>;
+    }
+    return (
+      <a
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          openSafeHttpUrl(href);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
   img: ({ src, alt }) =>
     src?.startsWith('data:') || src?.startsWith('blob:') ? (
       <img src={src} alt={alt || ''} className="msg-md-inline-img" loading="lazy" />
-    ) : (
-      <a href={src} target="_blank" rel="noopener noreferrer" className="msg-md-external-img-link">
+    ) : isSafeHttpUrl(src) ? (
+      <button
+        type="button"
+        className="msg-md-external-img-link"
+        onClick={() => openSafeHttpUrl(src)}
+      >
         {alt || src || 'Image'}
-      </a>
+      </button>
+    ) : (
+      <span>{alt || 'Image'}</span>
     ),
 };
 
@@ -374,14 +395,28 @@ function GamePresenceBanner({ peerId, presence }) {
   );
 }
 
-function MessageReplyQuote({ replyTo, isSelf }) {
+function MessageReplyQuote({ replyTo, isSelf, onJump }) {
   if (!replyTo) return null;
-  return (
-    <div className={`msg-reply-quote${isSelf ? ' msg-reply-quote--self' : ''}`}>
+  const className = `msg-reply-quote${isSelf ? ' msg-reply-quote--self' : ''}${onJump && replyTo.messageId ? ' msg-reply-quote--jump' : ''}`;
+  const body = (
+    <>
       <span className="msg-reply-quote-sender">{replyTo.sender || 'Nachricht'}</span>
       <span className="msg-reply-quote-text">{replyTo.preview || ''}</span>
-    </div>
+    </>
   );
+  if (onJump && replyTo.messageId) {
+    return (
+      <button
+        type="button"
+        className={className}
+        onClick={() => onJump(replyTo.messageId)}
+        title="Zur Originalnachricht springen"
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div className={className}>{body}</div>;
 }
 
 

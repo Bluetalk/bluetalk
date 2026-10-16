@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MessageCircle, UserPlus } from 'lucide-react';
 import { useApp, useAiProgress } from '../App';
 import { useToast } from '../components/ToastProvider';
 import { CreateGroupModal, GroupInfoModal } from '../components/GroupChatDialogs';
-import { isAiChatPeerId, botHasRemoteApi, modelSupportsVision, resolveBotModel } from '../aiChatConstants';
+import { AI_CHAT_DISCONTINUED, isAiChatPeerId, botHasRemoteApi, modelSupportsVision, resolveBotModel } from '../aiChatConstants';
+import { collectPinnedMessages, nextPinnedIndex } from '../../shared/chat-features.js';
 import { isTypingActive } from '../../shared/chat-typing.js';
 import {
   // Präsentations-Bausteine
@@ -17,6 +18,9 @@ import {
   MessageList,
   Composer,
   AiSetupView,
+  ChatSearchBar,
+  PinnedMessagesBar,
+  JumpToLatestButton,
   // Dialoge & Menüs
   ConnectDialog,
   AiProfileDialog,
@@ -43,7 +47,10 @@ import {
   useOfflineReconnect,
   useChatDialogs,
   useChatActions,
+  useChatDrafts,
+  useChatSearch,
 } from './chats/index.js';
+import { useMobileLayout } from '../utils/touch.js';
 
 export default function ChatsPage() {
   const { toast } = useToast();
@@ -61,6 +68,8 @@ export default function ChatsPage() {
     chatLastViewedPeerTs,
     markPeerChatViewed,
     sendMessage,
+    sendMessageEdit,
+    applyMessagePatch,
     cancelAiChat,
     clearAiChatContext,
     sendReadReceipt,
@@ -98,6 +107,12 @@ export default function ChatsPage() {
   const [mediaLightbox, setMediaLightbox] = useState(null);
   const [messageContextMenu, setMessageContextMenu] = useState(null);
   const [replyToMessage, setReplyToMessage] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [pinCycleIndex, setPinCycleIndex] = useState(0);
+  const [highlightMessageId, setHighlightMessageId] = useState('');
+  const [unreadCutoffTs, setUnreadCutoffTs] = useState(0);
+  const viewedTsRef = useRef(chatLastViewedPeerTs);
+  viewedTsRef.current = chatLastViewedPeerTs;
 
   const textareaRef = useRef(null);
 
@@ -137,7 +152,8 @@ export default function ChatsPage() {
     ollamaState,
   });
 
-  const { selectedPeerId, setSelectedPeerId } = useChatSelection({
+  const isMobile = useMobileLayout();
+  const { selectedPeerId, setSelectedPeerId, closeMobileChat } = useChatSelection({
     location,
     navigate,
     mainChatList,
@@ -175,7 +191,7 @@ export default function ChatsPage() {
   const aiChatSupportsVision = botModel.modelSource === 'openai'
     || modelSupportsVision(botModel.modelTier, botModel.cloudModelId);
   const showAiComposerAttach = !isAiChatSelected || aiChatSupportsVision;
-  const aiChatNeedsSetup = isAiChatSelected && !botHasRemoteApi(selectedBot, openaiGlobal, ollamaState);
+  const aiChatNeedsSetup = isAiChatSelected && !AI_CHAT_DISCONTINUED && !botHasRemoteApi(selectedBot, openaiGlobal, ollamaState);
   const aiChatPending = isAiChatPending(selectedPeer?.id);
   const peerTypingActive = Boolean(
     selectedPeer
@@ -205,12 +221,25 @@ export default function ChatsPage() {
   const hasMoreMessages = selectedPeer ? selectedPeer.messageCount > msgs.length : false;
   const newestTimestamp = msgs[msgs.length - 1]?.timestamp || 0;
 
-  const { chatMessagesRef, endRef, updateChatPinnedState } = useChatScroll({
+  const {
+    chatMessagesRef,
+    endRef,
+    updateChatPinnedState,
+    stuckToBottom,
+    unseenCount,
+    jumpToLatest,
+  } = useChatScroll({
     selectedPeerId,
     newestTimestamp,
     aiChatProgress,
     typingActive: aiChatPending || peerTypingActive,
   });
+
+  useLayoutEffect(() => {
+    setUnreadCutoffTs(selectedPeerId ? (viewedTsRef.current[selectedPeerId] || 0) : 0);
+    setPinCycleIndex(0);
+    setHighlightMessageId('');
+  }, [selectedPeerId]);
 
   const { loadingMessages, loadingMore, loadOlderMessages } = useChatMessagesLoader({
     selectedPeerId,
@@ -225,6 +254,25 @@ export default function ChatsPage() {
     sendReadReceiptsEnabled: settings.sendReadReceipts,
     toast,
   });
+
+  const { drafts, selectedDraft, saveDraft, clearDraft } = useChatDrafts(selectedPeerId);
+  const chatSearch = useChatSearch({
+    selectedPeerId,
+    msgs,
+    hasMoreMessages,
+    loadOlderMessages,
+    loadingMore,
+  });
+  const pinnedMessages = useMemo(() => collectPinnedMessages(msgs), [msgs]);
+
+  useEffect(() => {
+    const id = chatSearch.activeHit?.messageId;
+    if (!chatSearch.open || !id) return undefined;
+    const root = chatMessagesRef.current;
+    const el = root?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return undefined;
+  }, [chatSearch.open, chatSearch.activeHit?.messageId, chatMessagesRef]);
 
   const closeMessageContextMenu = useCallback(() => setMessageContextMenu(null), []);
   const closeListContextMenu = useCallback(() => setListContextMenu(null), []);
@@ -297,9 +345,9 @@ export default function ChatsPage() {
   const openChatListContextMenu = useCallback((e, chat) => {
     e.preventDefault();
     e.stopPropagation();
-    setSelectedPeerId(chat.id);
+    if (!isMobile) setSelectedPeerId(chat.id);
     setListContextMenu({ chat, x: e.clientX, y: e.clientY });
-  }, [setSelectedPeerId]);
+  }, [isMobile, setSelectedPeerId]);
 
   const handleSelectChat = useCallback((id) => {
     setSelectedSubagent(null);
@@ -311,9 +359,44 @@ export default function ChatsPage() {
   const handleReplyToMessage = useCallback((message) => {
     if (!message) return;
     setReplyToMessage(message);
+    setEditingMessage(null);
     closeMessageContextMenu();
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }, [closeMessageContextMenu]);
+
+  const handleStartEdit = useCallback((message) => {
+    if (!message) return;
+    setEditingMessage(message);
+    setReplyToMessage(null);
+    closeMessageContextMenu();
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [closeMessageContextMenu]);
+
+  const jumpToMessage = useCallback(async (messageId) => {
+    if (!messageId || !selectedPeer) return;
+    let found = (messages[selectedPeer.id] || []).some((item) => item.messageId === messageId);
+    for (let i = 0; i < 12 && !found; i += 1) {
+      const batch = await loadChatMessages(selectedPeer.id, { limit: 24 });
+      found = (batch?.messages || []).some((item) => item.messageId === messageId);
+      if (!batch?.hasMore) break;
+    }
+    window.requestAnimationFrame(() => {
+      const root = chatMessagesRef.current;
+      const el = root?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setHighlightMessageId(messageId);
+      window.setTimeout(() => setHighlightMessageId((cur) => (cur === messageId ? '' : cur)), 1600);
+    });
+  }, [selectedPeer, messages, loadChatMessages, chatMessagesRef]);
+
+  const handleTogglePin = useCallback((message) => {
+    if (!selectedPeer || !message?.messageId || !applyMessagePatch) return;
+    const nextPinned = !message.pinned;
+    void applyMessagePatch(selectedPeer.id, message.messageId, {
+      pinned: nextPinned,
+      pinnedAt: nextPinned ? Date.now() : undefined,
+    });
+  }, [selectedPeer, applyMessagePatch]);
 
   const togglePinnedState = () => {
     if (!selectedPeer) return;
@@ -327,7 +410,14 @@ export default function ChatsPage() {
   useEffect(() => {
     setMessageContextMenu(null);
     setReplyToMessage(null);
+    setEditingMessage(null);
   }, [selectedPeerId]);
+
+  useEffect(() => {
+    const open = Boolean(selectedPeerId) && isMobile;
+    document.body.classList.toggle('bt-mobile-chat-open', open);
+    return () => document.body.classList.remove('bt-mobile-chat-open');
+  }, [selectedPeerId, isMobile]);
 
   useEffect(() => {
     if (!mediaLightbox) return;
@@ -343,6 +433,7 @@ export default function ChatsPage() {
       || (!isGroupSelected && contactOutgoingBlocked(selectedPeer?.contact))
       || (isGroupSelected && !selectedPeer.canSend)
       || showOfflineComposerReconnect
+      || (isAiChatSelected && AI_CHAT_DISCONTINUED)
   );
 
   return (
@@ -379,7 +470,7 @@ export default function ChatsPage() {
         onDelete={deleteGroupChat}
         onClose={() => dialogs.setShowGroupInfo(false)}
       />
-      <div className="split-layout">
+      <div className={`split-layout${selectedPeer ? ' split-layout--chat-open' : ''}`}>
         <ChatListPanel
           collapsed={chatListCollapsed}
           widthPx={chatListWidthPx}
@@ -399,6 +490,7 @@ export default function ChatsPage() {
             selectedSubagent,
             debugMode,
             peerTyping,
+            drafts,
           }}
           actions={{
             resolveContact,
@@ -440,6 +532,7 @@ export default function ChatsPage() {
               selectedPeer={selectedPeer}
               onShowProfile={dialogs.togglePeerProfile}
               onOpenSettings={() => navigate('/settings/ai')}
+              onBack={closeMobileChat}
             />
           ) : (
             <>
@@ -455,6 +548,8 @@ export default function ChatsPage() {
                 aiChatPending={aiChatPending}
                 clearingContext={dialogs.clearingContext}
                 debugMode={debugMode}
+                onBack={closeMobileChat}
+                onOpenSearch={chatSearch.openSearch}
                 selection={{
                   selectionMode,
                   selectedCount,
@@ -490,9 +585,32 @@ export default function ChatsPage() {
                 }}
               />
 
+              {chatSearch.open ? (
+                <ChatSearchBar
+                  query={chatSearch.query}
+                  onQueryChange={chatSearch.setQuery}
+                  hitCount={chatSearch.hits.length}
+                  activeIndex={chatSearch.activeIndex}
+                  onPrev={chatSearch.goPrev}
+                  onNext={chatSearch.goNext}
+                  onClose={chatSearch.closeSearch}
+                  inputRef={chatSearch.inputRef}
+                />
+              ) : null}
+
+              <PinnedMessagesBar
+                pinned={pinnedMessages}
+                activeIndex={pinCycleIndex}
+                onSelect={(message) => void jumpToMessage(message.messageId)}
+                onCycle={() => setPinCycleIndex((i) => nextPinnedIndex(pinnedMessages.length, i, 1))}
+                onUnpin={handleTogglePin}
+                debugMode={debugMode}
+              />
+
+              <div className="chat-messages-wrap">
               <MessageList
                 chat={{ selectedPeer, selectedContact, isAiChatSelected, isGroupSelected, ownPeerId }}
-                data={{ msgs, readUpToId, hasMoreMessages, loadingMessages, loadingMore }}
+                data={{ msgs, readUpToId, hasMoreMessages, loadingMessages, loadingMore, unreadCutoffTs }}
                 ui={{
                   debugMode,
                   settings,
@@ -504,6 +622,9 @@ export default function ChatsPage() {
                   peerTypingActive,
                   liveAiProgress,
                   workLogEnabled: Boolean(selectedBot?.workLogEnabled),
+                  searchQuery: chatSearch.open ? chatSearch.query : '',
+                  activeSearchId: chatSearch.activeHit?.messageId || '',
+                  highlightMessageId,
                 }}
                 scroll={{ chatMessagesRef, endRef, onScroll: updateChatPinnedState }}
                 actions={{
@@ -518,12 +639,20 @@ export default function ChatsPage() {
                   onExportChat: actions.exportPeerChat,
                   onOpenDelete: dialogs.openDeleteForPeer,
                   onOpenWorklog: dialogs.openBotWorklog,
+                  onReply: handleReplyToMessage,
+                  onJumpToMessage: jumpToMessage,
                   onReact: (message, emoji) => {
                     if (!selectedPeer?.id) return;
                     void toggleMessageReaction(selectedPeer.id, message, emoji);
                   },
                 }}
               />
+              <JumpToLatestButton
+                visible={!stuckToBottom}
+                count={unseenCount}
+                onClick={jumpToLatest}
+              />
+              </div>
 
               <Composer
                 chat={{
@@ -542,10 +671,17 @@ export default function ChatsPage() {
                     : null,
                 }}
                 reply={{ replyToMessage, onClearReply: clearReply }}
+                edit={{
+                  editingMessage,
+                  onCancelEdit: () => setEditingMessage(null),
+                  onStartEdit: handleStartEdit,
+                }}
+                drafts={{ selectedDraft, saveDraft, clearDraft }}
                 attachments={attachments}
-                env={{ settings, contacts, peers, debugMode, warning }}
+                env={{ settings, contacts, peers, debugMode, warning, recentMessages: msgs }}
                 actions={{
                   sendMessage,
+                  sendMessageEdit,
                   sendTyping,
                   cancelAiChat,
                   connectToAddress,
@@ -675,6 +811,8 @@ export default function ChatsPage() {
           if (!selectedPeer?.id) return;
           void toggleMessageReaction(selectedPeer.id, message, emoji);
         }}
+        onEdit={handleStartEdit}
+        onTogglePin={handleTogglePin}
       />
 
       <ForwardDialog

@@ -8,6 +8,40 @@ pub(super) fn peer_info_to_value(info: &bluetalk_network::PeerInfo) -> Value {
         Ok(addr) => (addr.ip().to_string(), addr.port()),
         Err(_) => (info.remote_address.clone(), 0),
     };
+    let transport = if info.devices.iter().any(|device| device.transport == "direct")
+        || info.device_key == bluetalk_network::DIRECT_DEVICE_KEY
+        || (!info.remote_address.starts_with("relay://") && info.devices.is_empty())
+    {
+        if info.devices.iter().any(|device| device.transport == "relay") {
+            "mixed"
+        } else {
+            "direct"
+        }
+    } else {
+        "relay"
+    };
+    let devices: Vec<Value> = if info.devices.is_empty() {
+        vec![json!({
+            "id": if info.device_key.is_empty() {
+                bluetalk_network::DIRECT_DEVICE_KEY
+            } else {
+                info.device_key.as_str()
+            },
+            "name": info.device_name,
+            "transport": transport,
+        })]
+    } else {
+        info.devices
+            .iter()
+            .map(|device| {
+                json!({
+                    "id": device.id,
+                    "name": device.name,
+                    "transport": device.transport,
+                })
+            })
+            .collect()
+    };
     json!({
         "id": info.peer_id,
         "name": info.display_name,
@@ -18,11 +52,8 @@ pub(super) fn peer_info_to_value(info: &bluetalk_network::PeerInfo) -> Value {
         "direction": info.direction,
         "encrypted": info.authenticated_encryption,
         "supportsHeartbeat": true,
-        "transport": if info.remote_address.starts_with("relay://") {
-            "relay"
-        } else {
-            "direct"
-        },
+        "transport": transport,
+        "devices": devices,
     })
 }
 

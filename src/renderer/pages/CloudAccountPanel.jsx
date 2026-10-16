@@ -62,7 +62,7 @@ function syncLabel(sync) {
   return 'Aus';
 }
 
-export default function CloudAccountPanel({ toast, localPeerId }) {
+export default function CloudAccountPanel({ toast, localPeerId, devices = [] }) {
   const [ownPeerId, setOwnPeerId] = useState(localPeerId || '');
   const [account, setAccount] = useState(null);
   const [sync, setSync] = useState(() => getSyncState());
@@ -348,6 +348,23 @@ export default function CloudAccountPanel({ toast, localPeerId }) {
               <code className="cloud-sync-peer-id" title={account.peerId}>{shortenPeerId(account.peerId)}</code>
             </div>
           </div>
+
+          {Array.isArray(devices) && devices.length > 0 ? (
+            <ul className="cloud-device-list">
+              {devices.map((device) => (
+                <li key={device.id || device.name} className="cloud-device-row">
+                  <span className={`cloud-device-dot${device.online ? ' is-online' : ''}`} aria-hidden />
+                  <span className="cloud-device-name">
+                    {device.name || device.id || 'Gerät'}
+                    {device.thisDevice ? ' · dieses Gerät' : ''}
+                  </span>
+                  <span className="cloud-device-meta text-muted">
+                    {device.online ? 'Online' : 'Offline'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
           <div className="cloud-account-sync-row">
             <div>

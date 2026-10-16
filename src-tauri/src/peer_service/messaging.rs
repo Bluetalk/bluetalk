@@ -103,13 +103,21 @@ impl PeerService {
         stream: S,
         remote_address: String,
         expected_peer_id: Option<&str>,
+        device_key: &str,
+        device_name: &str,
     ) -> Result<Value>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
         let network = self.network().await?;
         match network
-            .connect_stream(stream, remote_address, expected_peer_id)
+            .connect_stream(
+                stream,
+                remote_address,
+                expected_peer_id,
+                device_key,
+                device_name,
+            )
             .await
         {
             Ok(info) => Ok(peer_info_to_value(&info)),
@@ -125,12 +133,17 @@ impl PeerService {
         &self,
         stream: S,
         remote_address: String,
+        device_key: &str,
+        device_name: &str,
     ) -> Result<Value>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
         let network = self.network().await?;
-        match network.accept_stream(stream, remote_address).await {
+        match network
+            .accept_stream(stream, remote_address, device_key, device_name)
+            .await
+        {
             Ok(info) => Ok(peer_info_to_value(&info)),
             Err(bluetalk_network::NetworkError::DuplicatePeer(id)) => self
                 .peer_snapshot(&id)
@@ -173,6 +186,15 @@ impl PeerService {
     pub async fn send(&self, peer_id: &str, data: Value) -> Result<bool> {
         let network = self.network().await?;
         match network.send(peer_id, data) {
+            Ok(()) => Ok(true),
+            Err(bluetalk_network::NetworkError::PeerNotFound(_)) => Ok(false),
+            Err(error) => Err(AppError::Network(error.to_string())),
+        }
+    }
+
+    pub async fn send_to(&self, peer_id: &str, device_key: &str, data: Value) -> Result<bool> {
+        let network = self.network().await?;
+        match network.send_to(peer_id, device_key, data) {
             Ok(()) => Ok(true),
             Err(bluetalk_network::NetworkError::PeerNotFound(_)) => Ok(false),
             Err(error) => Err(AppError::Network(error.to_string())),

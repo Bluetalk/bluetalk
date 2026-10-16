@@ -1,6 +1,7 @@
 const ALLOWED_EVENTS = new Set([
   'peer:connected',
   'peer:disconnected',
+  'peer:devices',
   'peer:message',
   'peer:file-offered',
   'peer:file-received',
@@ -43,6 +44,7 @@ const ALLOWED_EVENTS = new Set([
   'cloud:status',
   'cloud:presence',
   'cloud:mail',
+  'cloud:sync',
 ]);
 
 export function createEventBus() {

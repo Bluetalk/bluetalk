@@ -4,9 +4,14 @@ use super::*;
 use chrono::{Local, Timelike};
 
 const ROUTINE_TICK_SECS: u64 = 20;
+/// Bots sind eingestellt — Scheduler und manuelle Läufe sind tot, Daten bleiben.
+const BOTS_DISCONTINUED: bool = true;
 
 impl OllamaManager {
     pub async fn run_routine_scheduler_loop(manager: Arc<Self>) {
+        if BOTS_DISCONTINUED {
+            return;
+        }
         let mut ticker = tokio::time::interval(Duration::from_secs(ROUTINE_TICK_SECS));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -19,6 +24,9 @@ impl OllamaManager {
     }
 
     fn collect_due_routines(&self) -> Vec<(String, String)> {
+        if BOTS_DISCONTINUED {
+            return Vec::new();
+        }
         let agents = self.kv_get("aiChat.agents", json!([]));
         let Some(list) = agents.as_array() else {
             return Vec::new();
@@ -137,6 +145,9 @@ impl OllamaManager {
     }
 
     pub async fn run_bot_routine(self: &Arc<Self>, peer_id: &str, routine_id: &str) -> Value {
+        if BOTS_DISCONTINUED {
+            return json!({"ok": false, "error": "discontinued"});
+        }
         if !catalog::is_ai_chat_peer_id(peer_id) {
             return json!({"ok": false, "error": "not_bot_chat"});
         }

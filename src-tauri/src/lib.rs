@@ -127,6 +127,7 @@ pub fn run() {
             commands::peer::peer_reset_all_connections,
             commands::peer::peer_disconnect,
             commands::peer::peer_send,
+            commands::peer::peer_send_to,
             commands::peer::peer_send_many,
             commands::peer::peer_broadcast,
             commands::peer::peer_get_peers,

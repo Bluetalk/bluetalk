@@ -13,6 +13,8 @@ import {
   findMessageForReaction,
 } from './messageReactions';
 import { sanitizeVoiceMeta } from '../voice/voiceMeta.js';
+import { MESSAGE_EDIT_KIND, collectMentionPeerIds, isStoreableChatKind } from '../../shared/chat-features.js';
+import { applyInboundChatEdit } from './applyInboundChatEdit';
 
 const {
   GROUP_EVENT_KIND,
@@ -191,6 +193,20 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
       from: fromId,
     };
 
+    if (groupMessage.kind === MESSAGE_EDIT_KIND) {
+      await applyInboundChatEdit({
+        chatId: group.id,
+        fromId,
+        payload: groupMessage,
+        isGroup: true,
+        messageCacheRef,
+        applyMessagePatch,
+        setChatMeta,
+        setMessages,
+      });
+      return;
+    }
+
     if (groupMessage.kind === 'reaction') {
       const emoji = groupMessage.emoji;
       const refMessageId = groupMessage.refMessageId;
@@ -217,6 +233,10 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
         else delete groupMessage.voice;
       }
     } else if (groupMessage.kind === 'chat' && String(groupMessage.content || '').length > MAX_CHAT_TEXT_CHARS) {
+      return;
+    }
+
+    if (!isStoreableChatKind(groupMessage.kind)) {
       return;
     }
 
@@ -252,10 +272,22 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
       }));
     });
     // Gruppen-Mute liegt als Kontakt-Eintrag mit der Gruppen-ID im Store.
+    // @Erwähnungen durchbrechen die Gruppen-Stummschaltung, nicht globales DND.
     const groupMuteContact = contactsRef?.current?.find?.((entry) => entry?.id === group.id);
-    if (!shouldSuppressNotifications(settingsRef.current) && !isContactNotificationMuted(groupMuteContact)) {
+    const ownId = ownPeerIdRef.current;
+    const mentioned = Boolean(
+      ownId
+      && (
+        (Array.isArray(groupMessage.mentions) && groupMessage.mentions.includes(ownId))
+        || collectMentionPeerIds(groupMessage.content, group.members).includes(ownId)
+      )
+    );
+    if (
+      !shouldSuppressNotifications(settingsRef.current)
+      && (mentioned || !isContactNotificationMuted(groupMuteContact))
+    ) {
       void window.bluetalk?.notify?.show?.({
-        title: group.name,
+        title: mentioned ? `${group.name} · Erwähnung` : group.name,
         body: `${groupMessage.sender}: ${buildMessageNotificationPreview(groupMessage)}`,
       });
     }

@@ -2,7 +2,7 @@
 FROM node:22-bookworm-slim AS web
 WORKDIR /src
 COPY package.json package-lock.json ./
-COPY index.html vite.config.js ./
+COPY index.html vite.config.js vite.web-pwa.js ./
 COPY public ./public
 COPY src ./src
 COPY assets ./assets

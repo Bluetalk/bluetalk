@@ -8,6 +8,7 @@ impl PeerService {
         match event {
             NetworkEvent::PeerConnected(info) => {
                 self.clear_reconnect(&info.peer_id);
+                self.drop_relay_if_direct(&info.peer_id, &info.device_key, &info.devices);
                 let _ = self.app.emit("peer:connected", peer_info_to_value(&info));
                 let _ = self.app.emit("peers:list-sync", self.peers_snapshot().await);
             }
@@ -17,6 +18,24 @@ impl PeerService {
                     .emit("peer:disconnected", json!({ "id": peer_id, "reason": reason }));
                 let _ = self.app.emit("peers:list-sync", self.peers_snapshot().await);
                 self.schedule_reconnect(&peer_id);
+            }
+            NetworkEvent::PeerDevices { peer_id, devices } => {
+                self.drop_relay_if_direct(&peer_id, "", &devices);
+                let payload: Vec<Value> = devices
+                    .iter()
+                    .map(|device| {
+                        json!({
+                            "id": device.id,
+                            "name": device.name,
+                            "transport": device.transport,
+                        })
+                    })
+                    .collect();
+                let _ = self.app.emit(
+                    "peer:devices",
+                    json!({ "id": peer_id, "devices": payload }),
+                );
+                let _ = self.app.emit("peers:list-sync", self.peers_snapshot().await);
             }
             NetworkEvent::PeerDiscovered(peer) => {
                 let (addresses, ports): (Vec<String>, Vec<u16>) = peer
@@ -41,12 +60,19 @@ impl PeerService {
             }
             NetworkEvent::Message {
                 from_peer_id,
+                from_device,
                 message_id,
                 sent_at_ms,
                 payload,
             } => {
-                self.handle_peer_message(from_peer_id, message_id, sent_at_ms, payload)
-                    .await;
+                self.handle_peer_message(
+                    from_peer_id,
+                    from_device,
+                    message_id,
+                    sent_at_ms,
+                    payload,
+                )
+                .await;
             }
             NetworkEvent::Warning { code, message } => {
                 log::warn!("network warning {code}: {message}");
@@ -57,6 +83,7 @@ impl PeerService {
     async fn handle_peer_message(
         &self,
         from_peer_id: String,
+        from_device: String,
         message_id: String,
         sent_at_ms: i64,
         payload: Value,
@@ -87,6 +114,9 @@ impl PeerService {
                 };
                 if let Value::Object(map) = &mut event {
                     map.insert("from".to_owned(), Value::String(from_peer_id.clone()));
+                    if !from_device.is_empty() {
+                        map.insert("fromDevice".to_owned(), Value::String(from_device));
+                    }
                     map.entry("timestamp".to_owned())
                         .or_insert_with(|| Value::from(sent_at_ms));
                     map.entry("transportMessageId".to_owned())
@@ -134,6 +164,24 @@ impl PeerService {
         };
         if let Ok(network) = self.network().await {
             let _ = network.send(from_peer_id, response);
+        }
+    }
+
+    fn drop_relay_if_direct(
+        &self,
+        peer_id: &str,
+        device_key: &str,
+        devices: &[bluetalk_network::PeerDevice],
+    ) {
+        let has_direct = device_key == bluetalk_network::DIRECT_DEVICE_KEY
+            || devices.iter().any(|device| {
+                device.id == bluetalk_network::DIRECT_DEVICE_KEY || device.transport == "direct"
+            });
+        if !has_direct {
+            return;
+        }
+        if let Some(cloud) = self.app.try_state::<Arc<crate::cloud::CloudService>>() {
+            cloud.drop_relay_tunnels(peer_id);
         }
     }
 

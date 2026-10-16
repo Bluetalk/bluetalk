@@ -1,0 +1,278 @@
+/* Video-Bühne — BlueTalk-Tokens, Light/Dark, Safe-Area. */
+
+.call-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 1740;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-app-region: no-drag;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  animation: voice-composer-in 220ms ease;
+}
+.call-stage-surface {
+  position: relative;
+  flex: 1;
+  max-width: 1120px;
+  min-height: 0;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0b0b0c;
+  box-shadow: var(--shadow-xl);
+}
+.call-stage-main {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--blue) 18%, transparent), transparent 55%),
+    #0b0b0c;
+}
+.call-stage-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.call-stage-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-1);
+  font-size: 14px;
+  pointer-events: none;
+}
+.call-stage-placeholder--peer { color: #f4f4f5; }
+.call-stage-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 85%);
+  pointer-events: none;
+}
+.call-stage-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+  color: #fafafa;
+}
+.call-stage-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.call-stage-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(244, 244, 245, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+.call-stage-time { font-weight: 600; color: #fff; }
+
+.call-stage-pip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: min(196px, 34vw);
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: var(--shadow-lg);
+  cursor: grab;
+  touch-action: none;
+  z-index: 3;
+  background: #111;
+}
+.call-stage-pip:active { cursor: grabbing; }
+.call-stage-pip--tile { width: min(168px, 30vw); }
+.call-stage-local-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.call-stage-pip-label {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.call-stage-cam-tile {
+  position: absolute;
+  right: 14px;
+  bottom: 84px;
+  width: min(180px, 32vw);
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: var(--shadow-md);
+  background: #111;
+  z-index: 2;
+}
+
+.call-stage-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  box-shadow: var(--shadow-lg);
+}
+.call-stage-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.call-stage-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.call-stage-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.call-stage-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.call-stage-btn.is-off {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+}
+.call-stage-btn--hangup {
+  background: var(--red);
+  border-color: transparent;
+  color: #fff;
+}
+.call-stage-btn--hangup:hover { filter: brightness(1.08); }
+
+.call-overlay-status--video { color: var(--blue); }
+.call-action--accept-video .call-action-orb {
+  background: var(--blue);
+}
+.chat-header-call-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+.chat-header-call-group .chat-header-call-btn {
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .call-stage {
+    padding: 0;
+    background: #050506;
+  }
+  .call-stage-surface {
+    max-width: none;
+    border-radius: 0;
+    border: none;
+  }
+  .call-stage-bar {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    width: min(100% - 16px, 420px);
+    justify-content: space-evenly;
+    z-index: 5;
+  }
+  .call-stage-pip {
+    width: min(132px, 38vw);
+    z-index: 3;
+  }
+  .call-overlay-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* Handy Hochformat 360–430 px: Safe-Area, 44-px-Ziele, PiP über der Steuerleiste. */
+@media (max-width: 430px) {
+  .call-stage {
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    align-items: stretch;
+  }
+  .call-stage-surface {
+    width: 100%;
+    min-height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+  .call-stage-bar {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: calc(100% - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    max-width: 430px;
+    gap: 6px;
+    z-index: 6;
+  }
+  .call-stage-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .call-stage-pip,
+  .call-stage-pip--tile {
+    width: min(112px, 36vw);
+    max-height: calc(100% - 88px - env(safe-area-inset-bottom, 0px));
+    z-index: 3;
+  }
+  .call-stage-cam-tile {
+    right: 10px;
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+    width: min(120px, 34vw);
+    z-index: 2;
+  }
+  .call-overlay-status--video { font-size: 13px; }
+}
+
+[data-theme="light"] .call-stage-surface {
+  background: #111214;
+}
+[data-theme="light"] .call-stage-bar {
+  background: rgba(24, 24, 27, 0.72);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-stage {
+    animation: none !important;
+  }
+  .call-stage-pip {
+    transition: none;
+  }
+}

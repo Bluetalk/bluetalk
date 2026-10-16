@@ -1,4 +1,36 @@
-const DEFAULT_RELAY = 'wss://bt.henny.dev/v1/ws';
+/** Öffentlicher Relay, wenn keine eigene Herkunft greift. */
+const PUBLIC_RELAY_URL = 'wss://bt.henny.dev/v1/ws';
+
+function isWebBuild() {
+  return typeof __BLUETALK_WEB__ !== 'undefined' && Boolean(__BLUETALK_WEB__);
+}
+
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+/** Aus http(s)-Herkunft die Relay-URL ableiten; ws:// nur Loopback, sonst wss. */
+export function relayUrlFromLocation(loc) {
+  const protocol = loc?.protocol;
+  if (protocol !== 'http:' && protocol !== 'https:') return PUBLIC_RELAY_URL;
+  const host = loc.host;
+  if (!host) return PUBLIC_RELAY_URL;
+  const scheme = protocol === 'http:' && isLoopbackHostname(loc.hostname) ? 'ws' : 'wss';
+  return `${scheme}://${host}/v1/ws`;
+}
+
+/** Web-Build: eigene Herkunft. Desktop bleibt beim öffentlichen Relay. */
+export function defaultRelayUrl() {
+  if (isWebBuild()) {
+    try {
+      return relayUrlFromLocation(globalThis.location);
+    } catch {
+      /* Fallback */
+    }
+  }
+  return PUBLIC_RELAY_URL;
+}
 
 export class CloudApiError extends Error {
   constructor(code, message, status = 0) {
@@ -20,10 +52,20 @@ function safeMessage(code, message) {
 
 export function httpBaseFromRelayUrl(relayUrl) {
   try {
-    const url = new URL(String(relayUrl || DEFAULT_RELAY).trim() || DEFAULT_RELAY);
-    const protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+    const fallback = defaultRelayUrl();
+    const url = new URL(String(relayUrl || fallback).trim() || fallback);
+    const loopback = isLoopbackHostname(url.hostname);
+    const insecure = url.protocol === 'ws:' || url.protocol === 'http:';
+    const protocol = insecure && loopback ? 'http:' : 'https:';
     return `${protocol}//${url.host}`;
   } catch {
+    try {
+      if (isWebBuild() && (location.protocol === 'http:' || location.protocol === 'https:') && location.origin) {
+        return location.origin;
+      }
+    } catch {
+      /* öffentlicher Fallback */
+    }
     return 'https://bt.henny.dev';
   }
 }

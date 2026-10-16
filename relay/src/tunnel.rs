@@ -1,4 +1,7 @@
 //! Tunnel-Zuordnung, Binärframe-Umschreibung, Open-Timeout und Limits.
+//!
+//! Schlüssel ist die Verbindungs-Generation (ein Gerät), nicht die Peer-ID —
+//! Limits gelten damit pro Verbindung.
 
 use std::collections::HashMap;
 
@@ -25,31 +28,31 @@ pub fn decode_frame(data: &[u8]) -> Option<(u32, &[u8])> {
 
 #[derive(Clone, Debug)]
 pub struct Endpoint {
-    pub remote_peer: String,
+    pub remote_gen: u64,
     pub remote_id: u32,
 }
 
 #[derive(Clone, Debug)]
 pub struct PendingOut {
-    pub to: String,
+    pub to_gen: u64,
     pub remote_id: u32,
 }
 
 #[derive(Clone, Debug)]
 pub struct PendingIn {
-    pub from: String,
+    pub from_gen: u64,
     pub remote_id: u32,
 }
 
 #[derive(Default)]
-struct PeerTunnels {
+struct ConnTunnels {
     established: HashMap<u32, Endpoint>,
     pending_out: HashMap<u32, PendingOut>,
     pending_in: HashMap<u32, PendingIn>,
     next_hint: u32,
 }
 
-impl PeerTunnels {
+impl ConnTunnels {
     fn used(&self, id: u32) -> bool {
         self.established.contains_key(&id)
             || self.pending_out.contains_key(&id)
@@ -83,12 +86,11 @@ impl PeerTunnels {
 
 #[derive(Default)]
 pub struct Tunnels {
-    by_peer: HashMap<String, PeerTunnels>,
+    by_conn: HashMap<u64, ConnTunnels>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenFail {
-    Offline,
     Limit,
     SelfOpen,
     Invalid,
@@ -101,22 +103,20 @@ pub struct OpenOk {
 impl Tunnels {
     pub fn open(
         &mut self,
-        from: &str,
+        from_gen: u64,
+        from_peer: &str,
         local_id: u32,
-        to: &str,
-        target_online: bool,
+        to_gen: u64,
+        to_peer: &str,
     ) -> Result<OpenOk, OpenFail> {
-        if from == to {
+        if from_peer == to_peer {
             return Err(OpenFail::SelfOpen);
         }
         if local_id == 0 {
             return Err(OpenFail::Invalid);
         }
-        if !target_online {
-            return Err(OpenFail::Offline);
-        }
         {
-            let src = self.by_peer.entry(from.to_string()).or_default();
+            let src = self.by_conn.entry(from_gen).or_default();
             if src.used(local_id) {
                 return Err(OpenFail::Invalid);
             }
@@ -125,171 +125,157 @@ impl Tunnels {
             }
         }
         let remote_id = {
-            let dst = self.by_peer.entry(to.to_string()).or_default();
+            let dst = self.by_conn.entry(to_gen).or_default();
             if dst.total() >= MAX_TUNNELS || dst.pending_in.len() >= MAX_PENDING_OPENS {
                 return Err(OpenFail::Limit);
             }
             dst.alloc_id().ok_or(OpenFail::Limit)?
         };
-        self.by_peer
-            .entry(from.to_string())
+        self.by_conn
+            .entry(from_gen)
             .or_default()
             .pending_out
-            .insert(
-                local_id,
-                PendingOut {
-                    to: to.to_string(),
-                    remote_id,
-                },
-            );
-        self.by_peer
-            .entry(to.to_string())
-            .or_default()
-            .pending_in
-            .insert(
-                remote_id,
-                PendingIn {
-                    from: from.to_string(),
-                    remote_id: local_id,
-                },
-            );
+            .insert(local_id, PendingOut { to_gen, remote_id });
+        self.by_conn.entry(to_gen).or_default().pending_in.insert(
+            remote_id,
+            PendingIn {
+                from_gen,
+                remote_id: local_id,
+            },
+        );
         Ok(OpenOk { remote_id })
     }
 
-    /// B akzeptiert. Liefert (A-Peer, A-Tunnel-ID).
-    pub fn accept(&mut self, peer: &str, local_id: u32) -> Result<(String, u32), OpenFail> {
+    /// B akzeptiert. Liefert (A-Generation, A-Tunnel-ID).
+    pub fn accept(&mut self, gid: u64, local_id: u32) -> Result<(u64, u32), OpenFail> {
         let pending = self
-            .by_peer
-            .get_mut(peer)
+            .by_conn
+            .get_mut(&gid)
             .and_then(|p| p.pending_in.remove(&local_id))
             .ok_or(OpenFail::Invalid)?;
-        let from = pending.from;
+        let from_gen = pending.from_gen;
         let from_id = pending.remote_id;
         let src_ok = self
-            .by_peer
-            .get_mut(&from)
+            .by_conn
+            .get_mut(&from_gen)
             .and_then(|p| p.pending_out.remove(&from_id))
             .is_some();
         if !src_ok {
             return Err(OpenFail::Invalid);
         }
-        self.by_peer
-            .entry(peer.to_string())
-            .or_default()
-            .established
-            .insert(
-                local_id,
-                Endpoint {
-                    remote_peer: from.clone(),
-                    remote_id: from_id,
-                },
-            );
-        self.by_peer
-            .entry(from.clone())
+        self.by_conn.entry(gid).or_default().established.insert(
+            local_id,
+            Endpoint {
+                remote_gen: from_gen,
+                remote_id: from_id,
+            },
+        );
+        self.by_conn
+            .entry(from_gen)
             .or_default()
             .established
             .insert(
                 from_id,
                 Endpoint {
-                    remote_peer: peer.to_string(),
+                    remote_gen: gid,
                     remote_id: local_id,
                 },
             );
-        Ok((from, from_id))
+        Ok((from_gen, from_id))
     }
 
-    /// B lehnt ab. Liefert (A-Peer, A-Tunnel-ID).
-    pub fn reject(&mut self, peer: &str, local_id: u32) -> Result<(String, u32), OpenFail> {
+    /// B lehnt ab. Liefert (A-Generation, A-Tunnel-ID).
+    pub fn reject(&mut self, gid: u64, local_id: u32) -> Result<(u64, u32), OpenFail> {
         let pending = self
-            .by_peer
-            .get_mut(peer)
+            .by_conn
+            .get_mut(&gid)
             .and_then(|p| p.pending_in.remove(&local_id))
             .ok_or(OpenFail::Invalid)?;
-        let from = pending.from;
+        let from_gen = pending.from_gen;
         let from_id = pending.remote_id;
-        if let Some(src) = self.by_peer.get_mut(&from) {
+        if let Some(src) = self.by_conn.get_mut(&from_gen) {
             src.pending_out.remove(&from_id);
         }
-        Ok((from, from_id))
+        Ok((from_gen, from_id))
     }
 
     /// Timeout der offenen Anfrage von A.
-    pub fn timeout_open(&mut self, from: &str, local_id: u32) -> Option<(String, u32)> {
+    pub fn timeout_open(&mut self, from_gen: u64, local_id: u32) -> Option<(u64, u32)> {
         let pending = self
-            .by_peer
-            .get_mut(from)
+            .by_conn
+            .get_mut(&from_gen)
             .and_then(|p| p.pending_out.remove(&local_id))?;
-        if let Some(dst) = self.by_peer.get_mut(&pending.to) {
+        if let Some(dst) = self.by_conn.get_mut(&pending.to_gen) {
             dst.pending_in.remove(&pending.remote_id);
         }
-        Some((pending.to, pending.remote_id))
+        Some((pending.to_gen, pending.remote_id))
     }
 
-    pub fn lookup(&self, peer: &str, local_id: u32) -> Option<Endpoint> {
-        self.by_peer
-            .get(peer)
+    pub fn lookup(&self, gid: u64, local_id: u32) -> Option<Endpoint> {
+        self.by_conn
+            .get(&gid)
             .and_then(|p| p.established.get(&local_id))
             .cloned()
     }
 
     /// Schließt einen etablierten oder ausstehenden Tunnel. Liefert Gegenseite.
-    pub fn close(&mut self, peer: &str, local_id: u32) -> Option<(String, u32)> {
+    pub fn close(&mut self, gid: u64, local_id: u32) -> Option<(u64, u32)> {
         if let Some(end) = self
-            .by_peer
-            .get_mut(peer)
+            .by_conn
+            .get_mut(&gid)
             .and_then(|p| p.established.remove(&local_id))
         {
-            if let Some(remote) = self.by_peer.get_mut(&end.remote_peer) {
+            if let Some(remote) = self.by_conn.get_mut(&end.remote_gen) {
                 remote.established.remove(&end.remote_id);
             }
-            return Some((end.remote_peer, end.remote_id));
+            return Some((end.remote_gen, end.remote_id));
         }
         if let Some(p) = self
-            .by_peer
-            .get_mut(peer)
+            .by_conn
+            .get_mut(&gid)
             .and_then(|t| t.pending_out.remove(&local_id))
         {
-            if let Some(dst) = self.by_peer.get_mut(&p.to) {
+            if let Some(dst) = self.by_conn.get_mut(&p.to_gen) {
                 dst.pending_in.remove(&p.remote_id);
             }
-            return Some((p.to, p.remote_id));
+            return Some((p.to_gen, p.remote_id));
         }
         if let Some(p) = self
-            .by_peer
-            .get_mut(peer)
+            .by_conn
+            .get_mut(&gid)
             .and_then(|t| t.pending_in.remove(&local_id))
         {
-            if let Some(src) = self.by_peer.get_mut(&p.from) {
+            if let Some(src) = self.by_conn.get_mut(&p.from_gen) {
                 src.pending_out.remove(&p.remote_id);
             }
-            return Some((p.from, p.remote_id));
+            return Some((p.from_gen, p.remote_id));
         }
         None
     }
 
-    /// Alle Tunnel eines Peers, Gegenseiten zum Benachrichtigen.
-    pub fn drop_peer(&mut self, peer: &str) -> Vec<(String, u32)> {
-        let Some(own) = self.by_peer.remove(peer) else {
+    /// Alle Tunnel einer Verbindung, Gegenseiten zum Benachrichtigen.
+    pub fn drop_conn(&mut self, gid: u64) -> Vec<(u64, u32)> {
+        let Some(own) = self.by_conn.remove(&gid) else {
             return Vec::new();
         };
         let mut notify = Vec::new();
         for (_, end) in own.established {
-            if let Some(remote) = self.by_peer.get_mut(&end.remote_peer) {
+            if let Some(remote) = self.by_conn.get_mut(&end.remote_gen) {
                 remote.established.remove(&end.remote_id);
             }
-            notify.push((end.remote_peer, end.remote_id));
+            notify.push((end.remote_gen, end.remote_id));
         }
         for (_, p) in own.pending_out {
-            if let Some(dst) = self.by_peer.get_mut(&p.to) {
+            if let Some(dst) = self.by_conn.get_mut(&p.to_gen) {
                 dst.pending_in.remove(&p.remote_id);
             }
-            notify.push((p.to, p.remote_id));
+            notify.push((p.to_gen, p.remote_id));
         }
         for (_, p) in own.pending_in {
-            if let Some(src) = self.by_peer.get_mut(&p.from) {
+            if let Some(src) = self.by_conn.get_mut(&p.from_gen) {
                 src.pending_out.remove(&p.remote_id);
             }
-            notify.push((p.from, p.remote_id));
+            notify.push((p.from_gen, p.remote_id));
         }
         notify
     }
@@ -319,16 +305,22 @@ mod tests {
     #[test]
     fn zuordnung_open_accept_close() {
         let mut t = Tunnels::default();
-        let ok = t.open("A", 7, "B", true).expect("open");
+        let ok = t.open(1, "A", 7, 2, "B").expect("open");
         assert_eq!(ok.remote_id, 1);
-        let (from, from_id) = t.accept("B", 1).expect("accept");
-        assert_eq!(from, "A");
+        let (from_gen, from_id) = t.accept(2, 1).expect("accept");
+        assert_eq!(from_gen, 1);
         assert_eq!(from_id, 7);
-        let fwd = t.lookup("A", 7).expect("map");
-        assert_eq!(fwd.remote_peer, "B");
+        let fwd = t.lookup(1, 7).expect("map");
+        assert_eq!(fwd.remote_gen, 2);
         assert_eq!(fwd.remote_id, 1);
-        let back = t.close("A", 7).expect("close");
-        assert_eq!(back, ("B".into(), 1));
-        assert!(t.lookup("B", 1).is_none());
+        let back = t.close(1, 7).expect("close");
+        assert_eq!(back, (2, 1));
+        assert!(t.lookup(2, 1).is_none());
+    }
+
+    #[test]
+    fn open_gleiche_peer_id_ist_self() {
+        let mut t = Tunnels::default();
+        assert_eq!(t.open(1, "A", 7, 2, "A").err(), Some(OpenFail::SelfOpen));
     }
 }

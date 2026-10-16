@@ -1,6 +1,18 @@
+import { defaultRelayUrl } from '../../renderer/cloudAccount/api.js';
 import { bytesToB64 } from './peerProtocol/bytes.js';
+import {
+  LEGACY_DEVICE_KEY,
+  isValidDeviceId,
+  normalizeDeviceKey,
+  parseDeviceList,
+  remoteDevicesFromPresence,
+  sessionKey,
+  shouldOpenTunnel,
+} from './sessionMap.js';
 
-export const DEFAULT_RELAY_URL = 'wss://bt.henny.dev/v1/ws';
+export { defaultRelayUrl };
+/** Web: eigene Herkunft (ws nur Loopback), sonst bt.henny.dev. */
+export const DEFAULT_RELAY_URL = defaultRelayUrl();
 const PING_INTERVAL_MS = 20_000;
 const HELLO_TIMEOUT_MS = 10_000;
 const BACKOFF_MIN_MS = 1_000;
@@ -34,9 +46,9 @@ export function parseRelayUrl(raw) {
   throw new Error('Nur wss:// ist erlaubt (ws:// nur lokal).');
 }
 
+/** Host klein, mit Port außer 80/443 — muss zu PUBLIC_HOST / Host-Header passen. */
 export function authHost(url) {
-  const host = url.hostname.toLowerCase();
-  return url.port ? `${host}:${url.port}` : host;
+  return String(url.host || '').toLowerCase();
 }
 
 export function encodeTunnelFrame(tunnelId, payload) {
@@ -71,24 +83,32 @@ export class RelayClient {
   constructor({
     getIdentity,
     getDisplayName,
+    getDeviceId,
+    getDeviceName,
     getWatchIds,
     isBlocked,
+    hasSession,
     hasPeer,
     onStatus,
     onPresence,
     onMail,
+    onSync,
     attachTunnel,
   }) {
     this.getIdentity = getIdentity;
     this.getDisplayName = getDisplayName;
+    this.getDeviceId = getDeviceId;
+    this.getDeviceName = getDeviceName;
     this.getWatchIds = getWatchIds;
     this.isBlocked = isBlocked;
+    this.hasSession = hasSession;
     this.hasPeer = hasPeer;
     this.onStatus = onStatus;
     this.onPresence = onPresence;
     this.onMail = onMail;
+    this.onSync = onSync;
     this.attachTunnel = attachTunnel;
-    this.config = { enabled: true, relayUrl: DEFAULT_RELAY_URL };
+    this.config = { enabled: true, relayUrl: defaultRelayUrl() };
     this.snapshot = this.snapshotFromConfig();
     this.mail = [];
     this.inFlight = new Map();
@@ -96,13 +116,16 @@ export class RelayClient {
     this.loop = null;
     this.backoffMs = BACKOFF_MIN_MS;
     this.replaced = false;
+    this.yielded = false;
     this.stopped = false;
     this.tunnels = new Map();
     this.pendingOpen = new Map();
-    this.openingPeers = new Set();
+    this.openingKeys = new Set();
+    this.remoteDevices = new Map();
     this.pendingPost = new Map();
     this.nextTunnelId = 1;
     this.ourPeerId = '';
+    this.ourDeviceId = '';
     this.host = '';
     this.limits = { maxFrame: MAX_TUNNEL_PAYLOAD, maxMailBody: DEFAULT_MAX_MAIL_BODY, maxTunnels: MAX_TUNNELS };
     this.controlQ = [];
@@ -117,16 +140,24 @@ export class RelayClient {
       relayUrl: this.config.relayUrl,
       state: this.config.enabled ? 'connecting' : 'disabled',
       peerId: '',
+      device: '',
       lastError: null,
       latencyMs: null,
       connectedAt: null,
       tunnels: 0,
       onlinePeers: [],
+      ownDevices: [],
+      yielded: false,
     };
   }
 
   getStatus() {
-    return { ...this.snapshot, onlinePeers: [...this.snapshot.onlinePeers] };
+    return {
+      ...this.snapshot,
+      onlinePeers: [...this.snapshot.onlinePeers],
+      ownDevices: [...(this.snapshot.ownDevices || [])],
+      yielded: this.yielded,
+    };
   }
 
   emitStatus() {
@@ -135,6 +166,7 @@ export class RelayClient {
 
   setState(state, error) {
     this.snapshot.state = state;
+    this.snapshot.yielded = this.yielded;
     if (state !== 'online') {
       this.snapshot.connectedAt = null;
       this.snapshot.tunnels = 0;
@@ -149,12 +181,14 @@ export class RelayClient {
   setConfig(value = {}) {
     const next = { ...this.config };
     if (typeof value.enabled === 'boolean') next.enabled = value.enabled;
-    if (typeof value.relayUrl === 'string') next.relayUrl = value.relayUrl.trim() || DEFAULT_RELAY_URL;
+    if (typeof value.relayUrl === 'string') next.relayUrl = value.relayUrl.trim() || defaultRelayUrl();
     parseRelayUrl(next.relayUrl);
     this.config = next;
     this.snapshot.enabled = next.enabled;
     this.snapshot.relayUrl = next.relayUrl;
     this.replaced = false;
+    this.yielded = false;
+    this.snapshot.yielded = false;
     this.reconnect();
     return this.getStatus();
   }
@@ -174,10 +208,23 @@ export class RelayClient {
 
   takeover() {
     this.replaced = false;
+    this.yielded = false;
+    this.snapshot.yielded = false;
     this._reconfigure = true;
     this.backoffMs = BACKOFF_MIN_MS;
     this.closeSocket('takeover');
     this.start();
+    this.wake();
+    return this.getStatus();
+  }
+
+  /** Anderer Tab im selben Profil übernimmt die Geräte-ID — Socket frei geben. */
+  yieldToOtherTab() {
+    this.yielded = true;
+    this.replaced = false;
+    this.snapshot.yielded = true;
+    this.closeSocket('tab');
+    this.setState('offline');
     this.wake();
     return this.getStatus();
   }
@@ -259,6 +306,11 @@ export class RelayClient {
         await this.waitForWake();
         continue;
       }
+      if (this.yielded) {
+        this.setState('offline');
+        await this.waitForWake();
+        continue;
+      }
       if (this.replaced) {
         this.setState('replaced', 'replaced');
         await this.waitForWake();
@@ -274,6 +326,10 @@ export class RelayClient {
         if (this._reconfigure) {
           this._reconfigure = false;
           this.backoffMs = BACKOFF_MIN_MS;
+          continue;
+        }
+        if (this.yielded) {
+          this.setState('offline');
           continue;
         }
         if (message === 'replaced') {
@@ -333,19 +389,30 @@ export class RelayClient {
       if (hello?.t !== 'hello' || !hello.nonce) throw new Error('unerwartete Relay-Begrüßung');
       const name = String(this.getDisplayName() || 'BlueTalk user').slice(0, 64);
       const signature = identity.signRelayAuth(hello.nonce, this.host);
-      this.sendJson({
+      const device = String(this.getDeviceId?.() || '').trim();
+      const deviceName = String(this.getDeviceName?.() || '').slice(0, 64);
+      const auth = {
         t: 'auth',
         publicKey: identity.publicKeyB64,
         signature: bytesToB64(signature),
         name,
         client: CLIENT_LABEL,
-      });
+      };
+      if (isValidDeviceId(device)) {
+        auth.device = device;
+        this.ourDeviceId = device;
+        if (deviceName) auth.deviceName = deviceName;
+      } else {
+        this.ourDeviceId = '';
+      }
+      this.sendJson(auth);
       const ready = await incoming.nextJson(HELLO_TIMEOUT_MS);
       if (ready?.t !== 'ready') {
         const code = ready?.code || 'auth_failed';
         throw new Error(code);
       }
       this.ourPeerId = ready.peerId || identity.peerId;
+      if (isValidDeviceId(ready.device)) this.ourDeviceId = ready.device;
       this.limits = {
         maxFrame: ready.limits?.maxFrame || MAX_TUNNEL_PAYLOAD,
         maxMailBody: ready.limits?.maxMailBody || DEFAULT_MAX_MAIL_BODY,
@@ -353,6 +420,8 @@ export class RelayClient {
       };
       this.inFlight.clear();
       this.snapshot.peerId = this.ourPeerId;
+      this.snapshot.device = this.ourDeviceId;
+      this.snapshot.ownDevices = parseDeviceList(ready.devices);
       this.snapshot.connectedAt = Date.now();
       this.snapshot.lastError = null;
       this.snapshot.latencyMs = null;
@@ -361,12 +430,14 @@ export class RelayClient {
       this.snapshot.state = 'online';
       this.snapshot.enabled = true;
       this.snapshot.relayUrl = this.config.relayUrl;
+      this.snapshot.yielded = false;
       this.emitStatus();
       this.sendWatch();
 
       this.tunnels = new Map();
       this.pendingOpen = new Map();
-      this.openingPeers = new Set();
+      this.openingKeys = new Set();
+      this.remoteDevices = new Map();
       this.pendingPost = new Map();
       this.nextTunnelId = 1;
       let pingN = 1;
@@ -396,6 +467,12 @@ export class RelayClient {
               break;
             case 'presence':
               this.handlePresence(value);
+              break;
+            case 'devices':
+              this.handleOwnDevices(value);
+              break;
+            case 'sync':
+              this.handleSync(value);
               break;
             case 'incoming':
               this.handleIncoming(value);
@@ -510,33 +587,94 @@ export class RelayClient {
     if (this.snapshot.state === 'online') this.sendWatch();
   }
 
+  ownDeviceKey() {
+    return isValidDeviceId(this.ourDeviceId) ? this.ourDeviceId : LEGACY_DEVICE_KEY;
+  }
+
+  hasBoundSession(peerId, deviceKey) {
+    if (this.hasSession?.(peerId, deviceKey)) return true;
+    if (!this.hasSession && this.hasPeer?.(peerId)) return true;
+    const key = normalizeDeviceKey(deviceKey);
+    return [...this.tunnels.values()].some(
+      (tunnel) => tunnel.peerId === peerId && tunnel.deviceKey === key,
+    );
+  }
+
+  sessionOccupied(peerId, deviceKey) {
+    if (this.openingKeys.has(sessionKey(peerId, deviceKey))) return true;
+    return this.hasBoundSession(peerId, deviceKey);
+  }
+
+  deviceNameOf(peerId, deviceKey) {
+    const list = this.remoteDevices.get(peerId) || [];
+    const key = normalizeDeviceKey(deviceKey);
+    return list.find((item) => item.id === key)?.name || '';
+  }
+
+  handleOwnDevices(value) {
+    this.snapshot.ownDevices = parseDeviceList(value?.devices);
+    this.emitStatus();
+  }
+
+  handleSync(value) {
+    this.onSync?.({
+      latestSeq: Number.isFinite(value?.latestSeq) ? value.latestSeq : value?.latestSeq ?? null,
+    });
+  }
+
   handlePresence(value) {
     const peerId = value.peerId;
     if (!peerId) return;
     const online = Boolean(value.online);
+    const devices = remoteDevicesFromPresence(value);
     if (online) {
       if (!this.snapshot.onlinePeers.includes(peerId)) this.snapshot.onlinePeers.push(peerId);
+      this.remoteDevices.set(peerId, devices);
     } else {
       this.snapshot.onlinePeers = this.snapshot.onlinePeers.filter((id) => id !== peerId);
+      this.remoteDevices.delete(peerId);
     }
     this.emitStatus();
-    this.onPresence?.({ peerId, online });
-    if (!online || this.isBlocked?.(peerId) || this.ourPeerId >= peerId) return;
-    if (this.hasPeer?.(peerId) || this.openingPeers.has(peerId) || [...this.tunnels.values()].some((t) => t.peerId === peerId)) {
-      return;
+    this.onPresence?.({ peerId, online, devices });
+    if (!online || this.isBlocked?.(peerId) || peerId === this.ourPeerId) return;
+    for (const device of devices) {
+      this.maybeOpen(peerId, device.id);
     }
-    this.startOpen(peerId).catch(() => {});
+  }
+
+  maybeOpen(peerId, deviceKey) {
+    const remoteKey = normalizeDeviceKey(deviceKey);
+    if (this.sessionOccupied(peerId, remoteKey)) return;
+    if (!shouldOpenTunnel(this.ourPeerId, this.ownDeviceKey(), peerId, remoteKey)) return;
+    this.startOpen(peerId, remoteKey).catch(() => {});
+  }
+
+  rememberRemoteDevice(peerId, deviceKey, deviceName) {
+    const key = normalizeDeviceKey(deviceKey);
+    if (key === LEGACY_DEVICE_KEY) return;
+    const list = this.remoteDevices.get(peerId) || [];
+    if (list.some((item) => item.id === key)) return;
+    this.remoteDevices.set(peerId, [...list, { id: key, name: deviceName || '' }]);
   }
 
   handleIncoming(value) {
     const tunnelId = Number(value.tunnel);
     const from = String(value.from || '');
-    if (!tunnelId || !from || this.isBlocked?.(from) || this.hasPeer?.(from) || this.tunnels.size >= this.limits.maxTunnels) {
+    const deviceKey = normalizeDeviceKey(value.fromDevice);
+    this.rememberRemoteDevice(from, deviceKey, '');
+    if (
+      !tunnelId
+      || !from
+      || from === this.ourPeerId
+      || this.isBlocked?.(from)
+      || this.hasBoundSession(from, deviceKey)
+      || this.tunnels.size >= this.limits.maxTunnels
+    ) {
       this.sendJson({ t: 'reject', tunnel: tunnelId });
       return;
     }
     this.sendJson({ t: 'accept', tunnel: tunnelId });
-    this.bindTunnel(tunnelId, from, false);
+    this.bindTunnel(tunnelId, from, false, deviceKey, this.deviceNameOf(from, deviceKey));
   }
 
   handleOpened(value) {
@@ -544,8 +682,14 @@ export class RelayClient {
     const pending = this.pendingOpen.get(tunnelId);
     if (!pending) return;
     this.pendingOpen.delete(tunnelId);
-    this.openingPeers.delete(pending.peerId);
-    this.bindTunnel(tunnelId, pending.peerId, true)
+    this.openingKeys.delete(sessionKey(pending.peerId, pending.deviceKey));
+    this.bindTunnel(
+      tunnelId,
+      pending.peerId,
+      true,
+      pending.deviceKey,
+      this.deviceNameOf(pending.peerId, pending.deviceKey),
+    )
       .then(pending.resolve)
       .catch(pending.reject);
   }
@@ -555,14 +699,17 @@ export class RelayClient {
     const pending = this.pendingOpen.get(tunnelId);
     if (!pending) return;
     this.pendingOpen.delete(tunnelId);
-    this.openingPeers.delete(pending.peerId);
+    this.openingKeys.delete(sessionKey(pending.peerId, pending.deviceKey));
     pending.reject(new Error(`Cloud-Tunnel fehlgeschlagen (${value.code || 'failed'})`));
   }
 
-  async bindTunnel(tunnelId, peerId, initiator) {
+  async bindTunnel(tunnelId, peerId, initiator, deviceKey, deviceName) {
+    const key = normalizeDeviceKey(deviceKey);
     const send = (bytes) => this.sendBinary(tunnelId, bytes);
     const handle = {
       peerId,
+      deviceKey: key,
+      deviceName: deviceName || '',
       push: null,
       queue: [],
       close: () => this.sendJson({ t: 'close', tunnel: tunnelId }),
@@ -574,6 +721,8 @@ export class RelayClient {
       const attached = await this.attachTunnel({
         tunnelId,
         peerId,
+        deviceKey: key,
+        deviceName: handle.deviceName,
         initiator,
         send,
         remoteAddress: `relay://${this.host}`,
@@ -622,7 +771,8 @@ export class RelayClient {
       pending.reject(new Error('Cloud-Tunnel wurde unterbrochen.'));
     }
     this.pendingOpen.clear();
-    this.openingPeers.clear();
+    this.openingKeys.clear();
+    this.remoteDevices.clear();
     for (const pending of this.pendingPost.values()) {
       pending.reject(new Error('Cloud-Postfach wurde unterbrochen.'));
     }
@@ -644,28 +794,46 @@ export class RelayClient {
     return 1;
   }
 
-  async startOpen(target) {
+  async startOpen(target, deviceKey) {
+    const remoteKey = normalizeDeviceKey(deviceKey);
     if (this.pendingOpen.size >= MAX_PENDING_OPENS || this.tunnels.size >= this.limits.maxTunnels) {
       throw new Error('Zu viele Cloud-Tunnel.');
     }
-    if ([...this.tunnels.values()].some((t) => t.peerId === target) || this.openingPeers.has(target)) {
-      throw new Error('Cloud-Tunnel zu diesem Peer läuft bereits.');
+    if (this.sessionOccupied(target, remoteKey)) {
+      throw new Error('Cloud-Tunnel zu diesem Gerät läuft bereits.');
     }
     const id = this.allocTunnelId();
-    this.openingPeers.add(target);
+    this.openingKeys.add(sessionKey(target, remoteKey));
     const promise = new Promise((resolve, reject) => {
-      this.pendingOpen.set(id, { peerId: target, resolve, reject });
+      this.pendingOpen.set(id, { peerId: target, deviceKey: remoteKey, resolve, reject });
     });
-    this.sendJson({ t: 'open', tunnel: id, to: target });
+    const open = { t: 'open', tunnel: id, to: target };
+    if (remoteKey !== LEGACY_DEVICE_KEY) open.device = remoteKey;
+    this.sendJson(open);
     return promise;
   }
 
-  async openPeer(peerId) {
+  async openPeer(peerId, deviceId) {
     const target = String(peerId || '').trim();
     if (!target) throw new Error('peerId fehlt');
     if (this.snapshot.state !== 'online') throw new Error('Cloud ist nicht online.');
-    if (this.hasPeer?.(target)) return null;
-    return this.startOpen(target);
+    if (deviceId == null || deviceId === '') {
+      const known = this.remoteDevices.get(target);
+      if (known?.length) {
+        let first = null;
+        for (const device of known) {
+          if (this.sessionOccupied(target, device.id)) continue;
+          const opened = this.startOpen(target, device.id);
+          if (!first) first = opened;
+        }
+        return first;
+      }
+      if (this.sessionOccupied(target, LEGACY_DEVICE_KEY)) return null;
+      return this.startOpen(target, LEGACY_DEVICE_KEY);
+    }
+    const remoteKey = normalizeDeviceKey(deviceId);
+    if (this.sessionOccupied(target, remoteKey)) return null;
+    return this.startOpen(target, remoteKey);
   }
 
   async postMail(peerId, body, id) {

@@ -47,7 +47,6 @@ pub struct Session {
     pub account_id: i64,
     #[allow(dead_code)]
     pub username: String,
-    #[allow(dead_code)]
     pub peer_id: String,
 }
 

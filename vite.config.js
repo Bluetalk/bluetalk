@@ -2,10 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bluetalkWebPwaPlugin } from './vite.web-pwa.js';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
-const WEB_CSP = "default-src 'self'; connect-src 'self' wss: https:; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'";
+const WEB_CSP = "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'";
 
 export default defineConfig(({ mode }) => {
   const isWeb = mode === 'web';
@@ -20,6 +21,7 @@ export default defineConfig(({ mode }) => {
             .replace(/content="default-src[^"]+"/, `content="${WEB_CSP}"`);
         },
       },
+      isWeb && bluetalkWebPwaPlugin(),
     ].filter(Boolean),
     base: isWeb ? '/' : './',
     clearScreen: false,

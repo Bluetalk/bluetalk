@@ -1,5 +1,8 @@
 /** Renderer-Einstieg; abgestimmt mit src/shared/ai-chat-constants.js (kein direkter Import — CJS im Browser). */
 
+/** Bots/KI-Chats sind eingestellt: bestehende Chats bleiben lesbar, nichts Neues. */
+export const AI_CHAT_DISCONTINUED = true;
+
 export const AI_CHAT_PEER_ID = '__ai_chat__';
 export const AI_CHAT_PEER_PREFIX = '__ai_chat__:';
 

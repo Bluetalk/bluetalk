@@ -49,6 +49,7 @@ const PUSH_BODY_SAFETY = 4096;
 let running = false;
 let pushTimer = null;
 let pullTimer = null;
+let pullSoonTimer = null;
 let inflight = null;
 let backoffMs = BACKOFF_MIN_MS;
 let focusHandler = null;
@@ -267,10 +268,23 @@ function schedulePush() {
   }, PUSH_DEBOUNCE_MS);
 }
 
+export function requestPull() {
+  if (!running) return;
+  if (pullSoonTimer) clearTimeout(pullSoonTimer);
+  pullSoonTimer = setTimeout(() => {
+    pullSoonTimer = null;
+    void runCycle('pull');
+  }, 300);
+}
+
 function teardownTimers() {
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
+  }
+  if (pullSoonTimer) {
+    clearTimeout(pullSoonTimer);
+    pullSoonTimer = null;
   }
   if (pullTimer) {
     clearInterval(pullTimer);

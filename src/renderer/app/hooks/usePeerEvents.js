@@ -130,6 +130,15 @@ export function usePeerEvents(deps) {
       })
     );
 
+    unsubs.push(
+      window.bluetalk.on('peer:devices', (payload) => {
+        const id = payload?.id;
+        const devices = Array.isArray(payload?.devices) ? payload.devices : [];
+        if (!id) return;
+        setPeers((prev) => prev.map((peer) => (peer.id === id ? { ...peer, devices } : peer)));
+      })
+    );
+
     const handlePeerMessage = createPeerMessageHandler({
         contactsRef,
         settingsRef,

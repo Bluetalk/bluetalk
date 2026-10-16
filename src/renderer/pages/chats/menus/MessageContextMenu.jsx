@@ -1,8 +1,10 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, Forward, Reply, ScrollText, Trash2, X } from 'lucide-react';
+import { Copy, Forward, Pencil, Pin, PinOff, Reply, ScrollText, Trash2, X } from 'lucide-react';
 import { CHAT_ICON_STROKE, getMessageCopyText } from '../messageHelpers.jsx';
+import { canEditOwnTextMessage } from '../../../../shared/chat-features.js';
 import { useContextMenuPosition } from './useContextMenuPosition.js';
+import { ContextMenuBackdrop } from './ContextMenuBackdrop.jsx';
 import { REACTION_EMOJIS } from '../../../app/messageReactions';
 
 /**
@@ -31,6 +33,8 @@ export function MessageContextMenu({
   onReact,
   workLogEnabled = false,
   onOpenWorklog,
+  onEdit,
+  onTogglePin,
 }) {
   const { ref: messageContextMenuRef, style: menuStyle } = useContextMenuPosition(menu);
 
@@ -47,17 +51,23 @@ export function MessageContextMenu({
         onClose();
       };
       document.addEventListener('mousedown', onDown);
+      document.addEventListener('pointerdown', onDown);
     }, 0);
     return () => {
       window.clearTimeout(id);
       document.removeEventListener('keydown', onKey);
-      if (onDown) document.removeEventListener('mousedown', onDown);
+      if (onDown) {
+        document.removeEventListener('mousedown', onDown);
+        document.removeEventListener('pointerdown', onDown);
+      }
     };
   }, [menu, onClose]);
 
   if (!menu) return null;
 
   return createPortal(
+    <>
+    <ContextMenuBackdrop open={Boolean(menu)} onClose={onClose} />
     <div
       ref={messageContextMenuRef}
       className="chat-list-context-menu msg-context-menu context-menu-pop"
@@ -92,6 +102,36 @@ export function MessageContextMenu({
         <Reply size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         Antworten
       </button>
+      {onEdit && canEditOwnTextMessage(menu.message) ? (
+        <button
+          type="button"
+          className="chat-list-context-menu-item"
+          role="menuitem"
+          onClick={() => {
+            onEdit(menu.message);
+            onClose();
+          }}
+        >
+          <Pencil size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+          Bearbeiten
+        </button>
+      ) : null}
+      {onTogglePin && menu.message?.messageId ? (
+        <button
+          type="button"
+          className="chat-list-context-menu-item"
+          role="menuitem"
+          onClick={() => {
+            onTogglePin(menu.message);
+            onClose();
+          }}
+        >
+          {menu.message.pinned
+            ? <PinOff size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            : <Pin size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />}
+          {menu.message.pinned ? 'Loslösen' : 'Anheften'}
+        </button>
+      ) : null}
       {getMessageCopyText(menu.message, debugMode) ? (
         <button
           type="button"
@@ -155,7 +195,8 @@ export function MessageContextMenu({
         <X size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
         Aus
       </button>
-    </div>,
+    </div>
+    </>,
     document.body
   );
 }

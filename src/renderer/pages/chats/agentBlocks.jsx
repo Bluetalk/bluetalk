@@ -25,8 +25,11 @@ import {
   MarkdownBody,
   MessageReplyQuote,
 } from './messageParts.jsx';
+import { wrapMentionTokensForMarkdown } from '../../../shared/chat-features.js';
+import { useMobileLayout } from '../../utils/touch.js';
 
 function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
+  const mobile = useMobileLayout();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const hideTimerRef = useRef(null);
@@ -96,8 +99,8 @@ function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
         role="menuitem"
         aria-haspopup="menu"
         aria-expanded={open}
-        onMouseEnter={showSubmenu}
-        onMouseLeave={hideSubmenu}
+        onMouseEnter={mobile ? undefined : showSubmenu}
+        onMouseLeave={mobile ? undefined : hideSubmenu}
         onClick={(e) => {
           e.stopPropagation();
           if (open) hideSubmenu();
@@ -108,7 +111,12 @@ function ContextMenuHoverSubmenu({ label, icon: Icon, children }) {
         {label}
         <ChevronRight size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden className="chat-list-context-menu-chevron" />
       </div>
-      {open
+      {open && mobile ? (
+        <div className="context-menu-submenu-inline" role="menu">
+          {children}
+        </div>
+      ) : null}
+      {open && !mobile
         ? createPortal(
             <div
               ref={flyoutRef}
@@ -713,7 +721,13 @@ function MessageSegments({ segments, content, thinking, toolEvents, live = false
 
 // Memoisiert, damit die (teure) Markdown/KaTeX-Darstellung nicht bei jedem
 // Tastendruck im Composer neu gerendert wird — Props müssen dafür stabil sein.
-const ChatMessage = React.memo(function ChatMessage({ message, onExpandImage, onOpenSubagent }) {
+const ChatMessage = React.memo(function ChatMessage({
+  message,
+  onExpandImage,
+  onOpenSubagent,
+  mentionMembers,
+  onJumpToMessage,
+}) {
   const imageUrl = getImageUrl(message);
   if (imageUrl) {
     const open = () => {
@@ -728,7 +742,11 @@ const ChatMessage = React.memo(function ChatMessage({ message, onExpandImage, on
 
     return (
       <>
-        <MessageReplyQuote replyTo={message.replyTo} isSelf={message.from === 'self'} />
+        <MessageReplyQuote
+          replyTo={message.replyTo}
+          isSelf={message.from === 'self'}
+          onJump={onJumpToMessage}
+        />
         <button type="button" className="msg-inline-image-link" onClick={open}>
           <img src={imageUrl} alt="Geteiltes Bild" className="msg-inline-image" />
         </button>
@@ -738,12 +756,19 @@ const ChatMessage = React.memo(function ChatMessage({ message, onExpandImage, on
 
   const split = splitThinkingText(message.content);
   const thinking = [message.thinking || '', split.thinking].filter(Boolean).join('\n\n');
-  const content = split.content || message.content;
+  const rawContent = split.content || message.content;
+  const content = mentionMembers?.length
+    ? wrapMentionTokensForMarkdown(rawContent, mentionMembers)
+    : rawContent;
   const segments = Array.isArray(message.segments) ? message.segments : null;
 
   return (
     <>
-      <MessageReplyQuote replyTo={message.replyTo} isSelf={message.from === 'self'} />
+      <MessageReplyQuote
+        replyTo={message.replyTo}
+        isSelf={message.from === 'self'}
+        onJump={onJumpToMessage}
+      />
       {message.aiStopped && !content && !thinking && !(message.toolEvents?.length) && !segments ? (
         <span className="msg-ai-stopped-hint">Antwort wurde gestoppt.</span>
       ) : (
