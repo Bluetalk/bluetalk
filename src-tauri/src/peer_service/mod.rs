@@ -16,7 +16,7 @@ use bluetalk_network::{
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{RwLock, oneshot};
 
 use crate::{
@@ -104,12 +104,12 @@ impl PeerService {
         service
     }
 
-    fn identity(&self) -> Result<NetworkIdentity> {
+    pub(crate) fn network_identity(&self) -> Result<NetworkIdentity> {
         NetworkIdentity::load_or_create(&self.identity_path)
             .map_err(|error| AppError::Network(format!("identity unavailable: {error}")))
     }
 
-    fn display_name(&self) -> String {
+    pub(crate) fn display_name(&self) -> String {
         let name = self
             .database
             .get("settings.displayName", Value::Null)
@@ -165,7 +165,7 @@ impl PeerService {
     }
 
     async fn start_network(self: &Arc<Self>) -> Result<()> {
-        let identity = self.identity()?;
+        let identity = self.network_identity()?;
         let sink = Arc::new(ServiceSink {
             service: Arc::downgrade(self),
         });
@@ -222,6 +222,9 @@ impl PeerService {
         tokio::time::sleep(Duration::from_millis(500)).await;
         self.start_network().await?;
         let _ = self.app.emit("peers:list-sync", self.peers_snapshot().await);
+        if let Some(cloud) = self.app.try_state::<Arc<crate::cloud::CloudService>>() {
+            cloud.reconnect();
+        }
         self.reconnect_contacts().await;
         Ok(())
     }
@@ -247,6 +250,9 @@ impl PeerService {
         }
         self.start_network().await?;
         let _ = self.app.emit("peers:list-sync", self.peers_snapshot().await);
+        if let Some(cloud) = self.app.try_state::<Arc<crate::cloud::CloudService>>() {
+            cloud.reconnect();
+        }
         Ok(())
     }
 

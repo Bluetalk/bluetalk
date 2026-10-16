@@ -17,6 +17,7 @@ import {
   GAME_PRESENCE_CLEAR_KIND,
   GAME_PRESENCE_KIND,
   gameInviteKey,
+  presenceFromInvite,
 } from '../../shared/game-presence.js';
 import { USER_PRESENCE_KIND, parseIncomingUserPresenceStatus, shouldSuppressNotifications } from '../../shared/user-presence.js';
 import { TYPING_KIND, TYPING_EXPIRE_MS } from '../../shared/chat-typing.js';
@@ -44,6 +45,7 @@ const INVITE_KINDS = new Set([
   'connect-four-invite',
   'chess-invite',
   'tic-tac-toe-invite',
+  'kart-invite',
   'live-docs-invite',
 ]);
 
@@ -230,6 +232,12 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
+    // BlueKart-Spielprotokoll (Wire, Echtzeit-Fahrdaten) — nicht im Chatverlauf speichern
+    if (msg.kind === 'kart' && fromId) {
+      if (isBlocked) return;
+      return;
+    }
+
     // Plugin-Realtime-Protokoll — nicht im Chatverlauf speichern
     if (msg.kind === REALTIME_KIND && fromId) {
       if (isBlocked) return;
@@ -269,7 +277,9 @@ export function createPeerMessageHandler(deps) {
         [fromId]: {
           ...msg,
           peerId: fromId,
-          updatedAt: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
+          // Empfangszeit statt Absender-Uhr: eine abweichende Systemzeit des
+          // Hosts darf die Lobby nicht sofort als veraltet erscheinen lassen.
+          updatedAt: Date.now(),
         },
       }));
       return;
@@ -290,7 +300,7 @@ export function createPeerMessageHandler(deps) {
     if (isBlocked) {
       const k = msg.kind;
       const blockable =
-        k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'connect-four-invite' || k === 'chess-invite' || k === 'tic-tac-toe-invite' || k === 'live-docs-invite' || k === 'contact-share';
+        k === 'chat' || k === 'file' || k === 'sticker' || k === 'encrypted-chat-e2ee' || k === 'poker-invite' || k === 'uno-invite' || k === 'connect-four-invite' || k === 'chess-invite' || k === 'tic-tac-toe-invite' || k === 'kart-invite' || k === 'live-docs-invite' || k === 'contact-share';
       if (blockable && fromId && msg.messageId) {
         void window.bluetalk.peer.send(fromId, {
           kind: 'messaging-blocked',
@@ -324,7 +334,7 @@ export function createPeerMessageHandler(deps) {
       }
       if (!session?.aesKey) {
         console.warn('E2EE message held because no current session is available:', fromId);
-        return;
+        return false;
       }
       try {
         const inner = await decryptChatPayload(session.aesKey, msg, { keyId: session.keyId || '' });
@@ -333,11 +343,12 @@ export function createPeerMessageHandler(deps) {
           messageId: inner.messageId || normalized.messageId,
           timestamp: typeof inner.timestamp === 'number' ? inner.timestamp : normalized.timestamp,
           from: fromId,
+          via: msg.via || inner.via,
         };
         wasPairwiseEncrypted = true;
       } catch (e) {
         console.error('E2EE decrypt failed:', e);
-        return;
+        return false;
       }
     }
 
@@ -390,7 +401,9 @@ export function createPeerMessageHandler(deps) {
             ? 'chess'
             : normalized.kind === 'tic-tac-toe-invite'
               ? 'tic-tac-toe'
-              : 'connect-four';
+              : normalized.kind === 'kart-invite'
+                ? 'kart'
+                : 'connect-four';
       const sessionId = game === 'poker' ? normalized.tableId : normalized.gameId;
       const hostPeerId = normalized.hostPeerId || fromId;
       if (sessionId && hostPeerId) {
@@ -402,6 +415,16 @@ export function createPeerMessageHandler(deps) {
           void window.bluetalk?.store?.set?.('gameInviteKeys', [...next]);
           return next;
         });
+        // Einladung sofort als Lobby anzeigen — ohne auf die nächste
+        // Präsenz-Meldung des Hosts zu warten.
+        const seeded = presenceFromInvite(normalized, fromId);
+        if (seeded) {
+          setPeerGamePresence((prev) => {
+            const current = prev[hostPeerId];
+            if (current && current.game === game && current.sessionId === sessionId) return prev;
+            return { ...prev, [hostPeerId]: seeded };
+          });
+        }
       }
       const inviteContact = contactsRef.current.find((entry) => entry?.id === fromId);
       if (!shouldSuppressNotifications(settingsRef.current) && !isContactNotificationMuted(inviteContact)) {
@@ -413,6 +436,16 @@ export function createPeerMessageHandler(deps) {
       return;
     }
 
+    if (normalized.messageId && fromId) {
+      const cached = messageCacheRef.current?.[fromId];
+      if (Array.isArray(cached) && cached.some((item) => item?.messageId === normalized.messageId)) {
+        return;
+      }
+    }
+
+    const meta = await window.bluetalk.messages.append(fromId, normalized);
+    if (meta?.appended === false) return;
+
     if ((normalized.kind === 'chat' || normalized.kind === 'file' || normalized.kind === 'sticker' || normalized.kind === 'contact-share') && normalized.messageId && fromId) {
       void window.bluetalk.peer.send(fromId, {
         kind: 'delivery-receipt',
@@ -421,9 +454,6 @@ export function createPeerMessageHandler(deps) {
         sender: settingsRef.current.displayName,
       });
     }
-
-    const meta = await window.bluetalk.messages.append(fromId, normalized);
-    if (meta?.appended === false) return;
 
     // Benachrichtigen erst nach erfolgreichem Append (keine Duplikate) und
     // unabhängig davon, ob die Nachricht verschlüsselt ankam.
@@ -475,7 +505,10 @@ export function createPeerMessageHandler(deps) {
           name: normalized.sender || existing?.name || fromId,
           pendingMessageRequest: hasOutgoing || requestCleared ? false : true,
         });
-        if (window.bluetalk) void window.bluetalk.store.set('contacts', updated);
+        if (window.bluetalk) {
+          void window.bluetalk.store.set('contacts', updated);
+          void window.bluetalk.cloud?.refreshWatch?.();
+        }
         return updated;
       });
     }

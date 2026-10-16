@@ -1158,65 +1158,222 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
   color: inherit;
 }
 
-/* ============ Cloud sync teaser ============ */
-.cloud-sync-page {
-  flex: 1;
-  min-height: 0;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: radial-gradient(ellipse 80% 60% at 50% 20%, rgba(124, 58, 237, 0.12), transparent 55%),
-    var(--bg-0);
+/* ============ Cloud-Nachrichten ============ */
+.cloud-sync-page .cloud-sync-shell {
+  gap: 18px;
+  padding: 20px 22px 28px;
+  overflow: auto;
 }
-.cloud-sync-inner {
-  width: min(440px, 100%);
+.cloud-sync-toolbar {
+  display: flex;
+  align-items: center;
+}
+.cloud-sync-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  text-align: center;
 }
 .cloud-sync-hero {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  min-height: min(400px, 72vh);
-  padding: 28px 20px 24px;
-  border-radius: var(--radius-xl);
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 18px 16px;
+  border-radius: var(--radius-lg);
   border: 1px solid color-mix(in srgb, #a855f7 35%, var(--border));
-  background: var(--bg-1);
-  box-shadow: var(--shadow-lg);
+  background:
+    radial-gradient(120% 90% at 6% 0%, color-mix(in srgb, #a855f7 12%, transparent), transparent 58%),
+    var(--bg-1);
+  box-shadow: var(--highlight);
 }
-.cloud-sync-hero-copy {
-  text-align: center;
-}
-.cloud-sync-back {
-  margin-top: auto;
-  width: 100%;
-}
-.cloud-sync-icon-wrap {
-  width: 72px;
-  height: 72px;
-  margin: 0 auto 16px;
-  border-radius: var(--radius-xl);
-  background: linear-gradient(145deg, rgba(124, 58, 237, 0.2), rgba(168, 85, 247, 0.12));
-  color: #a855f7;
+.cloud-sync-hero-main {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+.cloud-sync-hero-copy {
+  min-width: 0;
 }
 .cloud-sync-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: -0.4px;
-  margin-bottom: 10px;
+  letter-spacing: -0.35px;
+  margin: 0 0 4px;
   color: var(--fg-0);
 }
 .cloud-sync-lead {
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--fg-1);
-  margin-bottom: 12px;
+  margin: 0;
 }
 .cloud-sync-sub {
   font-size: 12.5px;
   line-height: 1.5;
+  margin: 6px 0 0;
+}
+.cloud-sync-error {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--red);
+}
+.cloud-sync-status-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #a855f7;
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.cloud-sync-status-ring svg {
+  display: block;
+}
+.cloud-sync-status-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  right: 1px;
+  bottom: 1px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  box-shadow: 0 0 0 2px var(--bg-1);
+}
+.cloud-sync-status-ring.is-online {
+  box-shadow:
+    inset 0 0 0 1px var(--border),
+    0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+.cloud-sync-status-ring.is-online .cloud-sync-status-dot { background: var(--green); }
+.cloud-sync-status-ring.is-connecting .cloud-sync-status-dot {
+  background: var(--amber);
+  animation: cloud-status-pulse 1.2s ease-in-out infinite;
+}
+.cloud-sync-status-ring.is-offline .cloud-sync-status-dot { background: var(--fg-3); }
+.cloud-sync-status-ring.is-disabled .cloud-sync-status-dot { background: var(--fg-3); }
+.cloud-sync-status-ring.is-error .cloud-sync-status-dot { background: var(--red); }
+@keyframes cloud-status-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.86); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.cloud-sync-power {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cloud-sync-power-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-1);
+}
+.cloud-sync-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.cloud-sync-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 14px 12px;
+}
+.cloud-sync-metric-value {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.cloud-sync-metric-label {
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.35;
+}
+.cloud-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cloud-sync-privacy {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.cloud-sync-privacy-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+.cloud-sync-privacy ul {
   margin: 0;
+  padding-left: 18px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.cloud-sync-privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cloud-sync-id-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cloud-sync-peer-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+  word-break: break-all;
+}
+.chat-cloud-badge,
+.msg-via-cloud {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-2);
+  flex-shrink: 0;
+}
+.list-item-name-row .list-item-name { min-width: 0; }
+.msg-via-cloud { opacity: 0.75; }
+.sidebar-cloud-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  right: 5px;
+  top: 5px;
+  background: var(--fg-3);
+  box-shadow: 0 0 0 2px var(--bg-0);
+}
+.sidebar-cloud-dot.is-online { background: var(--green); }
+.sidebar-cloud-dot.is-connecting {
+  background: var(--amber);
+  animation: cloud-status-pulse 1.2s ease-in-out infinite;
+}
+.sidebar-cloud-dot.is-error { background: var(--red); }
+@media (max-width: 720px) {
+  .cloud-sync-hero { flex-wrap: wrap; }
+  .cloud-sync-metrics,
+  .cloud-sync-privacy { grid-template-columns: 1fr; }
+  .cloud-sync-id-row { flex-direction: column; align-items: flex-start; }
 }
 
 /* ============ Chat profile / message rows ============ */
@@ -1424,6 +1581,10 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 }
 .error-page--muted {
   background: var(--bg-1);
+}
+/* Innerhalb der Seiten-Hülle trägt die Hülle selbst den Hintergrund. */
+.page-shell > .error-page {
+  background: transparent;
 }
 .error-page-card {
   max-width: 420px;

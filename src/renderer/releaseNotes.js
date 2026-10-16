@@ -3,6 +3,16 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.2.0': {
+    title: "What's new in BlueTalk 2.2.0",
+    items: [
+      'Cloud-Nachrichten: Kontakte erreichst du jetzt auch außerhalb deines Netzwerks. Die Verbindung läuft über den BlueTalk-Relay (bt.henny.dev) und bleibt Ende-zu-Ende verschlüsselt — der Server sieht keine Inhalte.',
+      'Offline-Postfach: Nachrichten an Kontakte, die gerade nicht online sind, werden verschlüsselt zwischengespeichert und automatisch zugestellt, sobald sie wieder da sind.',
+      'Der Relay-Server ist Open Source und lässt sich selbst hosten; unter „Cloud-Nachrichten“ kannst du einen eigenen Server eintragen oder die Cloud ganz abschalten.',
+      'Neu: BlueKart — 3D-Rennspiel mit sechs Strecken, Zeitfahren mit Geister-Fahrer und Medaillen, live mit Freunden.',
+      'Spieleinladungen werden wieder zuverlässig angezeigt; das Design wurde an vielen Stellen verfeinert.',
+    ],
+  },
   '2.1.1': {
     title: "What's new in BlueTalk 2.1.1",
     items: [

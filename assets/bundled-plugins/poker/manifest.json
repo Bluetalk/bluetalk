@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "poker",
   "name": "Poker (Texas Hold'em)",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": "^2.0.0",
   "description": "Erstellt Tische, lädt Spieler per Chat-Einladung ein und spielt Echtzeit Texas Hold'em über P2P.",
   "author": "BlueTalk",

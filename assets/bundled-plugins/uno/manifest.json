@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "uno",
   "name": "UNO",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": "^2.0.0",
   "description": "UNO für bis zu 8 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster mit 3D-Karten.",
   "author": "BlueTalk",

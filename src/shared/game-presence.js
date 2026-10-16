@@ -1,4 +1,4 @@
-/** @typedef {'uno' | 'poker' | 'connect-four' | 'chess' | 'tic-tac-toe'} GameKind */
+/** @typedef {'uno' | 'poker' | 'connect-four' | 'chess' | 'tic-tac-toe' | 'kart'} GameKind */
 /** @typedef {'public' | 'invite'} LobbyAccess */
 
 const GAME_PRESENCE_KIND = 'game-presence';
@@ -26,6 +26,7 @@ function isLobbyPhaseJoinable(game, phase) {
   if (game === 'connect-four') return phase === 'lobby';
   if (game === 'chess') return phase === 'lobby';
   if (game === 'tic-tac-toe') return phase === 'lobby';
+  if (game === 'kart') return phase === 'lobby';
   return false;
 }
 
@@ -63,7 +64,7 @@ function buildGamePresencePayload({
     kind: GAME_PRESENCE_KIND,
     game,
     sessionId,
-    tableName: String(tableName || (game === 'poker' ? 'Poker-Tisch' : game === 'connect-four' ? 'Vier-gewinnt-Tisch' : game === 'chess' ? 'Schach-Partie' : game === 'tic-tac-toe' ? 'Tic-Tac-Toe' : 'UNO-Tisch')).slice(0, 48),
+    tableName: String(tableName || (game === 'poker' ? 'Poker-Tisch' : game === 'connect-four' ? 'Vier-gewinnt-Tisch' : game === 'chess' ? 'Schach-Partie' : game === 'tic-tac-toe' ? 'Tic-Tac-Toe' : game === 'kart' ? 'Kart-Rennen' : 'UNO-Tisch')).slice(0, 48),
     phase: phase || 'lobby',
     lobbyAccess: normalizeLobbyAccess(lobbyAccess),
     role,
@@ -113,6 +114,59 @@ function canJoinGameViaPresence({ presence, gameInvites, hostPeerId }) {
   return Boolean(gameInvites?.has(key));
 }
 
+const INVITE_KIND_TO_GAME = {
+  'poker-invite': 'poker',
+  'uno-invite': 'uno',
+  'connect-four-invite': 'connect-four',
+  'chess-invite': 'chess',
+  'tic-tac-toe-invite': 'tic-tac-toe',
+  'kart-invite': 'kart',
+};
+
+const INVITE_SETTINGS_FIELD = {
+  poker: 'pokerSettings',
+  uno: 'unoSettings',
+  'connect-four': 'connectFourSettings',
+  chess: 'chessSettings',
+  'tic-tac-toe': 'ticTacToeSettings',
+  kart: 'kartSettings',
+};
+
+/**
+ * Baut aus einer eingehenden Spiel-Einladung einen Lobby-Eintrag, der wie eine
+ * Live-Präsenz des Hosts behandelt wird. So bleibt die Einladung im Spiele-Tab
+ * sichtbar, auch wenn die nächste Präsenz-Meldung des Hosts noch aussteht
+ * (Verbindungsaufbau, Neustart, Spiele ohne Heartbeat). Die echte Präsenz
+ * ersetzt den Eintrag, sobald sie eintrifft.
+ * @param {Record<string, unknown>} message @param {string} fromId @param {number} [now]
+ * @returns {Record<string, unknown> | null}
+ */
+function presenceFromInvite(message, fromId, now = Date.now()) {
+  const game = INVITE_KIND_TO_GAME[String(message?.kind || '')];
+  if (!game) return null;
+  const sessionId = String((game === 'poker' ? message.tableId : message.gameId) || '');
+  const hostPeerId = String(message.hostPeerId || fromId || '');
+  if (!sessionId || !hostPeerId) return null;
+  const settings = /** @type {Record<string, unknown> | undefined} */ (message[INVITE_SETTINGS_FIELD[game]]);
+  const maxPlayers = Math.max(2, Number(settings?.maxPlayers) || 4);
+  return {
+    kind: GAME_PRESENCE_KIND,
+    game,
+    sessionId,
+    tableName: String(message.tableName || '').slice(0, 48),
+    phase: 'lobby',
+    lobbyAccess: normalizeLobbyAccess(message.lobbyAccess),
+    role: 'host',
+    hostPeerId,
+    peerId: fromId,
+    playerCount: 1,
+    maxPlayers,
+    joinable: true,
+    fromInvite: true,
+    updatedAt: now,
+  };
+}
+
 /** @param {Record<string, unknown> | null | undefined} presence */
 function formatGamePresenceLabel(presence) {
   if (!presence?.game) return '';
@@ -124,7 +178,9 @@ function formatGamePresenceLabel(presence) {
         ? 'Schach'
         : presence.game === 'tic-tac-toe'
           ? 'Tic-Tac-Toe'
-          : 'UNO';
+          : presence.game === 'kart'
+            ? 'BlueKart'
+            : 'UNO';
   const name = presence.tableName || gameLabel;
   const phase = String(presence.phase || '');
 
@@ -155,6 +211,7 @@ export {
   buildGamePresencePayload,
   isInviteSessionActive,
   canJoinGameViaPresence,
+  presenceFromInvite,
   formatGamePresenceLabel,
   isPresenceStale,
 };

@@ -2,7 +2,6 @@
 //! periodisches Announce.
 
 use super::*;
-use super::session::spawn_session;
 
 pub(super) async fn accept_loop(
     inner: Arc<Inner>,
@@ -30,35 +29,9 @@ pub(super) async fn accept_loop(
         tokio::spawn(async move {
             let _permit = permit;
             stream.set_nodelay(true).ok();
-            let mut stream = stream;
-            let session = match timeout(
-                inner.config.timeouts.handshake,
-                protocol::responder_handshake(
-                    &mut stream,
-                    &inner.identity,
-                    &inner.config.display_name,
-                    inner.config.limits.max_frame_bytes,
-                ),
-            )
-            .await
+            if let Err(error) =
+                super::complete_inbound_session(inner, stream, remote.to_string()).await
             {
-                Ok(Ok(session)) => session,
-                Ok(Err(error)) => {
-                    log::debug!("inbound handshake from {remote} rejected: {error}");
-                    return;
-                }
-                Err(_) => {
-                    log::debug!("inbound handshake from {remote} timed out");
-                    return;
-                }
-            };
-            if let Err(error) = spawn_session(
-                inner,
-                stream,
-                session,
-                remote.to_string(),
-                ConnectionDirection::Inbound,
-            ) {
                 log::debug!("inbound session from {remote} not registered: {error}");
             }
         });

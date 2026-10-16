@@ -1,25 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Mail, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import { pluginRuntime } from '../plugins/pluginRuntime';
 import { useApp } from '../App';
 import { PeerAvatar } from './chats/messageHelpers.jsx';
-import {
-  canJoinGameViaPresence,
-  formatGamePresenceLabel,
-  isPresenceStale,
-} from '../../shared/game-presence.js';
+import { useOpenGameInvites } from '../app/hooks/useOpenGameInvites';
 
 const ICON_STROKE = 1.75;
-
-const GAME_LABELS = {
-  poker: 'Poker',
-  uno: 'UNO',
-  'connect-four': 'Vier gewinnt',
-  chess: 'Schach',
-  'tic-tac-toe': 'Tic-Tac-Toe',
-};
 
 const DEFAULT_LABELS = {
   launchNew: 'Neues Spiel',
@@ -45,31 +33,26 @@ function labelsForGame(game) {
 
 export default function GamesPage() {
   const { toast } = useToast();
-  const { peers, contacts, peerGamePresence, gameInviteKeys, joinGameFromPresence } = useApp();
+  const { joinGameFromPresence } = useApp();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [joiningKey, setJoiningKey] = useState('');
 
   // Beitretbare Lobbys anderer Peers (per Einladung oder öffentlich).
-  // Quelle ist die Live-Präsenz, nicht der Chatverlauf — abgelaufene oder
-  // volle Sitzungen verschwinden hier automatisch.
-  const openInvites = useMemo(() => {
-    const rows = [];
-    for (const [hostPeerId, presence] of Object.entries(peerGamePresence || {})) {
-      if (!presence || isPresenceStale(presence)) continue;
-      if (!canJoinGameViaPresence({ presence, gameInvites: gameInviteKeys, hostPeerId })) continue;
-      const contact = contacts.find((c) => c?.id === hostPeerId);
-      const peer = peers.find((p) => p?.id === hostPeerId);
-      const hostName = contact?.nickname || contact?.name || peer?.name || hostPeerId;
-      rows.push({
-        hostPeerId,
-        presence,
-        hostName,
-        gameLabel: GAME_LABELS[presence.game] || presence.game,
-        profilePicture: contact?.profilePicture || peer?.profilePicture || '',
-      });
+  const openInvites = useOpenGameInvites();
+
+  const joinInvite = async (presence, hostPeerId) => {
+    if (joiningKey) return;
+    setJoiningKey(`${hostPeerId}:${presence.sessionId}`);
+    try {
+      const result = await joinGameFromPresence(presence, hostPeerId);
+      if (result?.ok === false) {
+        toast({ variant: 'warning', title: 'Beitritt nicht möglich', message: result.message || 'Beitritt fehlgeschlagen.' });
+      }
+    } finally {
+      setJoiningKey('');
     }
-    return rows.sort((a, b) => a.hostName.localeCompare(b.hostName, undefined, { sensitivity: 'base' }));
-  }, [peerGamePresence, gameInviteKeys, contacts, peers]);
+  };
 
   const refresh = useCallback(async () => {
     const games = pluginRuntime.listGames();
@@ -171,29 +154,34 @@ export default function GamesPage() {
                 <span className="new-section-count">{openInvites.length}</span>
               </div>
               <div className="new-request-list">
-                {openInvites.map(({ hostPeerId, presence, hostName, gameLabel, profilePicture }) => (
-                  <div key={`${hostPeerId}:${presence.sessionId}`} className="new-request-row">
-                    <PeerAvatar pictureUrl={profilePicture} name={hostName} size={40} />
-                    <div className="new-request-copy">
-                      <div className="new-person-name">
-                        {gameLabel}
-                        {presence.tableName && presence.tableName !== gameLabel ? ` · ${presence.tableName}` : ''}
+                {openInvites.map(({ hostPeerId, presence, hostName, gameLabel, profilePicture, isPublic }) => {
+                  const key = `${hostPeerId}:${presence.sessionId}`;
+                  return (
+                    <div key={key} className="new-request-row">
+                      <PeerAvatar pictureUrl={profilePicture} name={hostName} size={40} />
+                      <div className="new-request-copy">
+                        <div className="new-person-name">
+                          {gameLabel}
+                          {presence.tableName && presence.tableName !== gameLabel ? ` · ${presence.tableName}` : ''}
+                        </div>
+                        <div className="new-person-meta">
+                          {hostName} · {isPublic ? 'Öffentliche Lobby' : 'Einladung'}
+                          {presence.fromInvite ? '' : ` · ${presence.playerCount}/${presence.maxPlayers} Spieler`}
+                        </div>
                       </div>
-                      <div className="new-person-meta">
-                        {hostName} · {formatGamePresenceLabel(presence)} · {presence.playerCount}/{presence.maxPlayers} Spieler
+                      <div className="new-request-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={Boolean(joiningKey)}
+                          onClick={() => void joinInvite(presence, hostPeerId)}
+                        >
+                          {joiningKey === key ? 'Trete bei…' : 'Beitreten'}
+                        </button>
                       </div>
                     </div>
-                    <div className="new-request-actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void joinGameFromPresence(presence, hostPeerId)}
-                      >
-                        Beitreten
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           ) : null}

@@ -107,7 +107,7 @@ export function ToastProvider({ children, solidBottomRight = false }) {
                 type="button"
                 className="toast-dismiss btn btn-ghost btn-icon"
                 onClick={() => dismissToast(t.id)}
-                aria-label="Dismiss notification"
+                aria-label="Benachrichtigung schließen"
               >
                 <X size={14} strokeWidth={1.75} aria-hidden />
               </button>

@@ -12,6 +12,7 @@ use std::{
 };
 
 use tokio::{
+    io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{Semaphore, mpsc, watch},
     task::JoinHandle,
@@ -220,7 +221,33 @@ impl PeerNetwork {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|_| target.to_string());
 
-        let mut stream = stream;
+        self.connect_stream(stream, remote_address, expected_peer_id)
+            .await
+    }
+
+    /// Initiator-Handshake über einen beliebigen bidirektionalen Stream
+    /// (TCP, Relay-Tunnel, Test-Duplex). Gleiche Timeouts wie der TCP-Pfad.
+    pub async fn connect_stream<S>(
+        &self,
+        mut stream: S,
+        remote_address: String,
+        expected_peer_id: Option<&str>,
+    ) -> Result<PeerInfo>
+    where
+        S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    {
+        {
+            let state = self.inner.state.lock().expect("network state lock");
+            if !state.started {
+                return Err(NetworkError::NotStarted);
+            }
+            if let Some(expected) = expected_peer_id {
+                if let Some(existing) = state.peers.get(expected) {
+                    return Ok(existing.info.clone());
+                }
+            }
+        }
+
         let session = timeout(
             self.inner.config.timeouts.handshake,
             protocol::initiator_handshake(
@@ -241,6 +268,31 @@ impl PeerNetwork {
             remote_address,
             ConnectionDirection::Outbound,
         )
+    }
+
+    /// Responder-Handshake über einen beliebigen Stream. Nutzt dieselben
+    /// Handshake-Permits wie die Accept-Schleife.
+    pub async fn accept_stream<S>(&self, stream: S, remote_address: String) -> Result<PeerInfo>
+    where
+        S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    {
+        {
+            let state = self.inner.state.lock().expect("network state lock");
+            if !state.started {
+                return Err(NetworkError::NotStarted);
+            }
+        }
+        let permit = self
+            .inner
+            .handshake_permits
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                NetworkError::Handshake("too many pending inbound handshakes".to_owned())
+            })?;
+        let result = complete_inbound_session(self.inner.clone(), stream, remote_address).await;
+        drop(permit);
+        result
     }
 
     pub fn disconnect(&self, peer_id: &str) -> Result<()> {
@@ -417,6 +469,34 @@ mod session;
 use loops::{accept_loop, announce_once, discovery_loop};
 use session::spawn_session;
 
+async fn complete_inbound_session<S>(
+    inner: Arc<Inner>,
+    mut stream: S,
+    remote_address: String,
+) -> Result<PeerInfo>
+where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    let session = timeout(
+        inner.config.timeouts.handshake,
+        protocol::responder_handshake(
+            &mut stream,
+            &inner.identity,
+            &inner.config.display_name,
+            inner.config.limits.max_frame_bytes,
+        ),
+    )
+    .await
+    .map_err(|_| NetworkError::Timeout("handshake"))??;
+    spawn_session(
+        inner,
+        stream,
+        session,
+        remote_address,
+        ConnectionDirection::Inbound,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex as StdMutex;
@@ -550,6 +630,59 @@ mod tests {
             outcome,
             Err(NetworkError::PeerIdentityMismatch { .. })
         ));
+
+        network_a.stop().await;
+        network_b.stop().await;
+    }
+
+    #[tokio::test]
+    async fn stream_connect_and_accept_exchange_a_message() {
+        let sink_a = CollectingSink::new();
+        let sink_b = CollectingSink::new();
+        let network_a = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(sink_a.clone()),
+        )
+        .unwrap();
+        let network_b = PeerNetwork::new(
+            NetworkIdentity::generate().unwrap(),
+            test_config(),
+            Arc::new(sink_b.clone()),
+        )
+        .unwrap();
+
+        network_a.start().await.unwrap();
+        network_b.start().await.unwrap();
+        let (client, server) = tokio::io::duplex(256 * 1024);
+        let expected_b = network_b.peer_id();
+
+        let (initiated, accepted) = tokio::join!(
+            network_a.connect_stream(client, "relay://test".to_owned(), Some(&expected_b)),
+            network_b.accept_stream(server, "relay://test".to_owned()),
+        );
+        let peer = initiated.expect("initiator stream handshake");
+        accepted.expect("responder stream handshake");
+        assert_eq!(peer.peer_id, expected_b);
+        assert_eq!(peer.remote_address, "relay://test");
+
+        network_a
+            .send(&peer.peer_id, serde_json::json!({"kind": "chat", "text": "via-stream"}))
+            .unwrap();
+        let received = sink_b
+            .wait_for(|event| matches!(event, NetworkEvent::Message { .. }))
+            .await;
+        match received {
+            NetworkEvent::Message {
+                payload,
+                from_peer_id,
+                ..
+            } => {
+                assert_eq!(payload["text"], "via-stream");
+                assert_eq!(from_peer_id, network_a.peer_id());
+            }
+            _ => unreachable!(),
+        }
 
         network_a.stop().await;
         network_b.stop().await;

@@ -1,3 +1,4 @@
+pub mod cloud;
 pub mod game_windows;
 pub mod maintenance;
 pub mod native;
@@ -20,13 +21,14 @@ pub fn require_main(window: &tauri::WebviewWindow) -> Result<()> {
     Ok(())
 }
 
-const APP_WINDOW_LABELS: [&str; 6] = [
+const APP_WINDOW_LABELS: [&str; 7] = [
     "main",
     "game-poker",
     "game-uno",
     "game-connect-four",
     "game-chess",
     "game-tic-tac-toe",
+    "game-kart",
 ];
 
 /// For read-only commands the isolated game windows may also call

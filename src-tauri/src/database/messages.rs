@@ -35,10 +35,9 @@ impl Database {
             params![peer_id, message_id, storage_id, timestamp, encrypted],
         )?;
 
-        if inserted == 0 {
-            // Idempotent append: return the current chat summary without rewriting the record.
-        }
-        self.chat_meta_locked(&connection, peer_id)
+        let mut meta = self.chat_meta_locked(&connection, peer_id)?;
+        meta.appended = Some(inserted > 0);
+        Ok(meta)
     }
 
     pub fn patch_message(&self, peer_id: &str, message_id: &str, patch: Value) -> Result<bool> {
@@ -181,6 +180,7 @@ impl Database {
         Ok(MessageMeta {
             count,
             last_message,
+            appended: None,
         })
     }
 

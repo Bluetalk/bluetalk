@@ -1,6 +1,6 @@
 // sendMessage (Direkt-Pfad; Gruppen-/KI-Zweig in eigenen Modulen), Receipts
 // und Lösch-Aktionen, 1:1 aus App.jsx ausgelagert.
-import { useCallback, startTransition } from 'react';
+import { useCallback, useEffect, useRef, startTransition } from 'react';
 import { encryptChatPayload } from '../../chatCrypto';
 import { waitForE2eeIdentity, waitForE2eeSession } from '../e2eePersistence';
 import { newChatMessageId } from '../appHelpers';
@@ -24,6 +24,46 @@ const {
   isActiveGroupMember,
   isGroupChatId,
 } = groupChat;
+
+async function deliverPeerPayload(peerId, wire, contactsRef) {
+  const sentDirect = await window.bluetalk.peer.send(peerId, wire);
+  if (sentDirect) return { sent: true, via: undefined, mailbox: null };
+
+  let cloudStatus = null;
+  try {
+    cloudStatus = await window.bluetalk.cloud?.getStatus?.();
+  } catch {
+    return { sent: false, via: undefined, mailbox: null };
+  }
+  if (cloudStatus?.state !== 'online') {
+    return { sent: false, via: undefined, mailbox: null };
+  }
+
+  const contact = contactsRef.current.find((entry) => entry?.id === peerId);
+  try {
+    const connectTarget = contact?.address
+      ? { id: peerId, address: contact.address }
+      : { id: peerId };
+    await window.bluetalk.peer.connect(connectTarget);
+    const sentAfterConnect = await window.bluetalk.peer.send(peerId, wire);
+    if (sentAfterConnect) return { sent: true, via: 'relay', mailbox: null };
+  } catch {
+    /* Postfach nur für bereits E2EE-verschlüsselte Chatnachrichten */
+  }
+
+  if (wire?.kind !== 'encrypted-chat-e2ee') {
+    return { sent: false, via: undefined, mailbox: null };
+  }
+  try {
+    const posted = await window.bluetalk.cloud.postMail(peerId, wire, wire.messageId);
+    if (posted?.status === 'delivered' || posted?.status === 'stored') {
+      return { sent: true, via: 'cloud', mailbox: posted.status };
+    }
+  } catch {
+    /* bleibt ausstehend */
+  }
+  return { sent: false, via: undefined, mailbox: null };
+}
 
 export function useMessaging({
   settings,
@@ -222,24 +262,21 @@ export function useMessaging({
       const deferDisk = isFile;
 
       try {
-        let sent;
-        let meta;
+        const persistPromise = deferDisk
+          ? null
+          : window.bluetalk.messages.append(peerId, selfMessageFull);
+        const outcome = await deliverPeerPayload(peerId, wire, contactsRef);
 
-        if (isFile && deferDisk) {
-          sent = await window.bluetalk.peer.send(peerId, wire);
-          if (!sent) {
+        let meta;
+        if (deferDisk) {
+          if (!outcome.sent) {
             failScheduled();
             return false;
           }
           meta = await window.bluetalk.messages.append(peerId, selfMessageFull);
         } else {
-          const pair = await Promise.all([
-            window.bluetalk.peer.send(peerId, wire),
-            window.bluetalk.messages.append(peerId, selfMessageFull),
-          ]);
-          sent = pair[0];
-          meta = pair[1];
-          if (!sent) {
+          meta = persistPromise ? await persistPromise : null;
+          if (!outcome.sent) {
             failScheduled();
             return false;
           }
@@ -252,6 +289,28 @@ export function useMessaging({
 
         if (meta?.count) {
           setChatMeta((prev) => ({ ...prev, [peerId]: meta }));
+        }
+
+        const patch = {};
+        if (outcome.via) patch.via = outcome.via;
+        if (outcome.mailbox === 'stored') {
+          const tid = deliveryTimersRef.current.get(messageId);
+          if (tid) clearTimeout(tid);
+          deliveryTimersRef.current.delete(messageId);
+          Object.assign(patch, { deliveryStatus: 'sent', via: 'cloud', cloudStored: true });
+          void applyMessagePatch(peerId, messageId, patch);
+          return true;
+        }
+        if (outcome.mailbox === 'delivered') {
+          const tid = deliveryTimersRef.current.get(messageId);
+          if (tid) clearTimeout(tid);
+          deliveryTimersRef.current.delete(messageId);
+          Object.assign(patch, { deliveryStatus: 'delivered', via: 'cloud' });
+          void applyMessagePatch(peerId, messageId, patch);
+          return true;
+        }
+        if (patch.via) {
+          void applyMessagePatch(peerId, messageId, patch);
         }
 
         const t = setTimeout(() => {
@@ -271,6 +330,72 @@ export function useMessaging({
   }, [settings.displayName, upsertContact, applyMessagePatch, sendE2eeHandshake, sendGroupPacket]);
 
   sendMessageRef.current = sendMessage;
+
+  const cloudStateRef = useRef(null);
+  const mailRetryInFlightRef = useRef(new Set());
+
+  useEffect(() => {
+    if (!window.bluetalk?.cloud?.onStatus) return undefined;
+    return window.bluetalk.cloud.onStatus((status) => {
+      const next = status?.state || '';
+      const prev = cloudStateRef.current;
+      cloudStateRef.current = next;
+      if (next !== 'online' || prev === 'online') return;
+      const cache = messageCacheRef.current || {};
+      for (const [peerId, list] of Object.entries(cache)) {
+        if (!Array.isArray(list)) continue;
+        const pending = list.filter((item) => (
+          item?.from === 'self'
+          && item?.kind === 'chat'
+          && item?.messageId
+          && item?.deliveryStatus === 'scheduled'
+          && item?.cloudStored !== true
+        ));
+        for (const msg of pending) {
+          if (mailRetryInFlightRef.current.has(msg.messageId)) continue;
+          mailRetryInFlightRef.current.add(msg.messageId);
+          void (async () => {
+            try {
+              const session = e2eeSessionsRef.current[peerId];
+              const ready = e2eeReadyPeersRef.current.has(peerId);
+              if (!session?.aesKey || !session.keyId || !ready) return;
+              const wirePayload = await encryptChatPayload(session.aesKey, {
+                kind: 'chat',
+                content: msg.content,
+                sender: settingsRef.current.displayName,
+                messageId: msg.messageId,
+                timestamp: msg.timestamp,
+              }, {
+                keyId: session.keyId,
+                version: session.e2eeVersion === 2 ? 2 : 1,
+              });
+              const outcome = await deliverPeerPayload(peerId, {
+                ...wirePayload,
+                sender: settingsRef.current.displayName,
+                messageId: msg.messageId,
+                timestamp: msg.timestamp,
+              }, contactsRef);
+              if (!outcome.sent) return;
+              const patch = { via: outcome.via || 'cloud' };
+              if (outcome.mailbox === 'stored') {
+                patch.deliveryStatus = 'sent';
+                patch.cloudStored = true;
+              } else if (outcome.mailbox === 'delivered') {
+                patch.deliveryStatus = 'delivered';
+              } else {
+                patch.deliveryStatus = 'pending';
+              }
+              await applyMessagePatch(peerId, msg.messageId, patch);
+            } catch {
+              /* bleibt vorgemerkt */
+            } finally {
+              mailRetryInFlightRef.current.delete(msg.messageId);
+            }
+          })();
+        }
+      }
+    });
+  }, [applyMessagePatch]);
 
   const sendReadReceipt = useCallback(async (peerId, lastReadMessageId) => {
     if (!window.bluetalk || !peerId || !lastReadMessageId) return;

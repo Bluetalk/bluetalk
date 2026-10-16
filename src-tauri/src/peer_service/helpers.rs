@@ -18,6 +18,11 @@ pub(super) fn peer_info_to_value(info: &bluetalk_network::PeerInfo) -> Value {
         "direction": info.direction,
         "encrypted": info.authenticated_encryption,
         "supportsHeartbeat": true,
+        "transport": if info.remote_address.starts_with("relay://") {
+            "relay"
+        } else {
+            "direct"
+        },
     })
 }
 
@@ -43,6 +48,8 @@ pub(super) fn extract_connect_target(target: &Value) -> Result<(String, Option<S
             let address = map
                 .get("address")
                 .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
                 .map(normalize_connect_address)
                 .transpose()?
                 .unwrap_or_default();

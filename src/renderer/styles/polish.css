@@ -1,0 +1,107 @@
+/* ============================================================
+   BlueTalk — Design-Feinschliff
+   Vervollständigt das neue Design (runde Flächen, ruhige Oberfläche)
+   über alle Seiten: sichtbare Fokus-Ringe, Links, Zahlen, Zustände
+   und die Spiele-Einladungen. Farben (tokens.css) und Layout bleiben
+   unverändert — diese Datei verfeinert nur Details.
+   ============================================================ */
+
+/* ---------- Basis ---------- */
+::selection { background: color-mix(in srgb, var(--blue) 32%, transparent); color: inherit; }
+
+/* Links ohne eigene Klasse: nie Browser-Blau. Niedrige Spezifität, damit
+   Komponenten-Links (Chat-Markdown, Docs, Buttons) unverändert bleiben. */
+:where(a:not([class])) {
+  color: var(--blue);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s ease;
+}
+:where(a:not([class])):hover { text-decoration-color: currentColor; }
+
+/* Zahlen in Zeitstempeln, Zählern und Badges springen nicht */
+.msg-time, .msg-delivery, .list-item-meta, .badge, .chat-unread-badge,
+.sidebar-link-badge, .titlebar-status, .new-section-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Fokus: überall sichtbar und einheitlich ---------- */
+:where(button, [role="button"], a, summary, select, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.input:focus-visible,
+.chat-input-bar textarea:focus-visible { outline: none; }
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--ring);
+}
+.toggle input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--ring);
+}
+.sidebar-link:focus-visible,
+.list-item:focus-visible,
+.tb-btn:focus-visible { outline-offset: -2px; }
+
+/* ---------- Buttons & Eingaben ---------- */
+.btn { letter-spacing: -0.005em; line-height: 1.25; }
+.btn svg { flex-shrink: 0; }
+:where(.btn-primary) { box-shadow: var(--highlight); }
+.btn-primary:active { box-shadow: none; }
+.btn-secondary:active { background: var(--bg-active); }
+.btn-ghost:active { background: var(--bg-active); }
+.btn-danger:active { filter: brightness(0.92); }
+
+.input:hover:not(:disabled):not(:focus) { border-color: var(--border-strong); }
+.input:disabled { opacity: 0.55; cursor: not-allowed; }
+.input-group label { letter-spacing: 0.01em; }
+
+.toggle-slider { transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.18s ease; }
+.toggle:hover .toggle-slider { border-color: var(--border-strong); }
+.toggle-slider::before { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+
+/* ---------- Karten, Badges ---------- */
+:where(.card) { box-shadow: var(--highlight); }
+.badge { letter-spacing: 0.01em; line-height: 1.5; gap: 4px; }
+.badge-default,
+.badge-success,
+.badge-blue,
+.badge-danger,
+.badge-warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent); }
+
+/* ---------- Seitenleiste ---------- */
+.sidebar-link-badge { top: -2px; right: -2px; }
+.sidebar-link-badge--info { background: var(--blue); }
+
+/* ---------- Dialoge ---------- */
+.modal-overlay { backdrop-filter: blur(8px) saturate(1.1); }
+.modal h3 { letter-spacing: -0.01em; }
+
+/* ---------- Seiten-Hülle ---------- */
+:where(.page-shell) { box-shadow: var(--highlight); }
+.page-shell-copy p { line-height: 1.5; }
+
+/* ---------- Zeilen in „Neu" & Spiele ---------- */
+.new-request-row { transition: border-color 0.15s ease, background 0.15s ease; }
+.new-request-row:hover { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); }
+
+/* ---------- Spiele-Einladungen ---------- */
+.games-invites .new-section-count { background: var(--blue-soft); color: var(--blue); }
+.games-invites .new-request-row {
+  border-color: color-mix(in srgb, var(--blue) 28%, var(--border));
+  background: color-mix(in srgb, var(--blue) 6%, var(--bg-1));
+}
+.games-invites .new-request-row:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
+}
+.games-invites .new-request-row { animation: card-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+
+/* ---------- Fehler-/Leerseiten ---------- */
+.error-page-card { border-radius: var(--radius-lg); box-shadow: var(--shadow-md), var(--highlight); }
+.error-page-icon { border-radius: var(--radius-md); }
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .games-invites .new-request-row { animation: none; }
+}

@@ -36,7 +36,7 @@ struct AuxiliarySpec {
     min_height: u32,
 }
 
-const AUXILIARY_SPECS: [AuxiliarySpec; 5] = [
+const AUXILIARY_SPECS: [AuxiliarySpec; 6] = [
     AuxiliarySpec {
         game: "poker",
         label: "game-poker",
@@ -90,6 +90,17 @@ const AUXILIARY_SPECS: [AuxiliarySpec; 5] = [
         width: 900,
         height: 780,
         min_width: 640,
+        min_height: 520,
+    },
+    AuxiliarySpec {
+        game: "kart",
+        label: "game-kart",
+        route: "/kart-game",
+        event_prefix: "kart",
+        title: "BlueKart",
+        width: 1280,
+        height: 800,
+        min_width: 800,
         min_height: 520,
     },
 ];

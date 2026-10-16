@@ -130,8 +130,7 @@ export function usePeerEvents(deps) {
       })
     );
 
-    unsubs.push(
-      window.bluetalk.on('peer:message', createPeerMessageHandler({
+    const handlePeerMessage = createPeerMessageHandler({
         contactsRef,
         settingsRef,
         deliveryTimersRef,
@@ -163,8 +162,44 @@ export function usePeerEvents(deps) {
         rememberIncomingGroupEvent,
         replaceGroup,
         persistGroupOutbox,
-      }))
-    );
+    });
+    unsubs.push(window.bluetalk.on('peer:message', handlePeerMessage));
+
+    const drainCloudMail = async () => {
+      if (!window.bluetalk?.cloud?.drainMail) return;
+      let batch = [];
+      try {
+        batch = await window.bluetalk.cloud.drainMail();
+      } catch {
+        return;
+      }
+      if (!Array.isArray(batch) || batch.length === 0) return;
+      const acked = [];
+      for (const mail of batch) {
+        if (!mail?.id) continue;
+        const body = mail?.body && typeof mail.body === 'object' ? mail.body : {};
+        try {
+          const handled = await handlePeerMessage({
+            ...body,
+            from: mail.from,
+            timestamp: typeof body.timestamp === 'number' ? body.timestamp : mail.ts,
+            via: 'cloud',
+          });
+          if (handled !== false) acked.push(mail.id);
+        } catch {
+          /* bleibt in-flight, Server stellt erneut zu */
+        }
+      }
+      if (acked.length && window.bluetalk.cloud.ackMail) {
+        try {
+          await window.bluetalk.cloud.ackMail(acked);
+        } catch {
+          /* nächste Sitzung liefert erneut */
+        }
+      }
+    };
+    void drainCloudMail();
+    unsubs.push(window.bluetalk.cloud?.onMail?.(() => { void drainCloudMail(); }) || (() => undefined));
 
     let cancelled = false;
     void loadInitialData({

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "chess",
   "name": "Schach",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": "^2.0.0",
   "description": "2-Spieler-Schach — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster.",
   "author": "BlueTalk",

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, Trash2 } from 'lucide-react';
+import { Cloud, Save, Trash2 } from 'lucide-react';
 import StickerMessage from '../../components/StickerMessage';
 import { isContactNotificationMuted } from '../../contactNotificationMute';
 import groupChat from '../../../shared/group-chat.js';
@@ -37,6 +37,7 @@ const INVITE_MESSAGE_KINDS = new Set([
   'connect-four-invite',
   'chess-invite',
   'tic-tac-toe-invite',
+  'kart-invite',
   'live-docs-invite',
 ]);
 
@@ -169,9 +170,9 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
             {loadingMore ? (
               <span className="spinner-label">
                 <span className="spinner spinner--sm" />
-                <span>Loading</span>
+                <span>Lädt…</span>
               </span>
-            ) : `Load ${Math.min(CHAT_BATCH_SIZE, selectedPeer.messageCount - msgs.length)} older messages`}
+            ) : `${Math.min(CHAT_BATCH_SIZE, selectedPeer.messageCount - msgs.length)} ältere Nachrichten laden`}
           </button>
         </div>
       )}
@@ -180,14 +181,14 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
         <div className="chat-empty">
           <span className="spinner-label">
             <span className="spinner spinner--md" />
-            <span>Loading messages</span>
+            <span>Nachrichten werden geladen…</span>
           </span>
         </div>
       )}
 
       {!loadingMessages && msgs.length === 0 && !aiChatPending && !peerTypingActive && (
         <div className="chat-empty">
-          <p className="text-muted">No messages yet. Say hello!</p>
+          <p className="text-muted">Noch keine Nachrichten. Sag Hallo!</p>
         </div>
       )}
 
@@ -214,7 +215,7 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
         const isBotBubble = isAiChatSelected && !isSelf && !isLegacyAgentMessage;
         const outsideBubble = bareMedia || embedMessage || stickerMessage;
         const delivery = selfDeliveryLabel(m);
-        const seen = isSelf && readUpToId && m.messageId && readUpToId === m.messageId ? 'Seen' : '';
+        const seen = isSelf && readUpToId && m.messageId && readUpToId === m.messageId ? 'Gesehen' : '';
         const isSelected = Boolean(m.messageId && selectedMessageIds.has(m.messageId));
         const aiStats = !isSelf && m.aiStats && typeof m.aiStats === 'object' ? m.aiStats : null;
         const showAvatar = isGroupSelected && !isLegacyAgentMessage && !isBotBubble && !selectionMode && !clusteredWithNext;
@@ -315,7 +316,17 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               )}
               {showMeta ? (
               <div className={`msg-meta${isSelf ? ' msg-meta--self' : ''}`}>
-                {showTime ? <span className="msg-time">{formatMessageTime(m.timestamp)}</span> : null}
+                {showTime ? (
+                  <span className="msg-time">
+                    {formatMessageTime(m.timestamp)}
+                    {m.via === 'cloud' ? (
+                      <span className="msg-via-cloud" title="Über Cloud-Postfach">
+                        {' '}
+                        <Cloud size={10} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
                 {delivery.pending ? (
                   <span className="msg-delivery msg-delivery-pending">
                     <span className="spinner spinner--sm spinner--accent" />

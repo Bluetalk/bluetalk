@@ -213,7 +213,7 @@ export default function ProfileMenu({ variant = 'default' }) {
               }}
             >
               <Cloud size={16} strokeWidth={1.75} />
-              Cloud sync
+              Cloud-Nachrichten
             </button>
           </div>
         </div>

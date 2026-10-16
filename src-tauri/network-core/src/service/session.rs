@@ -2,16 +2,20 @@
 //! Reader/Writer-Task, der eine verschlüsselte Verbindung betreibt.
 
 use super::*;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Registers the peer (applying the duplicate-connection tie-break) and spawns
 /// the reader/writer tasks that own the connection.
-pub(super) fn spawn_session(
+pub(super) fn spawn_session<S>(
     inner: Arc<Inner>,
-    stream: TcpStream,
+    stream: S,
     session: EstablishedSession,
     remote_address: String,
     direction: ConnectionDirection,
-) -> Result<PeerInfo> {
+) -> Result<PeerInfo>
+where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let own_peer_id = inner.identity.peer_id();
     if session.remote_peer_id == own_peer_id {
         return Err(NetworkError::Handshake(
@@ -81,22 +85,24 @@ pub(super) fn spawn_session(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_session(
+async fn run_session<S>(
     inner: Arc<Inner>,
-    stream: TcpStream,
+    stream: S,
     session: EstablishedSession,
     peer_id: String,
     connection_id: String,
     mut outbound: mpsc::Receiver<Vec<u8>>,
     queued_bytes: Arc<AtomicUsize>,
     mut close: watch::Receiver<bool>,
-) {
+) where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let EstablishedSession {
         mut send_cipher,
         mut receive_cipher,
         ..
     } = session;
-    let (mut read_half, mut write_half) = stream.into_split();
+    let (mut read_half, mut write_half) = tokio::io::split(stream);
     let limits_max_frame = inner.config.limits.max_frame_bytes;
     let timeouts = inner.config.timeouts.clone();
     let sink = inner.sink.clone();

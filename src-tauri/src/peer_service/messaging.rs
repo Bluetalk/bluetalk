@@ -56,13 +56,88 @@ impl PeerService {
 
     pub async fn connect(&self, target: &Value) -> Result<Value> {
         let (address, expected_peer_id) = extract_connect_target(target)?;
+        if let Some(peer_id) = expected_peer_id.as_deref() {
+            if let Some(existing) = self.peer_snapshot(peer_id).await {
+                return Ok(existing);
+            }
+        }
         let address = self.resolve_dial_address(&address, expected_peer_id.as_deref()).await;
+        let direct_error = if address.is_empty() {
+            None
+        } else {
+            match self.network().await {
+                Ok(network) => match network.connect(&address, expected_peer_id.as_deref()).await {
+                    Ok(info) => return Ok(peer_info_to_value(&info)),
+                    Err(error) => Some(normalize_connect_error(&error.to_string())),
+                },
+                Err(error) => Some(error.to_string()),
+            }
+        };
+
+        if let Some(peer_id) = expected_peer_id.as_deref() {
+            if let Some(existing) = self.peer_snapshot(peer_id).await {
+                return Ok(existing);
+            }
+            if let Some(cloud) = self.app.try_state::<Arc<crate::cloud::CloudService>>() {
+                if cloud.is_online() {
+                    match cloud.open_peer(peer_id).await {
+                        Ok(info) => return Ok(info),
+                        Err(error) => {
+                            if address.is_empty() {
+                                return Err(error);
+                            }
+                            log::debug!("cloud fallback for {peer_id} failed: {error}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(AppError::Network(direct_error.unwrap_or_else(|| {
+            "Connection failed".to_owned()
+        })))
+    }
+
+    pub(crate) async fn connect_relay_stream<S>(
+        &self,
+        stream: S,
+        remote_address: String,
+        expected_peer_id: Option<&str>,
+    ) -> Result<Value>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    {
         let network = self.network().await?;
-        let info = network
-            .connect(&address, expected_peer_id.as_deref())
+        match network
+            .connect_stream(stream, remote_address, expected_peer_id)
             .await
-            .map_err(|error| AppError::Network(normalize_connect_error(&error.to_string())))?;
-        Ok(peer_info_to_value(&info))
+        {
+            Ok(info) => Ok(peer_info_to_value(&info)),
+            Err(bluetalk_network::NetworkError::DuplicatePeer(id)) => self
+                .peer_snapshot(&id)
+                .await
+                .ok_or_else(|| AppError::Network(format!("peer already connected: {id}"))),
+            Err(error) => Err(AppError::Network(normalize_connect_error(&error.to_string()))),
+        }
+    }
+
+    pub(crate) async fn accept_relay_stream<S>(
+        &self,
+        stream: S,
+        remote_address: String,
+    ) -> Result<Value>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    {
+        let network = self.network().await?;
+        match network.accept_stream(stream, remote_address).await {
+            Ok(info) => Ok(peer_info_to_value(&info)),
+            Err(bluetalk_network::NetworkError::DuplicatePeer(id)) => self
+                .peer_snapshot(&id)
+                .await
+                .ok_or_else(|| AppError::Network(format!("peer already connected: {id}"))),
+            Err(error) => Err(AppError::Network(error.to_string())),
+        }
     }
 
     /// Prefers a discovered endpoint for the peer when the raw input has no
@@ -134,22 +209,22 @@ impl PeerService {
     }
 
     pub async fn reconnect_contacts(self: &Arc<Self>) {
+        let cloud_online = self.cloud_online();
         for contact in self.stored_contacts() {
-            let Some(address) = contact.address else { continue };
             if contact.blocked {
                 continue;
             }
-            let connected = {
-                let network = self.network.read().await.clone();
-                network
-                    .map(|network| network.peers().iter().any(|peer| peer.peer_id == contact.id))
-                    .unwrap_or(false)
-            };
-            if connected {
+            if contact.address.is_none() && !cloud_online {
+                continue;
+            }
+            if self.has_peer(&contact.id).await {
                 continue;
             }
             let service = self.clone();
-            let target = json!({ "id": contact.id, "address": address });
+            let target = match contact.address {
+                Some(address) => json!({ "id": contact.id, "address": address }),
+                None => json!({ "id": contact.id }),
+            };
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = service.connect(&target).await {
                     log::debug!("contact reconnect failed: {error}");

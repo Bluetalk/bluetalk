@@ -21,7 +21,7 @@ export default class ErrorBoundary extends React.Component {
     const { error } = this.state;
     if (!error) return this.props.children;
 
-    const message = error?.message || 'Something went wrong.';
+    const message = error?.message || 'Etwas ist schiefgelaufen.';
 
     return (
       <div className="error-page">
@@ -29,10 +29,10 @@ export default class ErrorBoundary extends React.Component {
           <div className="error-page-icon" aria-hidden>
             <AlertTriangle size={28} strokeWidth={1.75} />
           </div>
-          <h1 className="error-page-title">This view crashed</h1>
+          <h1 className="error-page-title">Diese Ansicht ist abgestürzt</h1>
           <p className="error-page-lead text-muted">
-            BlueTalk hit an unexpected error. You can reload the window or return to chats. If this keeps happening, try
-            restarting the app.
+            BlueTalk ist auf einen unerwarteten Fehler gestoßen. Du kannst das Fenster neu laden oder zu den Chats
+            zurückkehren. Tritt der Fehler wiederholt auf, starte die App neu.
           </p>
           <pre className="error-page-detail">{message}</pre>
           <div className="error-page-actions">
@@ -42,7 +42,7 @@ export default class ErrorBoundary extends React.Component {
               onClick={() => window.location.reload()}
             >
               <RefreshCw size={15} strokeWidth={1.75} aria-hidden />
-              Reload
+              Neu laden
             </button>
             {this.props.showHomeAction !== false ? (
               <button
@@ -54,7 +54,7 @@ export default class ErrorBoundary extends React.Component {
                 }}
               >
                 <Home size={15} strokeWidth={1.75} aria-hidden />
-                Back to chats
+                Zurück zu den Chats
               </button>
             ) : null}
           </div>

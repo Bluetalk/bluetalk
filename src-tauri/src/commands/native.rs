@@ -76,6 +76,22 @@ pub async fn file_save_as(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn open_url(window: WebviewWindow, url: String) -> Result<Value> {
+    require_main(&window)?;
+    let parsed = url::Url::parse(url.trim()).map_err(|_| {
+        AppError::InvalidInput("URL ist ungültig.".to_owned())
+    })?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::InvalidInput(
+            "Nur https-Links können geöffnet werden.".to_owned(),
+        ));
+    }
+    tauri_plugin_opener::open_url(url.trim(), None::<&str>)
+        .map_err(|error| AppError::Io(std::io::Error::other(error.to_string())))?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn file_open_path(window: WebviewWindow, path: String) -> Result<Value> {
     require_main(&window)?;
     let trimmed = path.trim();

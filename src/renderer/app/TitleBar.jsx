@@ -51,22 +51,22 @@ export default function TitleBar() {
       </div>
       <div className="titlebar-status">
         <span className={peerCount > 0 ? 'online-dot' : 'offline-dot'} />
-        <span>{peerCount} peer{peerCount !== 1 ? 's' : ''}</span>
+        <span>{peerCount} {peerCount === 1 ? 'Peer' : 'Peers'}</span>
       </div>
       <div className="titlebar-controls">
-        <button type="button" onClick={() => window.bluetalk?.window.minimize()} className="tb-btn" title="Minimize" aria-label="Minimize">
+        <button type="button" onClick={() => window.bluetalk?.window.minimize()} className="tb-btn" title="Minimieren" aria-label="Minimieren">
           <Minus size={14} strokeWidth={2} aria-hidden />
         </button>
         <button
           type="button"
           onClick={() => window.bluetalk?.window.maximize()}
           className="tb-btn"
-          title={isMaximized ? 'Restore' : 'Maximize'}
-          aria-label={isMaximized ? 'Restore' : 'Maximize'}
+          title={isMaximized ? 'Wiederherstellen' : 'Maximieren'}
+          aria-label={isMaximized ? 'Wiederherstellen' : 'Maximieren'}
         >
           {isMaximized ? <SquareStack size={14} strokeWidth={2} aria-hidden /> : <Maximize2 size={14} strokeWidth={2} aria-hidden />}
         </button>
-        <button type="button" onClick={() => window.bluetalk?.window.close()} className="tb-btn tb-close" title="Close" aria-label="Close">
+        <button type="button" onClick={() => window.bluetalk?.window.close()} className="tb-btn tb-close" title="Schließen" aria-label="Schließen">
           <X size={14} strokeWidth={2} aria-hidden />
         </button>
       </div>

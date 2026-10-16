@@ -105,6 +105,11 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
   let tttSelfPeerName = '';
   let clientState = null;
   let lastPresenceSession = null;
+  // Heartbeat: Gäste verwerfen Lobby-Präsenz nach 90 s ohne Meldung — ohne
+  // regelmäßiges Signal verschwänden offene Einladungen aus dem Spiele-Tab.
+  const presenceHeartbeat = setInterval(() => {
+    if (lastPresenceSession) syncGamePresence();
+  }, 20_000);
 
   // Live-Autopilot: ein gewähltes eigenes Modell zieht für den eigenen
   // Sitzplatz — funktioniert als Host wie als Gast, solo wie online.
@@ -525,6 +530,7 @@ export default function activateTicTacToePlugin(BlueTalkPlugin) {
   void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
+    clearInterval(presenceHeartbeat);
     offChild?.();
     offMessage?.();
     offDisconnect?.();

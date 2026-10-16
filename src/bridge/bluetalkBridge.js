@@ -40,6 +40,12 @@ const ALLOWED_EVENTS = new Set([
   'ticTacToe:windowMaximized',
   'ticTacToe:state',
   'ticTacToe:fromChild',
+  'kart:windowMaximized',
+  'kart:state',
+  'kart:fromChild',
+  'cloud:status',
+  'cloud:presence',
+  'cloud:mail',
 ]);
 
 function subscribe(channel, callback) {
@@ -206,6 +212,7 @@ const api = Object.freeze({
   connectFour: Object.freeze(gameBridge('connect-four', '/connect-four-game')),
   chess: Object.freeze(gameBridge('chess', '/chess-game')),
   ticTacToe: Object.freeze(gameBridge('ticTacToe', '/tic-tac-toe-game')),
+  kart: Object.freeze(gameBridge('kart', '/kart-game')),
 
   app: Object.freeze({
     clearCache: () => call('app_clear_cache'),
@@ -213,6 +220,23 @@ const api = Object.freeze({
     wipeAllData: () => call('app_wipe_all_data'),
     getConfigLogPath: () => call('app_get_config_log_path'),
     readConfigTail: (maxBytes) => call('app_read_config_tail', { maxBytes }),
+    openUrl: (url) => call('open_url', { url }),
+  }),
+
+  cloud: Object.freeze({
+    getStatus: () => call('cloud_get_status'),
+    setConfig: (config) => call('cloud_set_config', { config }),
+    postMail: (peerId, body, id) => call('cloud_post_mail', {
+      peerId,
+      body,
+      ...(id ? { id } : {}),
+    }),
+    drainMail: () => call('cloud_drain_mail'),
+    ackMail: (ids) => call('cloud_ack_mail', { ids }),
+    refreshWatch: () => call('cloud_refresh_watch'),
+    onStatus: (callback) => subscribe('cloud:status', callback),
+    onPresence: (callback) => subscribe('cloud:presence', callback),
+    onMail: (callback) => subscribe('cloud:mail', callback),
   }),
 
   plugins: Object.freeze({

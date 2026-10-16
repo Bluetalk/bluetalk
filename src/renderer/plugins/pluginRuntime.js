@@ -27,6 +27,7 @@ const BUNDLED_UI_LOADERS = Object.freeze({
   hello: () => import('../../../assets/bundled-plugins/hello/ui.js'),
   poker: () => import('../../../assets/bundled-plugins/poker/ui.js'),
   'theme-studio': () => import('../../../assets/bundled-plugins/theme-studio/ui.js'),
+  kart: () => import('../../../assets/bundled-plugins/kart/ui.js'),
   'tic-tac-toe': () => import('../../../assets/bundled-plugins/tic-tac-toe/ui.js'),
   uno: () => import('../../../assets/bundled-plugins/uno/ui.js'),
 });

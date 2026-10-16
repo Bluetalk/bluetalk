@@ -73,7 +73,14 @@ export function useGamePresence({ setPeerGamePresence, gameInviteKeys }) {
                 tableName: presence.tableName || 'Tic-Tac-Toe',
                 ticTacToeSettings: {},
               }
-              : null;
+              : game === 'kart'
+                ? {
+                  hostPeerId,
+                  gameId: sessionId,
+                  tableName: presence.tableName || 'Kart-Rennen',
+                  kartSettings: {},
+                }
+                : null;
     if (!pending) {
       return { ok: false, message: 'Dieses Spiel wird nicht unterstützt.' };
     }

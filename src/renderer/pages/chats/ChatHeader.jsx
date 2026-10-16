@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Cloud,
   Forward,
   Trash2,
 } from 'lucide-react';
@@ -117,7 +118,14 @@ export function ChatHeader({
           />
           <span className={`chat-header-presence-dot is-${presenceKind}`} aria-hidden />
         </span>
-        <span className="chat-header-name">{selectedPeer.displayName}</span>
+        <span className="chat-header-name-row">
+          <span className="chat-header-name">{selectedPeer.displayName}</span>
+          {selectedPeer.peer?.transport === 'relay' ? (
+            <span className="chat-cloud-badge" title="Über Cloud verbunden">
+              <Cloud size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+            </span>
+          ) : null}
+        </span>
       </button>
       <PeerChatContextMenu
         menu={peerMenu}

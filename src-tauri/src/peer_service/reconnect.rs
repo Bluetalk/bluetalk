@@ -34,13 +34,54 @@ impl PeerService {
         }
     }
 
+    pub(crate) fn watch_peer_ids(&self) -> Vec<String> {
+        self.stored_contacts()
+            .into_iter()
+            .filter(|contact| !contact.blocked)
+            .map(|contact| contact.id)
+            .collect()
+    }
+
+    pub(crate) fn is_blocked(&self, peer_id: &str) -> bool {
+        self.stored_contacts()
+            .iter()
+            .any(|contact| contact.id == peer_id && contact.blocked)
+    }
+
+    pub(crate) async fn has_peer(&self, peer_id: &str) -> bool {
+        self.network
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|network| network.peers().iter().any(|peer| peer.peer_id == peer_id))
+    }
+
+    pub(crate) async fn peer_snapshot(&self, peer_id: &str) -> Option<Value> {
+        self.network.read().await.as_ref().and_then(|network| {
+            network
+                .peers()
+                .into_iter()
+                .find(|peer| peer.peer_id == peer_id)
+                .map(|peer| peer_info_to_value(&peer))
+        })
+    }
+
+    pub(super) fn cloud_online(&self) -> bool {
+        self.app
+            .try_state::<Arc<crate::cloud::CloudService>>()
+            .is_some_and(|cloud| cloud.is_online())
+    }
+
     pub(super) fn schedule_reconnect(self: &Arc<Self>, peer_id: &str) {
         let contact = self
             .stored_contacts()
             .into_iter()
             .find(|contact| contact.id == peer_id && !contact.blocked);
         let Some(contact) = contact else { return };
-        let Some(address) = contact.address else { return };
+        if contact.address.is_none() && !self.cloud_online() {
+            return;
+        }
+        let address = contact.address;
 
         let attempt = {
             let reconnects = self.reconnects.lock();

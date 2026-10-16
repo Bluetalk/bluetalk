@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "connect-four",
   "name": "Vier gewinnt",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "apiVersion": "^2.0.0",
   "description": "Vier gewinnt für 2 Spieler — Einladungen per Chat, Echtzeit über P2P, separates Spielfenster.",
   "author": "BlueTalk",

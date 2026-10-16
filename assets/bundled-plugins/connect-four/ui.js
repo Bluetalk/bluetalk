@@ -80,6 +80,11 @@ export default function activateConnectFourPlugin(BlueTalkPlugin) {
   let cfSelfPeerName = '';
   let clientState = null;
   let lastPresenceSession = null;
+  // Heartbeat: Gäste verwerfen Lobby-Präsenz nach 90 s ohne Meldung — ohne
+  // regelmäßiges Signal verschwänden offene Einladungen aus dem Spiele-Tab.
+  const presenceHeartbeat = setInterval(() => {
+    if (lastPresenceSession) syncGamePresence();
+  }, 20_000);
 
   function clearGamePresence() {
     if (!lastPresenceSession) return;
@@ -397,6 +402,7 @@ export default function activateConnectFourPlugin(BlueTalkPlugin) {
   void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
+    clearInterval(presenceHeartbeat);
     offChild?.();
     offMessage?.();
     offDisconnect?.();

@@ -49,6 +49,8 @@ pub struct MessageBatch {
 pub struct MessageMeta {
     pub count: usize,
     pub last_message: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appended: Option<bool>,
 }
 
 impl Database {

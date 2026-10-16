@@ -110,6 +110,16 @@ impl NetworkIdentity {
         self.signing_key.verifying_key().to_bytes()
     }
 
+    /// Ed25519-Signatur für die Relay-Anmeldung (Domäne `bluetalk-relay-auth-v1`).
+    pub fn sign_relay_auth(&self, nonce: &str, host: &str) -> [u8; 64] {
+        let mut message = String::with_capacity(24 + nonce.len() + 1 + host.len());
+        message.push_str("bluetalk-relay-auth-v1\n");
+        message.push_str(nonce);
+        message.push('\n');
+        message.push_str(host);
+        self.sign(message.as_bytes())
+    }
+
     pub(crate) fn sign(&self, message: &[u8]) -> [u8; 64] {
         self.signing_key.sign(message).to_bytes()
     }
@@ -177,6 +187,24 @@ mod tests {
         let second = NetworkIdentity::load_or_create(&path).unwrap();
         assert_eq!(first.peer_id(), second.peer_id());
         assert!(first.peer_id().starts_with("bt2_"));
+    }
+
+    #[test]
+    fn relay_auth_signature_matches_protocol_message() {
+        let identity = NetworkIdentity::generate().unwrap();
+        let nonce = "dGVzdC1ub25jZS0zMi1ieXRlcy0hISEhISE";
+        let host = "bt.henny.dev";
+        let signature = identity.sign_relay_auth(nonce, host);
+        let message = format!("bluetalk-relay-auth-v1\n{nonce}\n{host}");
+        assert!(
+            NetworkIdentity::verify(&identity.public_key_bytes(), message.as_bytes(), &signature)
+                .is_ok()
+        );
+        let other = format!("bluetalk-relay-auth-v1\n{nonce}\nexample.com");
+        assert!(
+            NetworkIdentity::verify(&identity.public_key_bytes(), other.as_bytes(), &signature)
+                .is_err()
+        );
     }
 
     #[test]

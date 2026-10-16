@@ -72,7 +72,7 @@ export default function AppShell({
               <div className="app-banner app-banner--error" role="alert">
                 <span>{loadError}</span>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLoadError('')}>
-                  Dismiss
+                  Schließen
                 </button>
               </div>
             ) : null}

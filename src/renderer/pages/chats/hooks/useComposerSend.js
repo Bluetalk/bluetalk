@@ -159,7 +159,7 @@ export function useComposerSend({
         setPendingFile((prev) => (prev?.launching ? null : prev));
       }, 320);
       let progressTimer = null;
-      setFileTransfer({ stage: 'sending', percent: 48, detail: 'Sending attachment…' });
+      setFileTransfer({ stage: 'sending', percent: 48, detail: 'Anhang wird gesendet…' });
       progressTimer = setInterval(() => {
         setFileTransfer((prev) => {
           if (!prev || prev.stage !== 'sending') return prev;

@@ -39,6 +39,7 @@ test('trusted bundled plugin UIs are importable ESM modules', async () => {
     'chess',
     'connect-four',
     'hello',
+    'kart',
     'live-docs',
     'poker',
     'theme-studio',

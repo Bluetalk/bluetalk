@@ -1,4 +1,5 @@
 mod ai;
+mod cloud;
 mod commands;
 mod crypto;
 mod database;
@@ -60,8 +61,14 @@ pub fn run() {
                 plugin_manager,
                 state.database.clone(),
             );
+            let cloud = cloud::CloudService::initialize(
+                app.handle().clone(),
+                database.clone(),
+                peers.clone(),
+            );
             app.manage(state);
             app.manage(peers);
+            app.manage(cloud);
             app.manage(plugin_service.clone());
             tauri::async_runtime::spawn_blocking(move || {
                 if let Err(error) = plugin_service.seed_bundled_startup() {
@@ -129,6 +136,13 @@ pub fn run() {
             commands::peer::network_test_ports,
             commands::peer::network_doctor,
             commands::peer::network_get_api_access,
+            commands::cloud::cloud_get_status,
+            commands::cloud::cloud_set_config,
+            commands::cloud::cloud_post_mail,
+            commands::cloud::cloud_drain_mail,
+            commands::cloud::cloud_ack_mail,
+            commands::cloud::cloud_refresh_watch,
+            commands::native::open_url,
             commands::plugins::plugins_list,
             commands::plugins::plugins_rescan,
             commands::plugins::plugins_reseed_bundled,
@@ -165,6 +179,12 @@ pub fn run() {
         .expect("BlueTalk failed to start")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                if let Some(cloud) = app_handle.try_state::<std::sync::Arc<cloud::CloudService>>() {
+                    let cloud = cloud.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        cloud.shutdown().await;
+                    });
+                }
                 // Peers receive a close frame instead of a dead socket.
                 if let Some(peers) =
                     app_handle.try_state::<std::sync::Arc<peer_service::PeerService>>()

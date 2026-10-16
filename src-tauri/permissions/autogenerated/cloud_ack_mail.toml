@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cloud-ack-mail"
+description = "Enables the cloud_ack_mail command without any pre-configured scope."
+commands.allow = ["cloud_ack_mail"]
+
+[[permission]]
+identifier = "deny-cloud-ack-mail"
+description = "Denies the cloud_ack_mail command without any pre-configured scope."
+commands.deny = ["cloud_ack_mail"]

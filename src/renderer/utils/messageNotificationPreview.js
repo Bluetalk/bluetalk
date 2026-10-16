@@ -9,6 +9,7 @@ export function buildMessageNotificationPreview(message) {
   if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'kart-invite') return `BlueKart: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'contact-share') {
     return `Kontakt: ${message.sharedContact?.displayName || message.sharedContact?.name || 'geteilt'}`;
   }

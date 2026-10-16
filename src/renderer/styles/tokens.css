@@ -57,6 +57,10 @@
   --radius-md: 16px;
   --radius-lg: 20px;
   --radius-xl: 24px;
+
+  /* Fokus-Ring & Oberflächen-Highlight (Farben bleiben Teil der bestehenden Palette) */
+  --ring: rgba(96,165,250,0.6);
+  --highlight: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 [data-theme="light"] {
@@ -95,6 +99,9 @@
   --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
   --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
   --shadow-xl: 0 16px 48px rgba(0,0,0,0.1);
+
+  --ring: rgba(37,99,235,0.5);
+  --highlight: 0 0 0 0 transparent;
 }
 
 /* ---------- Reset ---------- */

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, BellOff, ChevronDown, Pin, Users } from 'lucide-react';
+import { Bot, BellOff, ChevronDown, Cloud, Pin, Users } from 'lucide-react';
 import {
   formatGamePresenceLabel,
 } from '../../../shared/game-presence.js';
@@ -95,6 +95,11 @@ function ChatListRowInner({
         <div className="list-item-info">
           <div className="list-item-name-row">
             <div className="list-item-name">{chat.displayName}</div>
+            {chat.peer?.transport === 'relay' ? (
+              <span className="chat-cloud-badge" title="Über Cloud verbunden">
+                <Cloud size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+              </span>
+            ) : null}
             {chat.pinned && (
               <span className="chat-pin-badge" title="Angehefteter Chat">
                 <Pin size={12} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
@@ -157,7 +162,7 @@ function ChatListRowInner({
               )
             ) : chat.gamePresence ? (
               <span className="game-presence-list-badge" title={formatGamePresenceLabel(chat.gamePresence)}>
-                {chat.gamePresence.game === 'poker' ? '♠' : chat.gamePresence.game === 'connect-four' ? '🔴' : chat.gamePresence.game === 'chess' ? '♟' : chat.gamePresence.game === 'tic-tac-toe' ? '✕' : '🎴'}
+                {chat.gamePresence.game === 'poker' ? '♠' : chat.gamePresence.game === 'connect-four' ? '🔴' : chat.gamePresence.game === 'chess' ? '♟' : chat.gamePresence.game === 'tic-tac-toe' ? '✕' : chat.gamePresence.game === 'kart' ? '🏎️' : '🎴'}
               </span>
             ) : null}
           </div>

@@ -348,7 +348,7 @@ function GamePresenceBanner({ peerId, presence }) {
     <div className="game-presence-banner" role="status">
       <div className="game-presence-banner-copy">
         <span className="game-presence-banner-icon" aria-hidden>
-          {presence.game === 'poker' ? '♠' : presence.game === 'connect-four' ? '🔴' : presence.game === 'chess' ? '♟' : presence.game === 'tic-tac-toe' ? '✕' : '🎴'}
+          {presence.game === 'poker' ? '♠' : presence.game === 'connect-four' ? '🔴' : presence.game === 'chess' ? '♟' : presence.game === 'tic-tac-toe' ? '✕' : presence.game === 'kart' ? '🏎️' : '🎴'}
         </span>
         <div>
           <div className="game-presence-banner-title">{label}</div>

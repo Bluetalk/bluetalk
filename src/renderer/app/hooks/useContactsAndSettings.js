@@ -42,7 +42,10 @@ export function useContactsAndSettings({
     if (!patch?.id) return;
     setContacts((prev) => {
       const updated = applyContactPatch(prev, patch);
-      if (window.bluetalk) void window.bluetalk.store.set('contacts', updated);
+      if (window.bluetalk) {
+        void window.bluetalk.store.set('contacts', updated);
+        void window.bluetalk.cloud?.refreshWatch?.();
+      }
       return updated;
     });
   }, [applyContactPatch]);
@@ -130,7 +133,10 @@ export function useContactsAndSettings({
   const removeContact = useCallback((contactId) => {
     setContacts((prev) => {
       const updated = prev.filter((c) => c.id !== contactId);
-      if (window.bluetalk) window.bluetalk.store.set('contacts', updated);
+      if (window.bluetalk) {
+        window.bluetalk.store.set('contacts', updated);
+        void window.bluetalk.cloud?.refreshWatch?.();
+      }
       return updated;
     });
   }, []);

@@ -213,14 +213,18 @@ function selfDeliveryLabel(m) {
   if (m.deliveryStatus === 'partial') {
     return { text: `Teilweise zugestellt · ${summary?.delivered || 0}/${summary?.total || 0}`, pending: false };
   }
+  if (m.cloudStored && m.deliveryStatus !== 'delivered') {
+    return { text: 'Im Postfach', pending: false };
+  }
   if (m.deliveryStatus === 'scheduled') {
     return { text: summary?.total ? `Vorgemerkt · ${summary.offline || 0} offline` : 'Vorgemerkt', pending: false };
   }
   if (m.deliveryStatus === 'delivered') {
+    if (m.via === 'cloud') return { text: 'Zugestellt', pending: false };
     return { text: '', pending: false };
   }
   if (m.deliveryStatus === 'blocked') return { text: 'Blockiert', pending: false };
-  if (m.deliveryStatus === 'pending') return { text: 'Sending', pending: true };
+  if (m.deliveryStatus === 'pending') return { text: 'Wird gesendet', pending: true };
   return { text: '', pending: false };
 }
 
@@ -364,6 +368,7 @@ function getMessagePreviewText(message, debugMode = false) {
   if (message.kind === 'connect-four-invite') return `Vier gewinnt: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'chess-invite') return `Schach: ${message.tableName || 'Einladung'}`;
   if (message.kind === 'tic-tac-toe-invite') return `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
+  if (message.kind === 'kart-invite') return `BlueKart: ${message.tableName || 'Einladung'}`;
   const content = String(message.content || '').trim();
   if (!content) return 'Nachricht';
   return content.length > 120 ? `${content.slice(0, 117)}…` : content;
@@ -398,6 +403,9 @@ function getMessageCopyText(message, debugMode = false) {
   }
   if (message.kind === 'tic-tac-toe-invite') {
     return String(message.ticTacToeSettingsSummary || message.content || `Tic-Tac-Toe: ${message.tableName || 'Einladung'}`).trim();
+  }
+  if (message.kind === 'kart-invite') {
+    return String(message.kartSettingsSummary || message.content || `BlueKart: ${message.tableName || 'Einladung'}`).trim();
   }
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments?.length) {
@@ -482,9 +490,9 @@ function buildForwardPayload(message) {
 }
 
 function getLastPreview(message, debugMode = false) {
-  if (!message) return 'No messages';
+  if (!message) return 'Keine Nachrichten';
   if (message.kind === 'sticker') return `${message.from === 'self' ? 'Du: ' : ''}Sticker`;
-  if (message.kind === 'file' || message.kind === 'file-link') return `File: ${message.fileName || message.content || 'Attachment'}`;
+  if (message.kind === 'file' || message.kind === 'file-link') return `Datei: ${message.fileName || message.content || 'Anhang'}`;
   if (message.kind === 'contact-share') {
     const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
     return `${message.from === 'self' ? 'Du: ' : ''}Kontakt: ${name}`;
@@ -508,7 +516,10 @@ function getLastPreview(message, debugMode = false) {
   if (message.kind === 'tic-tac-toe-invite') {
     return `${message.from === 'self' ? 'Du: ' : ''}Tic-Tac-Toe: ${message.tableName || 'Einladung'}`;
   }
-  return (message.from === 'self' ? 'You: ' : '') + (message.content || 'Message');
+  if (message.kind === 'kart-invite') {
+    return `${message.from === 'self' ? 'Du: ' : ''}BlueKart: ${message.tableName || 'Einladung'}`;
+  }
+  return (message.from === 'self' ? 'Du: ' : '') + (message.content || 'Nachricht');
 }
 
 function formatUnreadBadgeCount(n) {
@@ -577,7 +588,7 @@ function readFileAsBase64WithProgress(file, onProgress, useFastDataUrl) {
           reject(err);
         }
       };
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.onerror = () => reject(reader.error || new Error('Datei konnte nicht gelesen werden'));
       reader.readAsDataURL(file);
     });
   }
@@ -616,7 +627,7 @@ function readFileAsBase64WithProgress(file, onProgress, useFastDataUrl) {
         reject(err);
       }
     };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.onerror = () => reject(reader.error || new Error('Datei konnte nicht gelesen werden'));
     reader.readAsArrayBuffer(file);
   });
 }
@@ -715,7 +726,7 @@ function isStickerMessage(message) {
 function isChatEmbedMessage(message, debugMode = false) {
   if (!message) return false;
   if (message.kind === 'uno-invite') return debugMode;
-  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'contact-share';
+  return message.kind === 'poker-invite' || message.kind === 'connect-four-invite' || message.kind === 'chess-invite' || message.kind === 'tic-tac-toe-invite' || message.kind === 'kart-invite' || message.kind === 'contact-share';
 }
 
 

@@ -66,6 +66,11 @@ export default function activatePokerPlugin(BlueTalkPlugin) {
   let clientState = null;
   let myHole = [];
   let lastPresenceSession = null;
+  // Heartbeat: Gäste verwerfen Lobby-Präsenz nach 90 s ohne Meldung — ohne
+  // regelmäßiges Signal verschwänden offene Einladungen aus dem Spiele-Tab.
+  const presenceHeartbeat = setInterval(() => {
+    if (lastPresenceSession) syncGamePresence();
+  }, 20_000);
 
   function clearGamePresence() {
     if (!lastPresenceSession) return;
@@ -412,6 +417,7 @@ export default function activatePokerPlugin(BlueTalkPlugin) {
   void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
+    clearInterval(presenceHeartbeat);
     offPokerChild?.();
     offPokerMessage?.();
     offPokerDisconnect?.();

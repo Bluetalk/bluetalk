@@ -41,6 +41,11 @@ export default function activateUnoPlugin(BlueTalkPlugin) {
   let clientState = null;
   let myHand = [];
   let lastPresenceSession = null;
+  // Heartbeat: Gäste verwerfen Lobby-Präsenz nach 90 s ohne Meldung — ohne
+  // regelmäßiges Signal verschwänden offene Einladungen aus dem Spiele-Tab.
+  const presenceHeartbeat = setInterval(() => {
+    if (lastPresenceSession) syncGamePresence();
+  }, 20_000);
 
   function clearGamePresence() {
     if (!lastPresenceSession) return;
@@ -364,6 +369,7 @@ export default function activateUnoPlugin(BlueTalkPlugin) {
   void bootstrapPendingJoin();
 
   api.onDeactivate(() => {
+    clearInterval(presenceHeartbeat);
     offUnoChild?.();
     offUnoMessage?.();
     offUnoDisconnect?.();
