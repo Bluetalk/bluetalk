@@ -3,6 +3,12 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.3.1': {
+    title: "What's new in BlueTalk 2.3.1",
+    items: [
+      'Cloud-Konto: Die Desktop-App erreicht den Cloud-Server wieder — die Sicherheitsrichtlinie hatte HTTPS-Anfragen blockiert.',
+    ],
+  },
   '2.3.0': {
     title: "What's new in BlueTalk 2.3.0",
     items: [

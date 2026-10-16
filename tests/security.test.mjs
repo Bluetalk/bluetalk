@@ -13,6 +13,10 @@ test('CSP blocks eval and Tauri globals', async () => {
     readFile(path.join(root, 'src', 'renderer', 'plugins', 'pluginRuntime.js'), 'utf8'),
   ]);
 
+  const htmlCsp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1];
+  assert.equal(htmlCsp, config.app.security.csp, 'index.html CSP must match tauri.conf.json (Tauri appends a second policy)');
+  assert.match(htmlCsp, /connect-src[^;]*https:/);
+  assert.match(htmlCsp, /connect-src[^;]*wss:/);
   assert.doesNotMatch(html, /unsafe-eval/);
   assert.doesNotMatch(config.app.security.csp, /unsafe-eval/);
   assert.equal(config.app.withGlobalTauri, false);
