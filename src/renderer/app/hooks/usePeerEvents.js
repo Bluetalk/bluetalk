@@ -6,6 +6,7 @@ import { isAiChatPeerId } from '../../aiChatConstants';
 import { buildUserPresencePayload } from '../../../shared/user-presence.js';
 import { createPeerMessageHandler } from '../peerMessageHandler';
 import { loadInitialData } from '../initialLoad';
+import { buildProfilePayload } from '../profileShare.js';
 
 export function usePeerEvents(deps) {
   const {
@@ -84,7 +85,7 @@ export function usePeerEvents(deps) {
 
         upsertContact({
           id: peer.id,
-          name: peer.name || peer.id,
+          name: peer.name || undefined,
           address: peer.address && peer.port ? `${peer.address}:${peer.port}` : undefined,
           bio: peer.bio,
           profilePicture: peer.profilePicture,
@@ -93,6 +94,7 @@ export function usePeerEvents(deps) {
         const blocked = contactsRef.current.some((c) => c?.id === peer.id && c.blocked === true);
         if (!blocked) {
           void window.bluetalk.peer.send(peer.id, buildUserPresencePayload(settingsRef.current));
+          void window.bluetalk.peer.send(peer.id, buildProfilePayload(settingsRef.current));
         }
         if (!blocked && ownEcdhPublicSpkiRef.current) {
           void sendE2eeHandshake(peer.id);

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { isAiChatPeerId, botHasRemoteApi } from '../../../aiChatConstants';
 import { isPresenceStale } from '../../../../shared/game-presence.js';
 import groupChat from '../../../../shared/group-chat.js';
+import { isPlaceholderDisplayName } from '../../../app/contactPatch.js';
 
 const { isActiveGroupMember, isGroupChatId } = groupChat;
 
@@ -58,7 +59,13 @@ export function useChatListData({
       const peer = peerById.get(id) || null;
       const contact = contactById.get(id) || null;
       const meta = chatMeta[id] || null;
-      const baseName = contact?.name || peer?.name || id;
+      const inboundSender = meta?.lastMessage?.from !== 'self'
+        && typeof meta?.lastMessage?.sender === 'string'
+        ? meta.lastMessage.sender.trim()
+        : '';
+      const contactName = !isPlaceholderDisplayName(contact?.name) ? (contact?.name || '') : '';
+      const peerName = !isPlaceholderDisplayName(peer?.name) ? (peer?.name || '') : '';
+      const baseName = contactName || peerName || inboundSender || contact?.name || peer?.name || id;
       const profilePicture = contact?.profilePicture || peer?.profilePicture || '';
       const bio = contact?.bio ?? peer?.bio ?? '';
 

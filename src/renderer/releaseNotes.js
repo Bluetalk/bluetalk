@@ -3,6 +3,12 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.4.1': {
+    title: "What's new in BlueTalk 2.4.1",
+    items: [
+      'Kontakte: Name und Profilbild bleiben beim Verbinden erhalten. Nach dem Handshake schickt jedes Gerät sein Profil mit, und Cloud-Sync füllt fehlende Namen aus dem Chatverlauf — Chats in BlueTalk Web und auf anderen Geräten zeigen wieder den richtigen Namen und das Bild.',
+    ],
+  },
   '2.4.0': {
     title: "What's new in BlueTalk 2.4.0",
     items: [

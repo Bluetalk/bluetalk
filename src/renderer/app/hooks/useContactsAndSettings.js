@@ -1,7 +1,8 @@
 // Kontakte, Settings, Theme und kleinere App-Aktionen, 1:1 aus App.jsx ausgelagert.
 import { useEffect, useCallback } from 'react';
-import { OWN_PEER_FEATURES } from '../../../shared/chat-features.js';
 import { buildUserPresencePayload } from '../../../shared/user-presence.js';
+import { applyContactPatchToList } from '../contactPatch.js';
+import { buildProfilePayload } from '../profileShare.js';
 
 export function useContactsAndSettings({
   theme,
@@ -23,21 +24,7 @@ export function useContactsAndSettings({
     }
   }, [theme]);
 
-  const applyContactPatch = useCallback((prev, patch) => {
-    if (!patch?.id) return prev;
-    const idx = prev.findIndex((c) => c.id === patch.id);
-    const base = idx >= 0 ? prev[idx] : { id: patch.id, addedAt: Date.now() };
-    const merged = { ...base, ...patch };
-    if (Object.prototype.hasOwnProperty.call(patch, 'notifyMutedUntil') && patch.notifyMutedUntil === undefined) {
-      delete merged.notifyMutedUntil;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'notifyMutedManual') && patch.notifyMutedManual === false) {
-      delete merged.notifyMutedManual;
-    }
-    return idx >= 0
-      ? prev.map((contact, i) => (i === idx ? merged : contact))
-      : [...prev, merged];
-  }, []);
+  const applyContactPatch = useCallback((prev, patch) => applyContactPatchToList(prev, patch), []);
 
   const upsertContact = useCallback((patch) => {
     if (!patch?.id) return;
@@ -166,14 +153,7 @@ export function useContactsAndSettings({
         window.bluetalk.store.set('settings', merged);
         const profileKeys = ['displayName', 'bio', 'profilePicture'];
         if (profileKeys.some((k) => Object.prototype.hasOwnProperty.call(newSettings, k))) {
-          window.bluetalk.peer.broadcast({
-            kind: 'profile',
-            displayName: merged.displayName,
-            bio: merged.bio || '',
-            profilePicture: merged.profilePicture || '',
-            sender: merged.displayName,
-            features: [...OWN_PEER_FEATURES],
-          });
+          window.bluetalk.peer.broadcast(buildProfilePayload(merged));
         }
         if (
           Object.prototype.hasOwnProperty.call(newSettings, 'doNotDisturb')

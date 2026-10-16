@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { DEFAULT_APP_SETTINGS } from '../chatConstants';
 import groupChat from '../../../shared/group-chat.js';
 import { getAccount, requestPull, startSync, stopSync } from '../../cloudAccount/index.js';
+import { buildProfilePayload } from '../profileShare.js';
+import { buildUserPresencePayload } from '../../../shared/user-presence.js';
 
 const { normalizeGroup } = groupChat;
 
@@ -111,6 +113,12 @@ async function reloadFromStore({
       const merged = { ...DEFAULT_APP_SETTINGS, ...(stored && typeof stored === 'object' ? stored : {}) };
       setSettings(merged);
       if (merged.theme) setTheme(merged.theme);
+      try {
+        window.bluetalk.peer?.broadcast?.(buildProfilePayload(merged));
+        window.bluetalk.peer?.broadcast?.(buildUserPresencePayload(merged));
+      } catch {
+        /* Peers ggf. noch nicht verbunden */
+      }
     }
     if (keys.has('groups')) {
       const storedGroups = await window.bluetalk.store.get('groups', []);

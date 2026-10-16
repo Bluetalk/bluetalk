@@ -3,6 +3,7 @@
 import { DEFAULT_APP_SETTINGS } from './chatConstants';
 import { buildUserPresencePayload } from '../../shared/user-presence.js';
 import groupChat from '../../shared/group-chat.js';
+import { buildProfilePayload } from './profileShare.js';
 
 const { normalizeGroup } = groupChat;
 
@@ -137,6 +138,7 @@ export async function loadInitialData(deps, isCancelled) {
     setSettings(mergedSettings);
     if (mergedSettings.theme) setTheme(mergedSettings.theme);
     void window.bluetalk.peer.broadcast(buildUserPresencePayload(mergedSettings));
+    void window.bluetalk.peer.broadcast(buildProfilePayload(mergedSettings));
 
     const needsUsernameOnboarding = mergedSettings.onboardingUsernameDone !== true
       && (displayNameTrim === '' || displayNameTrim === 'Anonymous');

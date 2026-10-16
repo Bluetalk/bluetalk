@@ -36,6 +36,7 @@ import {
   getAccount,
   updateAccountSeq,
 } from './session.js';
+import { upsertContactNameFromIncomingMessage } from '../app/contactPatch.js';
 
 const PULL_LIMIT = 200;
 const PUSH_DEBOUNCE_MS = 1500;
@@ -704,6 +705,7 @@ async function pullRemote() {
   let after = Number(live.lastSeq) || 0;
   let meta = await readMeta();
   const appliedOps = [];
+  let hydratedContacts = false;
   let more = true;
   while (more && running) {
     const page = await api.pull(after, PULL_LIMIT);
@@ -732,7 +734,32 @@ async function pullRemote() {
   await writeMeta(meta);
   schedulePersist();
   await updateAccountSeq(after);
-  if (appliedOps.length) emitApplied(peersAndStoresFromOps(appliedOps));
+  const store = rawStore();
+  if (store?.get && store?.set) {
+    const inbound = appliedOps.filter((op) => op?.t === 'msg' && op.peerId && op.message);
+    if (inbound.length) {
+      let contacts = await store.get('contacts', []);
+      let changed = false;
+      for (const op of inbound) {
+        const next = upsertContactNameFromIncomingMessage(contacts, op.peerId, op.message);
+        if (next.changed) {
+          contacts = next.contacts;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await store.set('contacts', contacts);
+        hydratedContacts = true;
+      }
+    }
+  }
+  if (appliedOps.length || hydratedContacts) {
+    const detail = peersAndStoresFromOps(appliedOps);
+    if (hydratedContacts && !detail.storeKeys.includes('contacts')) {
+      detail.storeKeys = [...detail.storeKeys, 'contacts'];
+    }
+    emitApplied(detail);
+  }
 }
 
 export async function fullUpload() {
