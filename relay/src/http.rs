@@ -1,20 +1,23 @@
-//! HTTP: Infoseite, /healthz, /v1/info, WebSocket-Upgrade.
+//! HTTP: Infoseite, /healthz, /v1/info, WebSocket-Upgrade, Web-Hosting.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, State, ws::WebSocketUpgrade},
-    http::{HeaderMap, StatusCode},
+    extract::{ConnectInfo, Request, State, ws::WebSocketUpgrade},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::get,
 };
 use serde_json::json;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::proto::MAX_TEXT_BYTES;
 use crate::ratelimit::IpGuard;
 use crate::util::{client_ip, normalize_host};
-use crate::{AppState, ws};
+use crate::{AppState, api, ws};
 
 const INDEX_HTML: &str = r##"<!DOCTYPE html>
 <html lang="de">
@@ -45,20 +48,81 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
      zwischen BlueTalk-Clients. Er sieht keinen Klartext — nur Peer-IDs,
      Größen, Zeitpunkte und IP-Adressen.</p>
   <p>Du kannst diesen Relay selbst hosten. In der BlueTalk-App trägst du unter
-     <strong>Cloud-Nachrichten</strong> die URL deines Servers ein.</p>
+     <strong>BlueTalk Cloud</strong> die URL deines Servers ein.</p>
   <p><a href="https://github.com/Bluetalk/bluetalk">Quellcode auf GitHub</a></p>
 </main>
 </body>
 </html>
 "##;
 
+const WEB_CSP: &str = "default-src 'self'; connect-src 'self' wss: https:; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'";
+const WEB_PERMISSIONS: &str = "microphone=(self)";
+
 pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/", get(index))
+    let web_dir = state.config.web_dir.clone();
+    let has_web = web_dir.join("index.html").is_file();
+    let mut v1 = Router::new()
+        .route("/info", get(info))
+        .route("/ws", get(ws_upgrade));
+    if state.config.accounts_enabled {
+        v1 = v1
+            .nest("/account", api::account_router())
+            .nest("/sync", api::sync_router());
+    }
+    v1 = v1.fallback(v1_not_found);
+    let mut app = Router::new()
         .route("/healthz", get(healthz))
-        .route("/v1/info", get(info))
-        .route("/v1/ws", get(ws_upgrade))
-        .with_state(state)
+        .route("/info", get(index))
+        .nest("/v1", v1);
+    if has_web {
+        app = app.fallback_service(web_service(web_dir));
+    } else {
+        app = app.route("/", get(index));
+    }
+    app.with_state(state)
+}
+
+fn web_service(web_dir: PathBuf) -> Router<()> {
+    let index = web_dir.join("index.html");
+    let assets_dir = web_dir.join("assets");
+    let rest = ServeDir::new(web_dir)
+        .append_index_html_on_directories(true)
+        .fallback(ServeFile::new(index));
+    Router::new()
+        .nest_service("/assets", ServeDir::new(assets_dir))
+        .fallback_service(rest)
+        .layer(middleware::from_fn(web_file_headers))
+}
+
+async fn v1_not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": "not_found", "message": "not found"})),
+    )
+        .into_response()
+}
+
+async fn web_file_headers(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut res = next.run(req).await;
+    let is_success = res.status().is_success();
+    let headers = res.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(WEB_CSP) {
+        headers.insert(header::CONTENT_SECURITY_POLICY, v);
+    }
+    if let Ok(v) = HeaderValue::from_str(WEB_PERMISSIONS) {
+        headers.insert("permissions-policy", v);
+    }
+    let is_index = path == "/" || path == "/index.html" || path.ends_with("/index.html");
+    if is_index {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    } else if path.starts_with("/assets/") && is_success {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+    res
 }
 
 async fn index() -> Html<&'static str> {

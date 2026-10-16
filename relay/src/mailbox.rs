@@ -1,6 +1,6 @@
 //! SQLite-Postfach: Quoten, TTL, idempotente IDs, Blocking-Thread.
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -10,7 +10,7 @@ use crate::proto::MAX_MAIL_BODY;
 use crate::util::unix_ms;
 
 const MAIL_PER_RECIPIENT: i64 = 1000;
-const MAIL_BYTES_PER_RECIPIENT: i64 = 32 * 1024 * 1024;
+const MAIL_BYTES_PER_RECIPIENT: i64 = 128 * 1024 * 1024;
 const MAIL_PER_PAIR: i64 = 300;
 const MAIL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
@@ -164,37 +164,7 @@ impl Mailbox {
 }
 
 fn open_db(path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    conn.busy_timeout(Duration::from_secs(5))
-        .map_err(|e| e.to_string())?;
-    conn.execute_batch(
-        "
-        PRAGMA journal_mode=WAL;
-        PRAGMA synchronous=NORMAL;
-        PRAGMA foreign_keys=ON;
-        CREATE TABLE IF NOT EXISTS mail (
-            sender TEXT NOT NULL,
-            id TEXT NOT NULL,
-            recipient TEXT NOT NULL,
-            ts INTEGER NOT NULL,
-            body TEXT NOT NULL,
-            size INTEGER NOT NULL,
-            pushed INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (sender, id)
-        );
-        CREATE INDEX IF NOT EXISTS mail_recipient_ts ON mail(recipient, ts);
-        CREATE TABLE IF NOT EXISTS mail_ids (
-            sender TEXT NOT NULL,
-            id TEXT NOT NULL,
-            recipient TEXT NOT NULL,
-            ts INTEGER NOT NULL,
-            PRIMARY KEY (sender, id)
-        );
-        CREATE INDEX IF NOT EXISTS mail_ids_ts ON mail_ids(ts);
-        ",
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(conn)
+    crate::db::open(path)
 }
 
 fn handle(conn: &mut Connection, job: Job) {

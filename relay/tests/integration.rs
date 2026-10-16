@@ -121,14 +121,7 @@ async fn relay_auth_presence_tunnel_mailbox() {
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let config = Config {
-        port: addr.port(),
-        data_dir: dir.path().to_path_buf(),
-        public_host: None,
-        trust_proxy: false,
-        client_ip_header: None,
-        max_connections_per_ip: 32,
-    };
+    let config = Config::test(dir.path().to_path_buf(), addr.port());
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
         bluetalk_relay::serve_listener_until_cancelled(listener, config, stop_rx)
@@ -289,14 +282,7 @@ async fn relay_grosser_tunnel_und_steuer_waehrenddessen() {
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let config = Config {
-        port: addr.port(),
-        data_dir: dir.path().to_path_buf(),
-        public_host: None,
-        trust_proxy: false,
-        client_ip_header: None,
-        max_connections_per_ip: 32,
-    };
+    let config = Config::test(dir.path().to_path_buf(), addr.port());
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
         bluetalk_relay::serve_listener_until_cancelled(listener, config, stop_rx)

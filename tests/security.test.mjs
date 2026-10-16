@@ -40,7 +40,6 @@ test('trusted bundled plugin UIs are importable ESM modules', async () => {
     'connect-four',
     'hello',
     'kart',
-    'live-docs',
     'poker',
     'theme-studio',
     'tic-tac-toe',

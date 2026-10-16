@@ -3,6 +3,9 @@
   try {
     var stored = localStorage.getItem('bluetalk-theme');
     if (stored === 'light' || stored === 'dark') theme = stored;
+    else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      theme = 'light';
+    }
   } catch (_) { /* ignore */ }
   document.documentElement.setAttribute('data-theme', theme);
   document.documentElement.style.colorScheme = theme;

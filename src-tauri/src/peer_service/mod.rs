@@ -109,6 +109,26 @@ impl PeerService {
             .map_err(|error| AppError::Network(format!("identity unavailable: {error}")))
     }
 
+    pub fn export_identity_seed(&self) -> Result<String> {
+        let identity = self.network_identity()?;
+        Ok(BASE64.encode(identity.seed_bytes()))
+    }
+
+    pub fn import_identity_seed(&self, seed_b64: &str) -> Result<()> {
+        let trimmed = seed_b64.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::InvalidInput("seed fehlt".to_owned()));
+        }
+        let decoded = BASE64.decode(trimmed.as_bytes()).map_err(|_| {
+            AppError::InvalidInput("Identitäts-Seed ist ungültig.".to_owned())
+        })?;
+        let seed: [u8; 32] = decoded.as_slice().try_into().map_err(|_| {
+            AppError::InvalidInput("Identitäts-Seed muss 32 Byte haben.".to_owned())
+        })?;
+        NetworkIdentity::write_seed(&self.identity_path, seed)
+            .map_err(|error| AppError::Network(format!("identity write failed: {error}")))
+    }
+
     pub(crate) fn display_name(&self) -> String {
         let name = self
             .database

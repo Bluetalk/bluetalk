@@ -71,6 +71,49 @@ pub fn install_main_window_event_forwarder(window: &WebviewWindow) -> Result<()>
     Ok(())
 }
 
+/// WebView2 blockiert getUserMedia ohne PermissionRequested-Handler.
+/// Nur Mikrofon, nur das Hauptfenster (keine Spiel-Webviews).
+pub fn install_microphone_permission_handler(window: &WebviewWindow) -> Result<()> {
+    require_main(window)?;
+    #[cfg(windows)]
+    {
+        window
+            .with_webview(|webview| {
+                unsafe {
+                    use webview2_com::{
+                        Microsoft::Web::WebView2::Win32::{
+                            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+                            COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                        },
+                        PermissionRequestedEventHandler,
+                    };
+                    let Ok(core) = webview.controller().CoreWebView2() else {
+                        return;
+                    };
+                    let mut token = 0i64;
+                    let _ = core.add_PermissionRequested(
+                        &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                            let Some(args) = args else {
+                                return Ok(());
+                            };
+                            let mut kind = Default::default();
+                            args.PermissionKind(&mut kind)?;
+                            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+                                args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                            }
+                            Ok(())
+                        })),
+                        &mut token,
+                    );
+                }
+            })
+            .map_err(|error| {
+                crate::error::AppError::Io(std::io::Error::other(error.to_string()))
+            })?;
+    }
+    Ok(())
+}
+
 fn emit_maximized(window: &WebviewWindow) -> Result<bool> {
     let maximized = window.is_maximized()?;
     window.emit(MAXIMIZED_EVENT, maximized)?;

@@ -1,3 +1,5 @@
+# Unbenutzt, wenn der Build-Kontext das Repo-Root ist (siehe /.dockerignore).
+# Nur relevant bei versehentlichem `docker build` aus diesem Ordner.
 target
 .git
 *.md

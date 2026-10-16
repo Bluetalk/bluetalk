@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-account-export-identity"
+description = "Enables the account_export_identity command without any pre-configured scope."
+commands.allow = ["account_export_identity"]
+
+[[permission]]
+identifier = "deny-account-export-identity"
+description = "Denies the account_export_identity command without any pre-configured scope."
+commands.deny = ["account_export_identity"]

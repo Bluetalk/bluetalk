@@ -17,7 +17,7 @@ Zeitpunkte, Größen, IP-Adressen.
 ## Transport
 
 - WebSocket, Standard-Endpunkt: `wss://bt.henny.dev/v1/ws`
-- **Textframes** = JSON-Steuernachrichten (`{"t": "<typ>", ...}`), max. 128 KiB.
+- **Textframes** = JSON-Steuernachrichten (`{"t": "<typ>", ...}`), max. 1,25 MiB.
 - **Binärframes** = Tunnel-Daten: `[u32 big-endian tunnelId][payload]`,
   Payload max. 64 KiB.
 - Unbekannte Felder werden ignoriert, unbekannte `t` mit
@@ -37,7 +37,7 @@ S→C {"t":"hello","v":1,"nonce":"<base64 32 Byte>","server":"bluetalk-relay/<ve
 C→S {"t":"auth","publicKey":"<base64 32 Byte>","signature":"<base64 64 Byte>",
      "name":"<Anzeigename, optional, ≤64 Zeichen>","client":"BlueTalk/2.2.0"}
 S→C {"t":"ready","peerId":"bt2_…","time":<unix ms>,
-     "limits":{"maxFrame":65536,"maxMailBody":65536,"maxTunnels":64}}
+     "limits":{"maxFrame":65536,"maxMailBody":1048576,"maxTunnels":64}}
 ```
 
 Signiert (Ed25519) werden die UTF-8-Bytes von
@@ -113,14 +113,14 @@ S→C {"t":"mail","id":"…","from":"bt2_…","ts":<unix ms>,"body":<JSON>}
 C→S {"t":"ack","ids":["…", …]}
 ```
 
-- `body` ist ein beliebiger JSON-Wert (serialisiert ≤ 64 KiB), vom Client
+- `body` ist ein beliebiger JSON-Wert (serialisiert ≤ 1 MiB), vom Client
   **bereits Ende-zu-Ende-verschlüsselt**. Der Server interpretiert ihn nicht.
 - Jede Post wird gespeichert, bis der Empfänger sie per `ack` bestätigt.
   `delivered` heißt: an eine aktive Verbindung des Empfängers zugestellt.
 - Nach `ready` schickt der Server alle wartenden Nachrichten (älteste zuerst).
 - Doppelte `id` (gleicher Absender) werden ignoriert, aber erneut mit
   `posted` beantwortet (idempotent).
-- Quoten: pro Empfänger 1000 Nachrichten / 32 MiB, pro Absender→Empfänger 300,
+- Quoten: pro Empfänger 1000 Nachrichten / 128 MiB, pro Absender→Empfänger 300,
   Aufbewahrung 30 Tage.
 
 ## 5. Sonstiges
@@ -136,7 +136,9 @@ HTTP:
 
 - `GET /healthz` → `200 ok`
 - `GET /v1/info` → `{"name":"BlueTalk Cloud Relay","version":"…","protocol":1,"online":<n>}`
-- `GET /` → kleine Infoseite
+- `GET /info` → kleine Infoseite
+- `GET /` → BlueTalk Web aus `WEB_DIR`, sonst die Infoseite
+- Konto- und Sync-API: siehe `ACCOUNTS.md`
 
 ## Server-Konfiguration (Umgebungsvariablen)
 
@@ -148,4 +150,7 @@ HTTP:
 | `TRUST_PROXY` | `0` | `1` = letztes `X-Forwarded-For`-Element als Client-IP (vom nächsten Proxy angehängt) |
 | `CLIENT_IP_HEADER` | – | Header mit der echten Client-IP (z. B. `cf-connecting-ip` hinter Cloudflare); hat Vorrang vor `TRUST_PROXY` |
 | `MAX_CONNECTIONS_PER_IP` | `32` | Verbindungen pro IP |
+| `WEB_DIR` | `/srv/web` | Gebautes BlueTalk Web (`index.html`); fehlt → Infoseite unter `/` |
+| `SYNC_QUOTA_BYTES` | `268435456` | Sync-Speicher pro Cloud-Konto |
+| `ACCOUNTS_ENABLED` | `1` | `0` = Konto-/Sync-API aus (reiner Relay) |
 | `RUST_LOG` | `info` | Log-Level |

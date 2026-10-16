@@ -213,7 +213,7 @@ export default function ProfileMenu({ variant = 'default' }) {
               }}
             >
               <Cloud size={16} strokeWidth={1.75} />
-              Cloud-Nachrichten
+              BlueTalk Cloud
             </button>
           </div>
         </div>

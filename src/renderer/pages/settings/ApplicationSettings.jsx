@@ -36,9 +36,9 @@ export default function ApplicationSettingsPage() {
             <div className="toggle-row-info">
               <span className="toggle-row-label-with-icon">
                 <Bell size={15} strokeWidth={SETTINGS_ICON_STROKE} aria-hidden />
-                Windows-Benachrichtigungen
+                {__BLUETALK_WEB__ ? 'Browser-Benachrichtigungen' : 'Windows-Benachrichtigungen'}
               </span>
-              <span>Nur wenn BlueTalk im Hintergrund ist. Mehrere Nachrichten werden zusammengefasst.</span>
+              <span>{__BLUETALK_WEB__ ? 'Hinweise, wenn der Tab nicht im Vordergrund ist — sofern der Browser es erlaubt.' : 'Nur wenn BlueTalk im Hintergrund ist. Mehrere Nachrichten werden zusammengefasst.'}</span>
             </div>
             <label className="toggle">
               <input
@@ -68,14 +68,14 @@ export default function ApplicationSettingsPage() {
           <div className="toggle-row">
             <div className="toggle-row-info">
               <span>Testbenachrichtigung</span>
-              <span>Prüft, ob Windows Mitteilungen anzeigen darf.</span>
+              <span>{__BLUETALK_WEB__ ? 'Prüft, ob dieser Browser Mitteilungen anzeigen darf.' : 'Prüft, ob Windows Mitteilungen anzeigen darf.'}</span>
             </div>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => window.bluetalk?.notify?.show?.({
                 title: 'BlueTalk',
-                body: 'Windows-Benachrichtigungen sind aktiv.',
+                body: __BLUETALK_WEB__ ? 'Browser-Benachrichtigungen sind aktiv.' : 'Windows-Benachrichtigungen sind aktiv.',
                 allowInForeground: true,
               })}
             >
@@ -117,6 +117,7 @@ export default function ApplicationSettingsPage() {
         </div>
       </section>
 
+      {__BLUETALK_WEB__ ? null : (
       <section className="settings-section">
         <h3 className="settings-section-title">System</h3>
         <div className="card">
@@ -172,8 +173,9 @@ export default function ApplicationSettingsPage() {
           </div>
         </div>
       </section>
+      )}
 
-      <UpdatesPanel />
+      {__BLUETALK_WEB__ ? null : <UpdatesPanel />}
     </SettingsPage>
   );
 }

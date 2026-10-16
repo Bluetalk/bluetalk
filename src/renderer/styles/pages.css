@@ -735,6 +735,54 @@
   grid-column: 1 / -1;
 }
 
+.new-add-form {
+  padding: 0 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.new-add-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-2);
+}
+.new-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.new-add-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.new-add-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+.new-add-confirm-copy {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+}
+.new-add-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+.new-add-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--red);
+}
+
 /* ============ Neu ============ */
 .new-section {
   display: flex;
@@ -864,6 +912,16 @@
   }
   .page-shell-actions {
     justify-content: flex-start;
+  }
+  .new-add-form {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .new-add-row {
+    flex-wrap: wrap;
+  }
+  .new-add-row .btn {
+    width: 100%;
   }
   .new-request-row {
     flex-wrap: wrap;

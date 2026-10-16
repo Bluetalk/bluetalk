@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::{
     CloudShared, ConnCmd, WsOut,
-    config::{CloudConfig, MAX_MAIL_BODY_BYTES, MAX_WATCH_PEERS, auth_host},
+    config::{CloudConfig, MAX_WATCH_PEERS, auth_host},
     mailbox::MailItem,
     status::CloudState,
     tunnel,
@@ -53,7 +53,7 @@ pub(super) async fn run(
                 _ = shutdown.changed() => break,
                 cmd = cmd_rx.recv() => match cmd {
                     None | Some(ConnCmd::Shutdown) => break,
-                    Some(ConnCmd::Reconfigure) => continue,
+                    Some(ConnCmd::Reconfigure) | Some(ConnCmd::Takeover) => continue,
                     Some(other) => fail_cmd(other, "Cloud ist ausgeschaltet."),
                 },
             }
@@ -75,6 +75,28 @@ pub(super) async fn run(
             SessionEnd::Reconfigure => {
                 backoff_ms = BACKOFF_MIN_MS;
             }
+            SessionEnd::Replaced => {
+                backoff_ms = BACKOFF_MIN_MS;
+                set_state(
+                    &app,
+                    &shared,
+                    CloudState::Replaced,
+                    Some("BlueTalk ist auf einem anderen Gerät aktiv.".to_owned()),
+                );
+                loop {
+                    if *shutdown.borrow() {
+                        return;
+                    }
+                    tokio::select! {
+                        _ = shutdown.changed() => return,
+                        cmd = cmd_rx.recv() => match cmd {
+                            None | Some(ConnCmd::Shutdown) => return,
+                            Some(ConnCmd::Reconfigure) | Some(ConnCmd::Takeover) => break,
+                            Some(other) => fail_cmd(other, "BlueTalk ist auf einem anderen Gerät aktiv."),
+                        },
+                    }
+                }
+            }
             SessionEnd::Disconnected(error) => {
                 log::info!("cloud relay disconnected: {error}");
                 let next_state = if !config.enabled {
@@ -93,7 +115,7 @@ pub(super) async fn run(
                     _ = tokio::time::sleep(wait) => {}
                     cmd = cmd_rx.recv() => match cmd {
                         None | Some(ConnCmd::Shutdown) => break,
-                        Some(ConnCmd::Reconfigure) => {
+                        Some(ConnCmd::Reconfigure) | Some(ConnCmd::Takeover) => {
                             backoff_ms = BACKOFF_MIN_MS;
                         }
                         Some(other) => fail_cmd(other, "Cloud ist offline."),
@@ -108,6 +130,7 @@ pub(super) async fn run(
 enum SessionEnd {
     Shutdown,
     Reconfigure,
+    Replaced,
     Disconnected(String),
 }
 
@@ -222,6 +245,13 @@ async fn run_session(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
+    let max_mail_body = ready
+        .get("limits")
+        .and_then(|limits| limits.get("maxMailBody"))
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .filter(|value| *value > 0)
+        .unwrap_or(super::config::MAX_MAIL_BODY_BYTES);
 
     {
         let mut guard = shared.lock();
@@ -234,6 +264,7 @@ async fn run_session(
         guard.snapshot.state = CloudState::Online;
         guard.snapshot.enabled = true;
         guard.snapshot.relay_url = config.relay_url.clone();
+        guard.max_mail_body = max_mail_body;
         guard.mail.clear_in_flight();
     }
     emit_status(app, shared);
@@ -264,7 +295,7 @@ async fn run_session(
             _ = shutdown.changed() => break SessionEnd::Shutdown,
             cmd = cmd_rx.recv() => match cmd {
                 None | Some(ConnCmd::Shutdown) => break SessionEnd::Shutdown,
-                Some(ConnCmd::Reconfigure) => break SessionEnd::Reconfigure,
+                Some(ConnCmd::Reconfigure) | Some(ConnCmd::Takeover) => break SessionEnd::Reconfigure,
                 Some(ConnCmd::RefreshWatch) => {
                     let _ = send_watch(&ws_tx, peers).await;
                 }
@@ -274,7 +305,8 @@ async fn run_session(
                     }
                 }
                 Some(ConnCmd::Post { id, to, body, reply }) => {
-                    handle_post(&ws_tx, &mut pending_post, id, to, body, reply).await;
+                    let limit = shared.lock().max_mail_body;
+                    handle_post(&ws_tx, &mut pending_post, id, to, body, reply, limit).await;
                 }
                 Some(ConnCmd::Open { peer_id: target, reply }) => {
                     if peers.has_peer(&target).await {
@@ -410,7 +442,10 @@ async fn run_session(
                         "post_failed" => handle_post_failed(&mut pending_post, &value),
                         "error" => {
                             let code = value.get("code").and_then(Value::as_str).unwrap_or("error");
-                            if matches!(code, "replaced" | "auth_failed" | "auth_timeout") {
+                            if code == "replaced" {
+                                break SessionEnd::Replaced;
+                            }
+                            if matches!(code, "auth_failed" | "auth_timeout") {
                                 break SessionEnd::Disconnected(code.to_owned());
                             }
                             log::debug!("cloud relay error: {code}");
@@ -488,9 +523,10 @@ async fn handle_post(
     to: String,
     body: Value,
     reply: oneshot::Sender<Result<Value>>,
+    max_mail_body: usize,
 ) {
     let encoded = match serde_json::to_vec(&body) {
-        Ok(bytes) if bytes.len() <= MAX_MAIL_BODY_BYTES => bytes,
+        Ok(bytes) if bytes.len() <= max_mail_body => bytes,
         Ok(_) => {
             let _ = reply.send(Err(AppError::InvalidInput(
                 "Nachricht ist zu groß für das Postfach.".to_owned(),

@@ -3,11 +3,58 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, Check, Link2, RefreshCw, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useApp } from '../App';
 import { useToast } from '../components/ToastProvider';
+import { CloudApiError, createCloudApi, httpBaseFromRelayUrl } from '../cloudAccount/api.js';
+import { USERNAME_RE, normalizeUsername } from '../cloudAccount/crypto.js';
 import { ConnectDialog } from './chats/dialogs/ConnectDialog.jsx';
 import { CHAT_ICON_STROKE, PeerAvatar } from './chats/messageHelpers.jsx';
 
+const DEFAULT_RELAY = 'wss://bt.henny.dev/v1/ws';
+
+async function cloudBaseUrl() {
+  try {
+    const status = await window.bluetalk?.cloud?.getStatus?.();
+    if (status?.relayUrl) return httpBaseFromRelayUrl(status.relayUrl);
+  } catch {
+    /* Standard-Relay */
+  }
+  return httpBaseFromRelayUrl(DEFAULT_RELAY);
+}
+
+function parseAddQuery(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return { kind: 'empty' };
+  if (trimmed.startsWith('bt2_')) return { kind: 'peer', peerId: trimmed };
+  const username = normalizeUsername(trimmed.replace(/^@+/, ''));
+  if (USERNAME_RE.test(username)) return { kind: 'username', username };
+  return { kind: 'invalid' };
+}
+
+function lookupErrorMessage(error) {
+  if (error instanceof CloudApiError) {
+    if (error.status === 404 || error.code === 'not_found') {
+      return 'Kein Konto mit diesem Benutzernamen.';
+    }
+    if (error.status === 429 || error.code === 'rate') {
+      return 'Zu viele Suchanfragen. Bitte kurz warten.';
+    }
+    if (error.code === 'network') {
+      return 'Cloud-Server ist nicht erreichbar.';
+    }
+    return error.message || 'Nachschlagen fehlgeschlagen.';
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'Offline — Benutzername kann gerade nicht nachgeschlagen werden.';
+  }
+  return error?.message || 'Nachschlagen fehlgeschlagen.';
+}
+
 function requestPreviewLine(message) {
   if (!message) return 'Neue Nachricht';
+  if (message.kind === 'file' && message.voice) {
+    const ms = Number(message.voice.durationMs) || 0;
+    const totalSec = Math.max(0, Math.round(ms / 1000));
+    return `🎤 Sprachnachricht (${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')})`;
+  }
   if (message.kind === 'file' || message.kind === 'file-link') return `Datei: ${message.fileName || message.content || 'Anhang'}`;
   return message.content || 'Nachricht';
 }
@@ -35,6 +82,10 @@ export default function NewConnectionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const [, setWarning] = useState('');
+  const [addQuery, setAddQuery] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [pendingAdd, setPendingAdd] = useState(null);
 
   const messageRequests = useMemo(() => {
     return contacts
@@ -104,6 +155,66 @@ export default function NewConnectionsPage() {
     navigate('/', { state: { openPeerId: peerId } });
   };
 
+  const confirmPendingAdd = async () => {
+    const peerId = pendingAdd?.peerId;
+    if (!peerId) return;
+    setAddBusy(true);
+    setAddError('');
+    try {
+      try {
+        await connectToAddress(peerId);
+      } catch {
+        upsertContact({ id: peerId, hasOutgoing: true });
+      }
+      setPendingAdd(null);
+      setAddQuery('');
+      navigate('/', { state: { openPeerId: peerId } });
+    } catch (err) {
+      setAddError(err?.message || 'Kontakt konnte nicht angelegt werden.');
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const lookupOrStageAdd = async (event) => {
+    event?.preventDefault?.();
+    if (addBusy) return;
+    setAddError('');
+    setPendingAdd(null);
+    const parsed = parseAddQuery(addQuery);
+    if (parsed.kind === 'empty') {
+      setAddError('Bitte einen Benutzernamen oder eine Peer-ID eingeben.');
+      return;
+    }
+    if (parsed.kind === 'invalid') {
+      setAddError('Benutzername (3–32 Zeichen, a–z 0–9 _ . -) oder Peer-ID beginnend mit bt2_.');
+      return;
+    }
+    if (parsed.kind === 'peer') {
+      setPendingAdd({ username: '', peerId: parsed.peerId });
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setAddError('Offline — Benutzername kann gerade nicht nachgeschlagen werden.');
+      return;
+    }
+    setAddBusy(true);
+    try {
+      const api = createCloudApi(await cloudBaseUrl(), () => '');
+      const result = await api.lookup(parsed.username);
+      const peerId = result?.peerId;
+      if (!peerId) {
+        setAddError('Kein Konto mit diesem Benutzernamen.');
+        return;
+      }
+      setPendingAdd({ username: result.username || parsed.username, peerId });
+    } catch (err) {
+      setAddError(lookupErrorMessage(err));
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -125,9 +236,10 @@ export default function NewConnectionsPage() {
         <header className="page-shell-header">
           <div className="page-shell-copy">
             <h1>Neu</h1>
-            <p>Geräte im selben Netz und Nachrichten von Unbekannten.</p>
+            <p>{__BLUETALK_WEB__ ? 'Nachrichten von Unbekannten und Cloud-Kontakte.' : 'Geräte im selben Netz und Nachrichten von Unbekannten.'}</p>
           </div>
           <div className="page-shell-actions">
+            {__BLUETALK_WEB__ ? null : (
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -136,6 +248,8 @@ export default function NewConnectionsPage() {
               <Link2 size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
               Peer verbinden
             </button>
+            )}
+            {__BLUETALK_WEB__ ? null : (
             <button
               type="button"
               className="btn btn-secondary btn-icon btn-sm"
@@ -151,8 +265,61 @@ export default function NewConnectionsPage() {
                 aria-hidden
               />
             </button>
+            )}
           </div>
         </header>
+
+        <form className="new-add-form" onSubmit={(event) => void lookupOrStageAdd(event)}>
+          <label className="new-add-label" htmlFor="new-add-query">Benutzername oder Peer-ID</label>
+          <div className="new-add-row">
+            <input
+              id="new-add-query"
+              className="input"
+              value={addQuery}
+              onChange={(event) => {
+                setAddQuery(event.target.value);
+                setAddError('');
+                setPendingAdd(null);
+              }}
+              placeholder="@anna oder bt2_…"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={addBusy}
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={addBusy || !addQuery.trim()}>
+              {addBusy ? 'Suche…' : 'Suchen'}
+            </button>
+          </div>
+          {pendingAdd ? (
+            <div className="new-add-confirm" role="status">
+              <div className="new-add-confirm-copy">
+                {pendingAdd.username
+                  ? `@${pendingAdd.username} · ${shortPeerId(pendingAdd.peerId)}`
+                  : shortPeerId(pendingAdd.peerId)}
+              </div>
+              <div className="new-add-confirm-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setPendingAdd(null)}
+                  disabled={addBusy}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void confirmPendingAdd()}
+                  disabled={addBusy}
+                >
+                  Hinzufügen
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {addError ? <p className="new-add-error" role="alert">{addError}</p> : null}
+        </form>
 
         <div className="page-shell-search">
           <div className="search-bar">
@@ -226,9 +393,11 @@ export default function NewConnectionsPage() {
               <p>
                 {search
                   ? `Niemand passt zu „${search.trim()}“.`
-                  : 'Andere Geräte mit BlueTalk erscheinen hier automatisch. Du kannst auch per Adresse verbinden.'}
+                  : (__BLUETALK_WEB__
+                    ? 'Neue Kontakte erscheinen hier, sobald jemand über Cloud schreibt. Du kannst oben einen Benutzernamen oder eine Peer-ID hinzufügen.'
+                    : 'Andere Geräte mit BlueTalk erscheinen hier automatisch. Du kannst auch per Benutzername, Peer-ID oder Adresse verbinden.')}
               </p>
-              {!search ? (
+              {!search && !__BLUETALK_WEB__ ? (
                 <div className="empty-state-actions">
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowConnect(true)}>
                     <Link2 size={14} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
@@ -252,7 +421,9 @@ export default function NewConnectionsPage() {
               <p>
                 {search
                   ? `Niemand passt zu „${search.trim()}“.`
-                  : 'Stelle sicher, dass andere Geräte BlueTalk im selben Netz nutzen.'}
+                  : (__BLUETALK_WEB__
+                    ? 'Geräte im lokalen Netz erscheinen im Browser nicht. Neue Kontakte kommen über Cloud oder Peer-ID.'
+                    : 'Stelle sicher, dass andere Geräte BlueTalk im selben Netz nutzen.')}
               </p>
             </div>
           ) : (

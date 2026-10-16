@@ -34,6 +34,8 @@
   --red-soft: rgba(239,68,68,0.08);
   --amber: #fbbf24;
   --amber-soft: rgba(251,191,36,0.12);
+  --cloud: #a855f7;
+  --cloud-soft: rgba(168, 85, 247, 0.14);
 
   --border: #262626;
   --border-strong: #333333;
@@ -92,6 +94,8 @@
   --red-soft: rgba(220,38,38,0.06);
   --amber: #b45309;
   --amber-soft: rgba(180,83,9,0.1);
+  --cloud: #a855f7;
+  --cloud-soft: rgba(168, 85, 247, 0.1);
 
   --border: #e5e5e5;
   --border-strong: #d4d4d4;

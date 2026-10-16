@@ -6,12 +6,31 @@ use std::{
 };
 
 use axum::http::HeaderMap;
+use rand::RngCore;
 
 pub fn unix_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+pub fn random_bytes(buf: &mut [u8]) {
+    if getrandom::fill(buf).is_err() {
+        rand::rng().fill_bytes(buf);
+    }
+}
+
+/// XOR-Faltung, gleiche Länge vorausgesetzt.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut d = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        d |= x ^ y;
+    }
+    d == 0
 }
 
 /// Gekürzte Peer-ID für Logs (`bt2_` + 8 Hex-Zeichen).
@@ -116,6 +135,13 @@ fn header_ip(headers: &HeaderMap, name: &str) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ct_eq_konstante_zeit() {
+        assert!(ct_eq(b"abcd", b"abcd"));
+        assert!(!ct_eq(b"abcd", b"abce"));
+        assert!(!ct_eq(b"ab", b"abcd"));
+    }
 
     #[test]
     fn host_stript_standardports() {

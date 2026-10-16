@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-account-import-identity"
+description = "Enables the account_import_identity command without any pre-configured scope."
+commands.allow = ["account_import_identity"]
+
+[[permission]]
+identifier = "deny-account-import-identity"
+description = "Denies the account_import_identity command without any pre-configured scope."
+commands.deny = ["account_import_identity"]

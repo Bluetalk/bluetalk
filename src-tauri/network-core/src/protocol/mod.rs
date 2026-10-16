@@ -93,7 +93,7 @@ struct HandshakeFinished {
     transcript_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub(crate) enum WireFrame {
     Message {
@@ -270,14 +270,18 @@ where
     cipher.decrypt(&record)
 }
 
+fn ephemeral_from_seed(seed: [u8; 32]) -> (StaticSecret, [u8; 32]) {
+    let secret = StaticSecret::from(seed);
+    let public = X25519PublicKey::from(&secret).to_bytes();
+    (secret, public)
+}
+
 fn generate_ephemeral() -> Result<(StaticSecret, [u8; 32])> {
     let mut bytes = Zeroizing::new([0_u8; 32]);
     getrandom::fill(bytes.as_mut()).map_err(|error| {
         NetworkError::Crypto(format!("operating-system RNG unavailable: {error}"))
     })?;
-    let secret = StaticSecret::from(*bytes);
-    let public = X25519PublicKey::from(&secret).to_bytes();
-    Ok((secret, public))
+    Ok(ephemeral_from_seed(*bytes))
 }
 
 fn reject_all_zero_shared_secret(shared_secret: &[u8; 32]) -> Result<()> {
@@ -432,6 +436,9 @@ pub(crate) fn unix_time_ms() -> i64 {
 mod handshake;
 
 pub(crate) use handshake::{initiator_handshake, responder_handshake};
+
+#[cfg(test)]
+mod vectors;
 
 #[cfg(test)]
 mod tests {

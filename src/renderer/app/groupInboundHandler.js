@@ -12,6 +12,7 @@ import {
   setReactorEmoji,
   findMessageForReaction,
 } from './messageReactions';
+import { sanitizeVoiceMeta } from '../voice/voiceMeta.js';
 
 const {
   GROUP_EVENT_KIND,
@@ -210,6 +211,11 @@ export async function handleGroupProtocolFrame(deps, normalized, fromId, wasPair
       const actualSize = base64ByteLength(groupMessage.fileData);
       if (actualSize < 0 || actualSize > MAX_CHAT_FILE_BYTES) return;
       groupMessage.fileSize = actualSize;
+      if (groupMessage.voice) {
+        const voice = sanitizeVoiceMeta(groupMessage.voice);
+        if (voice) groupMessage.voice = voice;
+        else delete groupMessage.voice;
+      }
     } else if (groupMessage.kind === 'chat' && String(groupMessage.content || '').length > MAX_CHAT_TEXT_CHARS) {
       return;
     }

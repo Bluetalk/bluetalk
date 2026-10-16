@@ -11,6 +11,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
+import CloudAccountPanel from './CloudAccountPanel';
 
 const DEFAULT_RELAY_URL = 'wss://bt.henny.dev/v1/ws';
 const RELAY_SOURCE_URL = 'https://github.com/Bluetalk/bluetalk/tree/v2/relay';
@@ -43,6 +44,8 @@ function stateLabel(state) {
       return 'Fehler';
     case 'disabled':
       return 'Aus';
+    case 'replaced':
+      return 'Anderes Gerät';
     default:
       return 'Lädt…';
   }
@@ -200,7 +203,7 @@ export default function CloudSyncPage() {
         {loadError && !status ? (
           <div className="card cloud-sync-empty" role="alert">
             <Cloud size={22} strokeWidth={1.75} aria-hidden />
-            <h1 className="cloud-sync-title">Cloud-Nachrichten</h1>
+            <h1 className="cloud-sync-title">BlueTalk Cloud</h1>
             <p className="text-muted">{loadError}</p>
           </div>
         ) : !status ? (
@@ -217,7 +220,7 @@ export default function CloudSyncPage() {
                   <span className="cloud-sync-status-dot" />
                 </div>
                 <div className="cloud-sync-hero-copy">
-                  <h1 className="cloud-sync-title">Cloud-Nachrichten</h1>
+                  <h1 className="cloud-sync-title">BlueTalk Cloud</h1>
                   <p className="cloud-sync-lead">
                     {stateLabel(state)}
                     {relayHost ? ` · ${relayHost}` : ''}
@@ -235,7 +238,7 @@ export default function CloudSyncPage() {
               <div className="cloud-sync-power">
                 <span className="cloud-sync-power-label" aria-hidden>{enabled ? 'An' : 'Aus'}</span>
                 <label className="toggle">
-                  <span className="sr-only">Cloud-Nachrichten {enabled ? 'ausschalten' : 'einschalten'}</span>
+                    <span className="sr-only">BlueTalk Cloud {enabled ? 'ausschalten' : 'einschalten'}</span>
                   <input
                     type="checkbox"
                     checked={enabled}
@@ -246,6 +249,33 @@ export default function CloudSyncPage() {
                 </label>
               </div>
             </section>
+
+            {state === 'replaced' ? (
+              <div className="card cloud-replaced-banner" role="status">
+                <div>
+                  <strong>BlueTalk ist auf einem anderen Gerät aktiv</strong>
+                  <p className="text-muted" style={{ margin: '4px 0 0' }}>
+                    Dieses Gerät wurde vom Relay getrennt. Sync über REST bleibt möglich.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={saving}
+                  onClick={() => {
+                    if (!window.bluetalk?.cloud?.takeover) return;
+                    setSaving(true);
+                    void window.bluetalk.cloud.takeover().catch((error) => {
+                      setValidationError(error?.message || 'Übernahme fehlgeschlagen.');
+                    }).finally(() => setSaving(false));
+                  }}
+                >
+                  Hier verwenden
+                </button>
+              </div>
+            ) : null}
+
+            <CloudAccountPanel toast={toast} localPeerId={status?.peerId || ''} />
 
             <div className="cloud-sync-metrics">
               <div className="card cloud-sync-metric">

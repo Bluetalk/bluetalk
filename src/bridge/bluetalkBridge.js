@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { wrapWithSync } from './syncLayer.js';
 
 const ALLOWED_EVENTS = new Set([
   'peer:connected',
@@ -95,7 +96,7 @@ function gameBridge(game, route) {
   };
 }
 
-const api = Object.freeze({
+const core = {
   window: Object.freeze({
     minimize: () => call('window_minimize'),
     maximize: () => call('window_toggle_maximize'),
@@ -234,9 +235,15 @@ const api = Object.freeze({
     drainMail: () => call('cloud_drain_mail'),
     ackMail: (ids) => call('cloud_ack_mail', { ids }),
     refreshWatch: () => call('cloud_refresh_watch'),
+    takeover: () => call('cloud_takeover'),
     onStatus: (callback) => subscribe('cloud:status', callback),
     onPresence: (callback) => subscribe('cloud:presence', callback),
     onMail: (callback) => subscribe('cloud:mail', callback),
+  }),
+
+  account: Object.freeze({
+    exportIdentity: () => call('account_export_identity'),
+    importIdentity: (seedB64) => call('account_import_identity', { seedB64 }),
   }),
 
   plugins: Object.freeze({
@@ -253,6 +260,13 @@ const api = Object.freeze({
   }),
 
   on: subscribe,
+};
+
+const synced = wrapWithSync(core);
+const api = Object.freeze({
+  ...synced,
+  store: Object.freeze(synced.store),
+  messages: Object.freeze(synced.messages),
 });
 
 Object.defineProperty(window, 'bluetalk', {

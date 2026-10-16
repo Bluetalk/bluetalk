@@ -67,8 +67,8 @@ export default function Sidebar() {
     { to: '/new', label: 'Neu', icon: UserPlus },
     { to: '/library', label: 'Bibliothek', icon: FolderOpen },
     { to: '/games', label: 'Spiele', icon: Sparkles },
-    { to: '/plugins', label: 'Erweiterungen', icon: Blocks },
-    { to: '/cloud-sync', label: 'Cloud-Nachrichten', icon: Cloud },
+    ...(__BLUETALK_WEB__ ? [] : [{ to: '/plugins', label: 'Erweiterungen', icon: Blocks }]),
+    { to: '/cloud-sync', label: 'BlueTalk Cloud', icon: Cloud },
     { to: '/settings', label: 'Einstellungen', icon: SettingsIcon },
   ];
 
@@ -85,7 +85,7 @@ export default function Sidebar() {
             ? (badgeCount === 1 ? 'Einladung' : 'Einladungen')
             : (badgeCount === 1 ? 'Anfrage' : 'Anfragen');
           const cloudTip = to === '/cloud-sync' && cloudState
-            ? (cloudState === 'online' ? 'Online' : cloudState === 'connecting' ? 'Verbindet…' : cloudState === 'error' ? 'Fehler' : cloudState === 'disabled' ? 'Aus' : 'Offline')
+            ? (cloudState === 'online' ? 'Online' : cloudState === 'connecting' ? 'Verbindet…' : cloudState === 'error' ? 'Fehler' : cloudState === 'disabled' ? 'Aus' : cloudState === 'replaced' ? 'Anderes Gerät' : 'Offline')
             : '';
           const tip = badgeCount > 0
             ? `${label} — ${badgeCount} ${badgeNoun}`
@@ -111,8 +111,8 @@ export default function Sidebar() {
             </NavLink>
           );
         })}
-        {pluginTabs.length > 0 ? <div className="sidebar-nav-divider" role="separator" aria-hidden="true" /> : null}
-        {pluginTabs.map((tab) => {
+        {!__BLUETALK_WEB__ && pluginTabs.length > 0 ? <div className="sidebar-nav-divider" role="separator" aria-hidden="true" /> : null}
+        {__BLUETALK_WEB__ ? null : pluginTabs.map((tab) => {
           const Icon = resolveLucideIcon(tab.icon);
           const tip = tab.tag ? `${tab.label} · ${tab.tag}` : tab.label;
           return (

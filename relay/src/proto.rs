@@ -5,10 +5,10 @@ use serde_json::{Value, json};
 
 use crate::util::unix_ms;
 
-/// Textframes max. 128 KiB, Binär-Payload max. 64 KiB (PROTOCOL.md).
-pub const MAX_TEXT_BYTES: usize = 128 * 1024;
+/// Textframes max. 1,25 MiB, Binär-Payload max. 64 KiB, Postfach-Body 1 MiB (PROTOCOL.md).
+pub const MAX_TEXT_BYTES: usize = (5 * 1024 * 1024) / 4;
 pub const MAX_FRAME_PAYLOAD: usize = 65_536;
-pub const MAX_MAIL_BODY: usize = 65_536;
+pub const MAX_MAIL_BODY: usize = 1024 * 1024;
 pub const MAX_TUNNELS: usize = 64;
 pub const MAX_PENDING_OPENS: usize = 8;
 pub const MAX_WATCH: usize = 2000;

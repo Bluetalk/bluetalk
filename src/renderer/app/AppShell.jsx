@@ -90,13 +90,13 @@ export default function AppShell({
                     <Route index element={<Navigate to="account" replace />} />
                     <Route path="account" element={<AccountSettingsPage />} />
                     <Route path="application" element={<ApplicationSettingsPage />} />
-                    <Route path="connection" element={<ConnectionSettingsPage />} />
-                    <Route path="ai" element={<AiSettingsPage />} />
+                    <Route path="connection" element={__BLUETALK_WEB__ ? <Navigate to="/settings/account" replace /> : <ConnectionSettingsPage />} />
+                    <Route path="ai" element={__BLUETALK_WEB__ ? <Navigate to="/settings/account" replace /> : <AiSettingsPage />} />
                     <Route path="stickers" element={<StickersSettingsPage />} />
-                    <Route path="updates" element={<UpdatesSettingsPage />} />
+                    <Route path="updates" element={__BLUETALK_WEB__ ? <Navigate to="/settings/application" replace /> : <UpdatesSettingsPage />} />
                   </Route>
                   <Route path="/cloud-sync" element={<CloudSyncPage />} />
-                  <Route path="/plugins" element={<PluginsPage />} />
+                  <Route path="/plugins" element={__BLUETALK_WEB__ ? <Navigate to="/" replace /> : <PluginsPage />} />
                   <Route path="/plugin/:tabId" element={<PluginTabView />} />
                   <Route path="*" element={<NotFoundPage />} />
                   </Routes>

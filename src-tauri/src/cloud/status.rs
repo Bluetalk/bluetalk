@@ -11,6 +11,7 @@ pub enum CloudState {
     Online,
     Offline,
     Error,
+    Replaced,
 }
 
 impl CloudState {
@@ -21,6 +22,7 @@ impl CloudState {
             Self::Online => "online",
             Self::Offline => "offline",
             Self::Error => "error",
+            Self::Replaced => "replaced",
         }
     }
 }

@@ -1,5 +1,16 @@
 export function buildMessageNotificationPreview(message) {
   if (!message || typeof message !== 'object') return 'Neue Nachricht';
+  if (message.kind === 'call-log') {
+    if (message.outcome === 'missed') return 'Verpasster Anruf';
+    return 'Sprachanruf';
+  }
+  if (message.kind === 'file' && message.voice) {
+    const ms = Number(message.voice.durationMs) || 0;
+    const totalSec = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `🎤 Sprachnachricht (${m}:${String(s).padStart(2, '0')})`;
+  }
   if (message.kind === 'file' || message.kind === 'file-link') {
     return `Datei: ${message.fileName || message.content || 'Anhang'}`;
   }

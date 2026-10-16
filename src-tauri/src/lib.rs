@@ -79,6 +79,7 @@ pub fn run() {
             tray::setup(app.handle(), database)?;
             if let Some(main_window) = app.get_webview_window("main") {
                 commands::window::install_main_window_event_forwarder(&main_window)?;
+                commands::window::install_microphone_permission_handler(&main_window)?;
             }
             Ok(())
         })
@@ -142,6 +143,9 @@ pub fn run() {
             commands::cloud::cloud_drain_mail,
             commands::cloud::cloud_ack_mail,
             commands::cloud::cloud_refresh_watch,
+            commands::cloud::cloud_takeover,
+            commands::cloud::account_export_identity,
+            commands::cloud::account_import_identity,
             commands::native::open_url,
             commands::plugins::plugins_list,
             commands::plugins::plugins_rescan,

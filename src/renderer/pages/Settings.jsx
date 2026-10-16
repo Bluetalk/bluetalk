@@ -9,7 +9,7 @@ export default function SettingsLayout() {
       <div className="settings-split">
         <nav className="page-shell settings-side" aria-label="Einstellungen">
           <div className="settings-side-title">Einstellungen</div>
-          {SETTINGS_NAV.map((item) => (
+          {SETTINGS_NAV.filter((item) => !(__BLUETALK_WEB__ && item.desktopOnly)).map((item) => (
             <SettingsNavRow
               key={item.to}
               to={item.to}

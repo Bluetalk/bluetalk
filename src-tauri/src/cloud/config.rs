@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub const DEFAULT_RELAY_URL: &str = "wss://bt.henny.dev/v1/ws";
-pub const MAX_MAIL_BODY_BYTES: usize = 64 * 1024;
+pub const MAX_MAIL_BODY_BYTES: usize = 1024 * 1024;
 pub const MAX_TUNNEL_PAYLOAD: usize = 64 * 1024;
 pub const DUPLEX_BUFFER: usize = 256 * 1024;
 pub const MAX_WATCH_PEERS: usize = 2_000;

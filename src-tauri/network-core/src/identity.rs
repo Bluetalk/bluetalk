@@ -52,23 +52,20 @@ impl NetworkIdentity {
         }
     }
 
-    /// Loads a seed from a restricted file or creates it atomically.
-    ///
-    /// Hosts with an OS keyring should store the 32-byte seed there and call
-    /// [`Self::from_seed`]. This file helper exists for headless deployments.
-    pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        match Self::load(path) {
-            Ok(identity) => return Ok(identity),
-            Err(NetworkError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+    pub fn seed_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
 
-        let identity = Self::generate()?;
+    /// Writes `network-identity.json` atomically in the on-disk format.
+    pub fn write_seed(path: impl AsRef<Path>, seed: [u8; 32]) -> Result<()> {
+        let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+        Self::write_identity_file(path, &Self::from_seed(seed))
+    }
 
+    fn write_identity_file(path: &Path, identity: &Self) -> Result<()> {
         let random_suffix = random_hex(8)?;
         let temporary_path = path.with_extension(format!("tmp-{random_suffix}"));
         let stored = StoredIdentity {
@@ -90,15 +87,37 @@ impl NetworkIdentity {
         drop(file);
 
         match fs::rename(&temporary_path, path) {
-            Ok(()) => Ok(identity),
-            Err(_) if path.exists() => {
-                let _ = fs::remove_file(&temporary_path);
-                Self::load(path)
-            }
+            Ok(()) => Ok(()),
             Err(error) => {
+                if path.exists() {
+                    let _ = fs::remove_file(path);
+                    if fs::rename(&temporary_path, path).is_ok() {
+                        return Ok(());
+                    }
+                }
                 let _ = fs::remove_file(&temporary_path);
                 Err(error.into())
             }
+        }
+    }
+
+    /// Loads a seed from a restricted file or creates it atomically.
+    ///
+    /// Hosts with an OS keyring should store the 32-byte seed there and call
+    /// [`Self::from_seed`]. This file helper exists for headless deployments.
+    pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        match Self::load(path) {
+            Ok(identity) => return Ok(identity),
+            Err(NetworkError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        let identity = Self::generate()?;
+        match Self::write_identity_file(path, &identity) {
+            Ok(()) => Ok(identity),
+            Err(_) if path.exists() => Self::load(path),
+            Err(error) => Err(error),
         }
     }
 
@@ -205,6 +224,22 @@ mod tests {
             NetworkIdentity::verify(&identity.public_key_bytes(), other.as_bytes(), &signature)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn written_seed_matches_on_disk_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("network-identity.json");
+        let first = NetworkIdentity::generate().unwrap();
+        NetworkIdentity::write_seed(&path, first.seed_bytes()).unwrap();
+        let second = NetworkIdentity::load_or_create(&path).unwrap();
+        assert_eq!(first.peer_id(), second.peer_id());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"version\":1"));
+        assert!(text.contains("secretKey"));
+        let parsed: StoredIdentity = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.secret_key, BASE64.encode(first.seed_bytes()));
     }
 
     #[test]

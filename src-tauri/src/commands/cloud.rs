@@ -7,6 +7,7 @@ use crate::{
     cloud::CloudService,
     commands::require_main,
     error::Result,
+    peer_service::PeerService,
 };
 
 #[tauri::command]
@@ -68,4 +69,35 @@ pub async fn cloud_refresh_watch(
     require_main(&window)?;
     cloud.refresh_watch();
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn cloud_takeover(
+    window: WebviewWindow,
+    cloud: State<'_, Arc<CloudService>>,
+) -> Result<Value> {
+    require_main(&window)?;
+    Ok(cloud.takeover())
+}
+
+#[tauri::command]
+pub async fn account_export_identity(
+    window: WebviewWindow,
+    peers: State<'_, Arc<PeerService>>,
+) -> Result<Value> {
+    require_main(&window)?;
+    let seed_b64 = peers.export_identity_seed()?;
+    Ok(serde_json::json!({ "seedB64": seed_b64 }))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn account_import_identity(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+    peers: State<'_, Arc<PeerService>>,
+    seed_b64: String,
+) -> Result<Value> {
+    require_main(&window)?;
+    peers.import_identity_seed(&seed_b64)?;
+    app.restart()
 }

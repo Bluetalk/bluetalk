@@ -25,6 +25,9 @@ import {
   GamePresenceBanner,
   MessageReplyQuote,
 } from './messageParts.jsx';
+import { VoicePlayer } from '../../voice/VoicePlayer.jsx';
+import { isVoiceMessage } from '../../voice/voiceMeta.js';
+import { CallLogLine, isCallLogMessage } from '../../calls/CallLogLine.jsx';
 import { ChatMessage } from './agentBlocks.jsx';
 import { MessageReactions } from './MessageReactions.jsx';
 
@@ -231,6 +234,19 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
           || aiStats?.genTimeMs > 0
           || m.aiStopped
         );
+        if (isCallLogMessage(m)) {
+          return (
+            <React.Fragment key={m.messageId || `${m.timestamp || i}-${m.from || 'msg'}-${i}`}>
+              {showDaySep ? (
+                <div className="msg-day-sep" role="separator">
+                  <span>{formatDaySeparator(m.timestamp)}</span>
+                </div>
+              ) : null}
+              <CallLogLine message={m} />
+            </React.Fragment>
+          );
+        }
+
         return (
           <React.Fragment key={m.messageId || `${m.timestamp || i}-${m.from || 'msg'}-${i}`}>
             {showDaySep ? (
@@ -290,7 +306,9 @@ export function MessageList({ chat, data, ui, scroll, actions }) {
               {m.replyTo && m.kind !== 'chat' ? (
                 <MessageReplyQuote replyTo={m.replyTo} isSelf={isSelf} />
               ) : null}
-              {m.kind === 'file' ? (
+              {m.kind === 'file' && isVoiceMessage(m) ? (
+                <VoicePlayer message={m} />
+              ) : m.kind === 'file' ? (
                 <FileMessage
                   message={m}
                   bareLayout={bareMedia}

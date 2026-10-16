@@ -186,8 +186,29 @@ function messageClusterKey(message) {
   return String(message.senderPeerId || message.from || 'other');
 }
 
+function voicePreview(message) {
+  const ms = Number(message?.voice?.durationMs) || 0;
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `🎤 Sprachnachricht (${m}:${String(s).padStart(2, '0')})`;
+}
+
+function callLogPreview(message) {
+  if (message?.outcome === 'missed') return 'Verpasster Anruf';
+  if (message?.outcome === 'rejected') return 'Anruf abgelehnt';
+  if (message?.outcome === 'busy') return 'Besetzt';
+  if (message?.outcome === 'failed') return 'Anruf fehlgeschlagen';
+  const ms = Number(message?.durationMs) || 0;
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `Sprachanruf · ${m}:${String(s).padStart(2, '0')}`;
+}
+
 function isMessageClusterContinuation(prev, curr, windowMs = MESSAGE_CLUSTER_MS) {
   if (!prev || !curr) return false;
+  if (prev.kind === 'call-log' || curr.kind === 'call-log') return false;
   if (messageClusterKey(prev) !== messageClusterKey(curr)) return false;
   const pt = prev.timestamp;
   const ct = curr.timestamp;
@@ -351,7 +372,9 @@ function getComposerTextareaMaxHeight() {
 
 function getMessagePreviewText(message, debugMode = false) {
   if (!message) return '';
+  if (message.kind === 'call-log') return callLogPreview(message);
   if (message.kind === 'sticker') return 'Sticker';
+  if (message.kind === 'file' && message.voice) return voicePreview(message);
   if (message.kind === 'file' || message.kind === 'file-link') return `📎 ${message.fileName || message.content || 'Anhang'}`;
   if (message.kind === 'contact-share') {
     const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
@@ -483,6 +506,7 @@ function buildForwardPayload(message) {
       fileSize: message.fileSize,
       fileType: message.fileType,
       fileData: message.fileData,
+      ...(message.voice ? { voice: message.voice } : {}),
     };
   }
   const preview = getMessagePreviewText(message);
@@ -491,7 +515,9 @@ function buildForwardPayload(message) {
 
 function getLastPreview(message, debugMode = false) {
   if (!message) return 'Keine Nachrichten';
+  if (message.kind === 'call-log') return callLogPreview(message);
   if (message.kind === 'sticker') return `${message.from === 'self' ? 'Du: ' : ''}Sticker`;
+  if (message.kind === 'file' && message.voice) return voicePreview(message);
   if (message.kind === 'file' || message.kind === 'file-link') return `Datei: ${message.fileName || message.content || 'Anhang'}`;
   if (message.kind === 'contact-share') {
     const name = message.sharedContact?.displayName || message.sharedContact?.name || 'Kontakt';
@@ -542,12 +568,14 @@ function countUnreadPeerMessages(peerId, lastViewedTs, messagesByPeer, lastMessa
   const arr = messagesByPeer[peerId] || [];
   let n = 0;
   for (const m of arr) {
+    if (m.kind === 'call-log') continue;
     if (m.from !== 'self' && typeof m.timestamp === 'number' && m.timestamp > bound) n += 1;
   }
   if (
     n === 0
     && arr.length === 0
     && lastMessageMeta
+    && lastMessageMeta.kind !== 'call-log'
     && lastMessageMeta.from !== 'self'
     && typeof lastMessageMeta.timestamp === 'number'
     && lastMessageMeta.timestamp > bound

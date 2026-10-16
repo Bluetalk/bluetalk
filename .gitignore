@@ -3,6 +3,7 @@
 /web/.svelte-kit/
 /web/build/
 /dist/
+/dist-web/
 /release/
 /src-tauri/target/
 /src-tauri/gen/

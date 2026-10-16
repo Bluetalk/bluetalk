@@ -1,12 +1,17 @@
 # Beispiel zum Selbsthosten. Reverse-Proxy (Caddy/nginx/Traefik) davor:
 # WebSocket-Upgrade und TLS (wss://) dort erledigen.
 #
-#   cd relay
-#   docker compose up -d --build
+#   # im Repo-Root:
+#   docker compose -f relay/docker-compose.yml up -d --build
+#   # oder: cd relay && docker compose up -d --build
+#
+# Build-Kontext ist das Repo-Root (BlueTalk Web + Relay).
 
 services:
   relay:
-    build: .
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
     image: bluetalk-relay:latest
     restart: unless-stopped
     ports:
@@ -14,6 +19,9 @@ services:
     environment:
       PORT: "8080"
       DATA_DIR: /data
+      WEB_DIR: /srv/web
+      ACCOUNTS_ENABLED: "1"
+      SYNC_QUOTA_BYTES: "268435456"
       # Host, den Clients in der Auth-Signatur verwenden (ohne https://).
       # PUBLIC_HOST: bt.example.com
       TRUST_PROXY: "1"

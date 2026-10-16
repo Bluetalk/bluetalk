@@ -32,6 +32,7 @@ enum WsOut {
 
 enum ConnCmd {
     Reconfigure,
+    Takeover,
     RefreshWatch,
     Open {
         peer_id: String,
@@ -53,6 +54,7 @@ struct CloudShared {
     config: CloudConfig,
     snapshot: StatusSnapshot,
     mail: MailQueue,
+    max_mail_body: usize,
 }
 
 pub struct CloudService {
@@ -74,6 +76,7 @@ impl CloudService {
             config,
             snapshot,
             mail: MailQueue::default(),
+            max_mail_body: config::MAX_MAIL_BODY_BYTES,
         }));
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -116,6 +119,11 @@ impl CloudService {
 
     pub fn reconnect(&self) {
         let _ = self.cmd_tx.try_send(ConnCmd::Reconfigure);
+    }
+
+    pub fn takeover(&self) -> Value {
+        let _ = self.cmd_tx.try_send(ConnCmd::Takeover);
+        self.status()
     }
 
     pub fn refresh_watch(&self) {

@@ -8,6 +8,7 @@ import { DEFAULT_APP_SETTINGS } from './app/chatConstants';
 import { AppContext, AiProgressContext } from './app/appContext';
 import { InboundToastBridge } from './app/bridges';
 import AppShell from './app/AppShell';
+import { CallProvider } from './calls/CallProvider.jsx';
 import { useContactsAndSettings } from './app/hooks/useContactsAndSettings';
 import { useChatData } from './app/hooks/useChatData';
 import { useE2ee } from './app/hooks/useE2ee';
@@ -17,6 +18,7 @@ import { useMessaging } from './app/hooks/useMessaging';
 import { useAiChat } from './app/hooks/useAiChat';
 import { useGamePresence } from './app/hooks/useGamePresence';
 import { usePluginHost } from './app/hooks/usePluginHost';
+import { useCloudAccountSync } from './app/hooks/useCloudAccountSync';
 import { TYPING_EXPIRE_MS } from '../shared/chat-typing.js';
 
 // Bestehende Importe aus '../App' (Pages/Components) bleiben gültig:
@@ -125,6 +127,22 @@ export default function App() {
     messages,
     setMessages,
     setLoadedChats,
+    messageCacheRef,
+  });
+
+  useCloudAccountSync({
+    loadChatMessages,
+    setContacts,
+    setSettings,
+    setTheme,
+    setGroups,
+    groupsRef,
+    setPeerReadReceipts,
+    setChatLastViewedPeerTs,
+    setChatMeta,
+    setMessages,
+    setLoadedChats,
+    setE2eeBootNonce,
     messageCacheRef,
   });
 
@@ -439,16 +457,26 @@ export default function App() {
   return (
     <AppContext.Provider value={ctx}>
       <AiProgressContext.Provider value={aiChatProgress}>
-        <AppShell
+        <CallProvider
+          sendPairwiseEncrypted={sendPairwiseEncrypted}
+          setMessages={setMessages}
+          setChatMeta={setChatMeta}
+          contacts={contacts}
+          peers={peers}
+          settings={settings}
           inboundToastRef={inboundToastRef}
-          showUsernameOnboarding={showUsernameOnboarding}
-          completeUsernameOnboarding={completeUsernameOnboarding}
-          versionWelcomeNotes={versionWelcomeNotes}
-          showVersionWelcome={showVersionWelcome}
-          dismissVersionWelcome={dismissVersionWelcome}
-          loadError={loadError}
-          setLoadError={setLoadError}
-        />
+        >
+          <AppShell
+            inboundToastRef={inboundToastRef}
+            showUsernameOnboarding={showUsernameOnboarding}
+            completeUsernameOnboarding={completeUsernameOnboarding}
+            versionWelcomeNotes={versionWelcomeNotes}
+            showVersionWelcome={showVersionWelcome}
+            dismissVersionWelcome={dismissVersionWelcome}
+            loadError={loadError}
+            setLoadError={setLoadError}
+          />
+        </CallProvider>
       </AiProgressContext.Provider>
     </AppContext.Provider>
   );

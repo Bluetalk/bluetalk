@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import {
   Cloud,
   Forward,
+  Phone,
   Trash2,
 } from 'lucide-react';
+import { useCall } from '../../calls/CallProvider.jsx';
 import { PeerChatContextMenu } from './menus/PeerChatContextMenu.jsx';
 import { peerPresenceKind, peerPresenceLabel } from './peerPresence.js';
 import {
@@ -44,6 +46,16 @@ export function ChatHeader({
 }) {
   const [peerMenu, setPeerMenu] = useState(null);
   const { selectionMode, selectedCount } = selection;
+  const callApi = useCall();
+  const showPeerActions = !isAiChatSelected && !isGroupSelected;
+  const callDisabledReason = !showPeerActions
+    ? (isGroupSelected ? 'Anrufe nur in 1:1-Chats' : 'Keine Anrufe mit Bots')
+    : selectedPeer?.offline
+      ? 'Kontakt ist offline'
+      : (selectedPeer?.contact?.blocked || selectedPeer?.contact?.blockedByPeer || selectedPeer?.contact?.chatDeletedByPeer)
+        ? 'Anruf nicht möglich'
+        : '';
+  const showCallButton = showPeerActions && !selectionMode;
 
   useEffect(() => {
     setPeerMenu(null);
@@ -52,7 +64,6 @@ export function ChatHeader({
   const presenceKind = peerPresenceKind(selectedPeer, isAiChatSelected, isGroupSelected);
   const presenceLabel = peerPresenceLabel(selectedPeer, isAiChatSelected, isGroupSelected);
   const profileActionLabel = isGroupSelected ? 'Gruppeninfo' : isAiChatSelected ? 'Profil bearbeiten' : 'Profil anzeigen';
-  const showPeerActions = !isAiChatSelected && !isGroupSelected;
 
   return (
     <div
@@ -91,6 +102,21 @@ export function ChatHeader({
             </button>
           </div>
         </div>
+      ) : null}
+      {showCallButton ? (
+        <button
+          type="button"
+          className="chat-header-call-btn"
+          disabled={Boolean(callDisabledReason) || !callApi?.startCall}
+          title={callDisabledReason || 'Sprachanruf'}
+          aria-label={callDisabledReason || 'Sprachanruf starten'}
+          onClick={() => {
+            if (callDisabledReason || !selectedPeer?.id) return;
+            void callApi?.startCall?.(selectedPeer.id);
+          }}
+        >
+          <Phone size={16} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
+        </button>
       ) : null}
       <button
         type="button"

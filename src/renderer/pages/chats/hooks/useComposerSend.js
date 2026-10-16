@@ -175,6 +175,7 @@ export function useComposerSend({
         fileType: file.type,
         fileData: file.base64,
         localPreviewUrl: file.objectUrl,
+        ...(file.voice ? { voice: file.voice } : {}),
       }).then((result) => {
         if (progressTimer) clearInterval(progressTimer);
         progressTimer = null;

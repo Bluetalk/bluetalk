@@ -29,6 +29,8 @@ import {
   setReactorEmoji,
   findMessageForReaction,
 } from './messageReactions';
+import { dispatchCallInbound } from '../calls/inbound.js';
+import { sanitizeVoiceMeta } from '../voice/voiceMeta.js';
 
 // Eingehende Inhalte, die eine Desktop-Benachrichtigung auslösen sollen.
 const NOTIFYABLE_KINDS = new Set([
@@ -78,6 +80,12 @@ export function createPeerMessageHandler(deps) {
   return async (msg) => {
     const fromId = msg.from;
     const isBlocked = fromId && contactsRef.current.some((c) => c?.id === fromId && c.blocked === true);
+
+    // call-audio kommt ~17×/s — sofort weiterleiten, kein React/Store.
+    if ((msg.kind === 'call-audio' || msg.kind === 'call-signal') && fromId) {
+      if (!isBlocked) dispatchCallInbound(fromId, msg);
+      return;
+    }
 
     if (msg.kind === 'contact-blocked' && fromId) {
       // Von uns blockierte Kontakte dürfen keine Status-Frames mehr auslösen
@@ -352,6 +360,15 @@ export function createPeerMessageHandler(deps) {
       }
     }
 
+    if (normalized.kind === 'call-offer' && fromId) {
+      dispatchCallInbound(fromId, normalized);
+      return;
+    }
+    if ((normalized.kind === 'call-audio' || normalized.kind === 'call-signal') && fromId) {
+      if (!isBlocked) dispatchCallInbound(fromId, normalized);
+      return;
+    }
+
     if (GROUP_PROTOCOL_KINDS.includes(normalized.kind)) {
       await handleGroupProtocolFrame(deps, normalized, fromId, wasPairwiseEncrypted);
       return;
@@ -382,6 +399,11 @@ export function createPeerMessageHandler(deps) {
         return;
       }
       normalized = { ...normalized, fileSize: actualSize };
+      if (normalized.voice) {
+        const voice = sanitizeVoiceMeta(normalized.voice);
+        if (voice) normalized.voice = voice;
+        else delete normalized.voice;
+      }
     } else if (normalized.kind === 'chat' && String(normalized.content || '').length > MAX_CHAT_TEXT_CHARS) {
       console.warn('Rejected oversized chat message from peer:', fromId);
       return;

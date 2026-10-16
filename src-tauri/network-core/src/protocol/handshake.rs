@@ -15,18 +15,13 @@ where
 {
     validate_display_name(display_name)?;
     let (ephemeral_secret, ephemeral_public) = generate_ephemeral()?;
-    let mut hello = ClientHello {
-        magic: HANDSHAKE_MAGIC.to_owned(),
-        envelope_version: HANDSHAKE_ENVELOPE_VERSION,
-        protocol_version: PROTOCOL_VERSION,
-        timestamp_ms: unix_time_ms(),
-        nonce: random_hex(32)?,
-        identity_key: BASE64.encode(identity.public_key_bytes()),
-        ephemeral_key: BASE64.encode(ephemeral_public),
-        display_name: display_name.to_owned(),
-        signature: String::new(),
-    };
-    hello.signature = BASE64.encode(identity.sign(&client_signature_input(&hello)?));
+    let hello = make_client_hello(
+        identity,
+        display_name,
+        unix_time_ms(),
+        random_hex(32)?,
+        &ephemeral_public,
+    )?;
     let client_bytes = serde_json::to_vec(&hello)?;
     write_prefixed(stream, &client_bytes, MAX_HANDSHAKE_BYTES).await?;
 
@@ -105,20 +100,14 @@ where
     let remote_peer_id = peer_id_for_public_key(&client_identity);
 
     let (ephemeral_secret, ephemeral_public) = generate_ephemeral()?;
-    let client_hash = Sha256::digest(&client_bytes);
-    let mut server = ServerHello {
-        magic: HANDSHAKE_MAGIC.to_owned(),
-        envelope_version: HANDSHAKE_ENVELOPE_VERSION,
-        protocol_version: PROTOCOL_VERSION,
-        timestamp_ms: unix_time_ms(),
-        nonce: random_hex(32)?,
-        identity_key: BASE64.encode(identity.public_key_bytes()),
-        ephemeral_key: BASE64.encode(ephemeral_public),
-        display_name: display_name.to_owned(),
-        client_hello_hash: hex::encode(client_hash),
-        signature: String::new(),
-    };
-    server.signature = BASE64.encode(identity.sign(&server_signature_input(&server)?));
+    let server = make_server_hello(
+        identity,
+        display_name,
+        &client_bytes,
+        unix_time_ms(),
+        random_hex(32)?,
+        &ephemeral_public,
+    )?;
     let server_bytes = serde_json::to_vec(&server)?;
     write_prefixed(stream, &server_bytes, MAX_HANDSHAKE_BYTES).await?;
 
@@ -231,6 +220,95 @@ fn validate_timestamp(timestamp_ms: i64) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn make_client_hello(
+    identity: &NetworkIdentity,
+    display_name: &str,
+    timestamp_ms: i64,
+    nonce: String,
+    ephemeral_public: &[u8; 32],
+) -> Result<ClientHello> {
+    let mut hello = ClientHello {
+        magic: HANDSHAKE_MAGIC.to_owned(),
+        envelope_version: HANDSHAKE_ENVELOPE_VERSION,
+        protocol_version: PROTOCOL_VERSION,
+        timestamp_ms,
+        nonce,
+        identity_key: BASE64.encode(identity.public_key_bytes()),
+        ephemeral_key: BASE64.encode(ephemeral_public),
+        display_name: display_name.to_owned(),
+        signature: String::new(),
+    };
+    hello.signature = BASE64.encode(identity.sign(&client_signature_input(&hello)?));
+    Ok(hello)
+}
+
+fn make_server_hello(
+    identity: &NetworkIdentity,
+    display_name: &str,
+    client_bytes: &[u8],
+    timestamp_ms: i64,
+    nonce: String,
+    ephemeral_public: &[u8; 32],
+) -> Result<ServerHello> {
+    let mut server = ServerHello {
+        magic: HANDSHAKE_MAGIC.to_owned(),
+        envelope_version: HANDSHAKE_ENVELOPE_VERSION,
+        protocol_version: PROTOCOL_VERSION,
+        timestamp_ms,
+        nonce,
+        identity_key: BASE64.encode(identity.public_key_bytes()),
+        ephemeral_key: BASE64.encode(ephemeral_public),
+        display_name: display_name.to_owned(),
+        client_hello_hash: hex::encode(Sha256::digest(client_bytes)),
+        signature: String::new(),
+    };
+    server.signature = BASE64.encode(identity.sign(&server_signature_input(&server)?));
+    Ok(server)
+}
+
+#[cfg(test)]
+pub(crate) struct HandshakeSecrets {
+    pub timestamp_ms: i64,
+    pub nonce_hex: String,
+    pub ephemeral_seed: [u8; 32],
+}
+
+#[cfg(test)]
+pub(crate) fn client_hello_from_secrets(
+    identity: &NetworkIdentity,
+    display_name: &str,
+    secrets: &HandshakeSecrets,
+) -> Result<(Vec<u8>, x25519_dalek::StaticSecret)> {
+    let (secret, public) = super::ephemeral_from_seed(secrets.ephemeral_seed);
+    let hello = make_client_hello(
+        identity,
+        display_name,
+        secrets.timestamp_ms,
+        secrets.nonce_hex.clone(),
+        &public,
+    )?;
+    Ok((serde_json::to_vec(&hello)?, secret))
+}
+
+#[cfg(test)]
+pub(crate) fn server_hello_from_secrets(
+    identity: &NetworkIdentity,
+    display_name: &str,
+    client_bytes: &[u8],
+    secrets: &HandshakeSecrets,
+) -> Result<(Vec<u8>, x25519_dalek::StaticSecret)> {
+    let (secret, public) = super::ephemeral_from_seed(secrets.ephemeral_seed);
+    let hello = make_server_hello(
+        identity,
+        display_name,
+        client_bytes,
+        secrets.timestamp_ms,
+        secrets.nonce_hex.clone(),
+        &public,
+    )?;
+    Ok((serde_json::to_vec(&hello)?, secret))
 }
 
 fn client_signature_input(hello: &ClientHello) -> Result<Vec<u8>> {

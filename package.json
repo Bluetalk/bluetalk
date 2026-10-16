@@ -1,7 +1,7 @@
 {
   "name": "bluetalk-v2",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "BlueTalk peer-to-peer desktop client powered by Rust and Tauri",
   "type": "module",
   "author": {
@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:web": "vite build --mode web",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
@@ -20,6 +21,9 @@
     "check": "npm run test && npm run build && npm run test:rust"
   },
   "dependencies": {
+    "@noble/ciphers": "^1.3.0",
+    "@noble/curves": "^1.9.1",
+    "@noble/hashes": "^1.8.0",
     "@tauri-apps/api": "2.11.1",
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",

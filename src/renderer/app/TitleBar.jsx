@@ -53,6 +53,7 @@ export default function TitleBar() {
         <span className={peerCount > 0 ? 'online-dot' : 'offline-dot'} />
         <span>{peerCount} {peerCount === 1 ? 'Peer' : 'Peers'}</span>
       </div>
+      {__BLUETALK_WEB__ ? null : (
       <div className="titlebar-controls">
         <button type="button" onClick={() => window.bluetalk?.window.minimize()} className="tb-btn" title="Minimieren" aria-label="Minimieren">
           <Minus size={14} strokeWidth={2} aria-hidden />
@@ -70,6 +71,7 @@ export default function TitleBar() {
           <X size={14} strokeWidth={2} aria-hidden />
         </button>
       </div>
+      )}
     </div>
   );
 }

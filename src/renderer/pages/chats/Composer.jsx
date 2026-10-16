@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { SendHorizontal, Square, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { useVoiceRecorder } from '../../voice/useVoiceRecorder.js';
+import { VoiceComposerBar, MicSendButton } from '../../voice/VoiceComposerBar.jsx';
+import { voiceFileName } from '../../voice/format.js';
 import groupChat from '../../../shared/group-chat.js';
 import { TYPING_REFRESH_MS } from '../../../shared/chat-typing.js';
 import {
@@ -9,6 +12,7 @@ import {
   getComposerTextareaMaxHeight,
   getFileCategory,
   getMessagePreviewText,
+  readFileAsBase64WithProgress,
 } from './messageHelpers.jsx';
 import { FileTypeIcon } from './messageParts.jsx';
 import { ComposerAttachMenu } from './ComposerAttachMenu.jsx';
@@ -65,6 +69,7 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
   const showStop = isAiChatSelected && aiChatPending && !askActive;
 
   const [input, setInput] = useState('');
+  const voice = useVoiceRecorder();
   const typingPeerRef = useRef('');
   const lastTypingSentRef = useRef(0);
   const typingActiveRef = useRef(false);
@@ -110,6 +115,11 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
   useEffect(() => {
     if (composerDisabled) stopTyping();
   }, [composerDisabled, stopTyping]);
+
+  const resetVoice = voice.reset;
+  useEffect(() => {
+    resetVoice();
+  }, [selectedPeer?.id, resetVoice]);
 
   useEffect(() => {
     if (!input.trim() || isAiChatSelected || isGroupSelected || composerDisabled) return undefined;
@@ -164,6 +174,63 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
   });
 
   const [sendBurst, setSendBurst] = useState(false);
+
+  useEffect(() => {
+    if (voice.error === 'denied') {
+      toast({
+        variant: 'error',
+        title: 'Kein Mikrofonzugriff',
+        message: 'BlueTalk braucht Zugriff auf das Mikrofon, um Sprachnachrichten aufzunehmen.',
+      });
+    } else if (voice.error === 'unavailable') {
+      toast({
+        variant: 'error',
+        title: 'Mikrofon nicht verfügbar',
+        message: 'Die Aufnahme konnte nicht gestartet werden.',
+      });
+    }
+  }, [voice.error, toast]);
+
+  const startVoice = () => {
+    if (composerDisabled || isAiChatSelected) return;
+    void voice.start();
+  };
+
+  const sendVoice = async () => {
+    const preview = voice.consumePreview();
+    if (!preview || !selectedPeer) return;
+    const fileName = voiceFileName(new Date(), preview.ext);
+    try {
+      const file = new File([preview.blob], fileName, { type: preview.mime || 'audio/webm' });
+      const data = await readFileAsBase64WithProgress(file, () => {}, true);
+      sendMessage(selectedPeer.id, {
+        kind: 'file',
+        content: fileName,
+        fileName,
+        fileSize: file.size,
+        fileType: preview.mime || 'audio/webm',
+        fileData: data.base64,
+        localPreviewUrl: preview.objectUrl,
+        voice: {
+          durationMs: preview.durationMs,
+          waveform: preview.waveform,
+          mime: preview.mime || 'audio/webm',
+        },
+      }).then((result) => {
+        // sendMessage liefert true inkl. Cloud-Postfach; nur echter Fehler → Toast.
+        const ok = result === true || result?.ok === true;
+        if (!ok) {
+          toast({ variant: 'error', title: 'File not sent', message: 'Peer is probably offline.' });
+        }
+      });
+    } catch {
+      toast({ variant: 'error', title: 'Sprachnachricht', message: 'Aufnahme konnte nicht gelesen werden.' });
+      try { URL.revokeObjectURL(preview.objectUrl); } catch { /* ignore */ }
+    }
+  };
+
+  const voiceActive = voice.recording || voice.previewing;
+  const showMic = !showStop && !askActive && !isAiChatSelected && !input.trim() && !pendingFile;
 
   const fireSend = () => {
     if (askActive) {
@@ -276,6 +343,17 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
 
       {warning && <div className="chat-warning">{warning}</div>}
 
+      {voiceActive ? (
+        <VoiceComposerBar
+          phase={voice.phase}
+          durationMs={voice.durationMs}
+          liveWaveform={voice.liveWaveform}
+          preview={voice.preview}
+          onStop={() => void voice.stop()}
+          onDiscard={() => voice.reset()}
+          onSend={() => void sendVoice()}
+        />
+      ) : (
       <div className="chat-input-bar">
         {showAiComposerAttach ? (
           <ComposerAttachMenu
@@ -334,11 +412,16 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
           rows={1}
           disabled={composerDisabled}
         />
-        <button
-          className={`btn btn-primary btn-icon chat-send-btn${sendBurst ? ' is-sending' : ''}`}
-          onClick={showStop ? () => void cancelAiChat() : fireSend}
+        <MicSendButton
+          showMic={showMic}
+          showStop={showStop}
+          sendBurst={sendBurst}
+          onMic={startVoice}
+          onSend={fireSend}
+          onStop={() => void cancelAiChat()}
           disabled={
             !showStop
+            && !showMic
             && (
               sendingFile
               || readingFile
@@ -346,17 +429,20 @@ export function Composer({ chat, reply, attachments, env, actions, textareaRef }
               || (!input.trim() && !pendingFile)
               || composerDisabled
             )
+            || (showMic && composerDisabled)
           }
-          style={{ height: 32, width: 32 }}
-          title={showStop ? 'Antwort stoppen' : askActive ? 'Antwort senden' : 'Nachricht senden'}
-        >
-          {showStop ? (
-            <Square size={15} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-          ) : (
-            <SendHorizontal size={17} strokeWidth={CHAT_ICON_STROKE} aria-hidden />
-          )}
-        </button>
+          title={
+            showStop
+              ? 'Antwort stoppen'
+              : askActive
+                ? 'Antwort senden'
+                : showMic
+                  ? 'Sprachnachricht aufnehmen'
+                  : 'Nachricht senden'
+          }
+        />
       </div>
+      )}
       </div>
     </div>
   );

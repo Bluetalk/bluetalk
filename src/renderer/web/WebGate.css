@@ -1,0 +1,293 @@
+.web-gate {
+  min-height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(59, 130, 246, 0.16), transparent 60%),
+    var(--bg-0);
+}
+
+.web-gate-card {
+  width: min(420px, 100%);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: 32px 28px 24px;
+}
+
+.web-gate-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.web-gate-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: block;
+}
+
+.web-gate-brand h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--fg-0);
+  margin: 0;
+}
+
+.web-gate-brand p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+.web-gate-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 20px;
+  background: var(--bg-2);
+  border-radius: var(--radius-md);
+}
+
+.web-gate-tab {
+  border: 0;
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.web-gate-tab.is-active {
+  background: var(--bg-0);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-sm);
+}
+
+.web-gate-tab:focus-visible,
+.web-gate-stay input:focus-visible,
+.web-gate-form .input:focus-visible,
+.web-gate-submit:focus-visible,
+.web-replaced-actions .btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--ring);
+}
+
+.web-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.web-gate-form .input-group label {
+  font-size: 12px;
+}
+
+.web-gate-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fg-2);
+  background: var(--cloud-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.web-gate-privacy svg {
+  color: var(--cloud);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.web-gate-stay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.web-gate-stay input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.web-gate-error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--red);
+  background: var(--red-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.web-gate-submit {
+  width: 100%;
+  margin-top: 4px;
+  min-height: 40px;
+}
+
+.web-gate-hint {
+  margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-3);
+  text-align: center;
+}
+
+.web-gate-loading {
+  min-height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-2);
+  font-size: 13px;
+}
+
+.web-replaced {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: color-mix(in srgb, var(--bg-0) 86%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.web-replaced-card {
+  width: min(440px, 100%);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.web-replaced-card h2 {
+  margin: 12px 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.web-replaced-card p {
+  margin: 0 0 20px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.web-replaced-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.web-account-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 10px;
+}
+
+.web-account-bar button {
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .web-gate {
+    padding: 16px 12px;
+    align-items: flex-start;
+  }
+  .web-gate-card {
+    padding: 24px 18px 20px;
+    border-radius: var(--radius-lg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .web-gate,
+  .web-replaced {
+    background: var(--bg-0);
+  }
+  .web-replaced {
+    backdrop-filter: none;
+  }
+}
+
+/* App-Layout im Browser ab 768 px: Sidebar + Chatliste bleiben bedienbar. */
+@media (max-width: 768px) {
+  html.bluetalk-web .app {
+    height: 100dvh;
+  }
+  html.bluetalk-web .titlebar {
+    height: 36px;
+  }
+  html.bluetalk-web .content-frame {
+    margin: 0 4px 4px 0;
+  }
+  html.bluetalk-web .app-body:not(:has(.sidebar)) .content-frame {
+    margin-left: 4px;
+  }
+  html.bluetalk-web .content {
+    border-radius: var(--radius-md);
+  }
+  html.bluetalk-web .split-layout {
+    padding: 4px;
+    gap: 4px;
+  }
+  html.bluetalk-web .split-list {
+    width: min(220px, 38vw);
+  }
+  html.bluetalk-web .chat-profile-panel,
+  html.bluetalk-web .chat-profile-panel.peer-profile-modal {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: min(320px, calc(100% - 16px));
+    min-width: 0;
+    z-index: 30;
+    box-shadow: var(--shadow-xl);
+  }
+  html.bluetalk-web .page-header,
+  html.bluetalk-web .page-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  html.bluetalk-web .page-shell-header,
+  html.bluetalk-web .page-shell-search,
+  html.bluetalk-web .page-shell-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}

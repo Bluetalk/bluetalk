@@ -3,6 +3,15 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.3.0': {
+    title: "What's new in BlueTalk 2.3.0",
+    items: [
+      'Sprachnachrichten: Im leeren Chatfeld wird Senden zum Mikrofon. Aufnahme mit Wellenform, danach Abspielen, Spulen und 1×/1,5×/2×.',
+      'Sprachanrufe: 1:1-Anrufe über die bestehende verschlüsselte Verbindung — im LAN, über die Cloud und in BlueTalk Web, ohne extra Server.',
+      'BlueTalk Cloud-Konto: Mit Benutzername und Passwort dieselbe Identität auf jedem Gerät. Chatverlauf, Kontakte und Einstellungen synchronisieren Ende-zu-Ende verschlüsselt. Kontakte findest du über den Benutzernamen.',
+      'BlueTalk Web: Unter https://bt.henny.dev/ im Browser anmelden. Ein Gerät ist aktiv, die anderen zeigen „Hier verwenden“. Ein vergessenes Passwort lässt sich nicht wiederherstellen.',
+    ],
+  },
   '2.2.0': {
     title: "What's new in BlueTalk 2.2.0",
     items: [
