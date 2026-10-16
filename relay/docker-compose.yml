@@ -1,0 +1,28 @@
+# Beispiel zum Selbsthosten. Reverse-Proxy (Caddy/nginx/Traefik) davor:
+# WebSocket-Upgrade und TLS (wss://) dort erledigen.
+#
+#   cd relay
+#   docker compose up -d --build
+
+services:
+  relay:
+    build: .
+    image: bluetalk-relay:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DATA_DIR: /data
+      # Host, den Clients in der Auth-Signatur verwenden (ohne https://).
+      # PUBLIC_HOST: bt.example.com
+      TRUST_PROXY: "1"
+      # Hinter Cloudflare die echte Client-IP (hat Vorrang vor TRUST_PROXY):
+      CLIENT_IP_HEADER: cf-connecting-ip
+      MAX_CONNECTIONS_PER_IP: "32"
+      RUST_LOG: info
+    volumes:
+      - relay-data:/data
+
+volumes:
+  relay-data:
