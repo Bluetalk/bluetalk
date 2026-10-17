@@ -255,3 +255,26 @@ test('gerätelokales Settings-Feld wird beim Apply ignoriert', () => {
   assert.equal(theme.theme, 'light');
   assert.equal(theme.launchAtLogin, false);
 });
+
+test('remote contact stub keeps local name, picture and bio', () => {
+  const local = [{ id: 'bt2_a', name: 'Ada', profilePicture: 'data:image/png;base64,abc', bio: 'hi' }];
+  const next = applyStoreEntryToValue('contacts', local, 'bt2_a', {
+    value: { id: 'bt2_a', features: ['message-edit'] },
+  });
+  assert.deepEqual(next[0], {
+    id: 'bt2_a',
+    features: ['message-edit'],
+    name: 'Ada',
+    profilePicture: 'data:image/png;base64,abc',
+    bio: 'hi',
+  });
+  const renamed = applyStoreEntryToValue('contacts', local, 'bt2_a', {
+    value: { id: 'bt2_a', name: 'Ada L.', profilePicture: 'data:image/png;base64,new' },
+  });
+  assert.equal(renamed[0].name, 'Ada L.');
+  assert.equal(renamed[0].profilePicture, 'data:image/png;base64,new');
+  const placeholder = applyStoreEntryToValue('contacts', local, 'bt2_a', {
+    value: { id: 'bt2_a', name: 'bt2_a' },
+  });
+  assert.equal(placeholder[0].name, 'Ada');
+});

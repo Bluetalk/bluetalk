@@ -1,5 +1,10 @@
 /** Kontakt-Patches: undefined darf Name/Profilbild nicht überschreiben. */
 
+import groupChat from '../../shared/group-chat.js';
+import { isAiChatPeerId } from '../aiChatConstants.js';
+
+const { isGroupChatId } = groupChat;
+
 const PLACEHOLDER_NAMES = new Set(['', 'Anonymous', 'BlueTalk user']);
 
 export function isPlaceholderDisplayName(name) {
@@ -48,7 +53,7 @@ export function applyContactPatchToList(prev, patch) {
 /** Name aus einer eingehenden Nachricht, wenn der Kontakt noch keinen echten hat. */
 export function upsertContactNameFromIncomingMessage(contacts, peerId, message) {
   const list = Array.isArray(contacts) ? contacts : [];
-  if (!peerId || !message || message.from === 'self') {
+  if (!peerId || !message || message.from === 'self' || isGroupChatId(peerId) || isAiChatPeerId(peerId)) {
     return { contacts: list, changed: false };
   }
   const name = typeof message.sender === 'string' ? message.sender.trim() : '';

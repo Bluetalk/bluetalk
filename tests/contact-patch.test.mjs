@@ -91,3 +91,9 @@ test('profile payload includes name and picture', () => {
   assert.equal(payload.profilePicture, 'data:image/png;base64,abc');
   assert.ok(Array.isArray(payload.features));
 });
+
+test('name hydration skips group chats', () => {
+  const groupId = 'group:' + 'a'.repeat(16);
+  const result = upsertContactNameFromIncomingMessage([], groupId, { from: 'bt2_x', sender: 'X' });
+  assert.equal(result.changed, false);
+});

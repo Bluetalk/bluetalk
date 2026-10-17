@@ -3,6 +3,12 @@
  * When you ship a new version, add a matching key here (same as package.json version).
  */
 const RELEASE_NOTES = {
+  '2.4.2': {
+    title: "What's new in BlueTalk 2.4.2",
+    items: [
+      'Cloud-Sync: Chats kommen jetzt mit Namen und Profilbild in die Cloud. Ein unvollständiger Kontakt von einem anderen Gerät überschreibt Name, Bild und Bio nicht mehr, und Geräte, die sich nur angemeldet hatten, laden ihre vorhandenen Chats und Kontakte einmal nach.',
+    ],
+  },
   '2.4.1': {
     title: "What's new in BlueTalk 2.4.1",
     items: [

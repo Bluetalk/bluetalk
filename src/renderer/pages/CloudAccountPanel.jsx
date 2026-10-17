@@ -152,7 +152,6 @@ export default function CloudAccountPanel({ toast, localPeerId, devices = [] }) 
   const afterAuth = async (nextAccount, vault, { isRegister }) => {
     clearSecrets();
     if (isRegister) {
-      await startSync();
       await fullUpload();
       toast?.({ variant: 'success', title: 'Konto erstellt', message: 'Nachrichten werden Ende-zu-Ende verschlüsselt synchronisiert.' });
       await refreshUsage();

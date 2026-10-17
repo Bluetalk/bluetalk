@@ -39,6 +39,8 @@ import {
 import { upsertContactNameFromIncomingMessage } from '../app/contactPatch.js';
 
 const PULL_LIMIT = 200;
+const BACKFILL_KEY = 'cloudSyncBackfill';
+const backfillTag = (account) => `v1:${account?.username || ''}`;
 const PUSH_DEBOUNCE_MS = 1500;
 const PULL_INTERVAL_MS = 60_000;
 const BACKOFF_MIN_MS = 2000;
@@ -350,6 +352,15 @@ export async function startSync() {
   window.addEventListener('online', onlineHandler);
   pullTimer = setInterval(() => { void runCycle('pull'); }, PULL_INTERVAL_MS);
   await runCycle('start');
+  // Geräte, die sich vor 2.4.2 nur angemeldet (nicht registriert) haben, hatten
+  // ihre vorhandenen Chats und Kontakte nie hochgeladen — einmal pro Konto nachholen.
+  // Web nicht: dort liegt nur, was ohnehin aus der Cloud kam.
+  const isWeb = typeof __BLUETALK_WEB__ !== 'undefined' && __BLUETALK_WEB__;
+  if (running && !isWeb && (await rawStore()?.get?.(BACKFILL_KEY, null)) !== backfillTag(stored)) {
+    void fullUpload().catch((error) => {
+      console.warn('[BlueTalk Sync] Nachladen fehlgeschlagen:', error?.message || error);
+    });
+  }
 }
 
 export function stopSync() {
@@ -768,11 +779,12 @@ export async function fullUpload() {
   await hydrateOutbox();
   const changes = [];
   const now = Date.now();
-  for (const key of SYNCED_STORE_KEYS) {
-    const value = await rawStore()?.get?.(key, null);
-    const diffs = diffStoreEntries(key, value, {});
-    for (const diff of diffs) changes.push({ ...diff, ts: now });
-  }
+  const store = rawStore();
+  await store?.set?.(BACKFILL_KEY, backfillTag(await getAccount()));
+  // Chats ohne Kontakteintrag (z. B. nur per LAN bekannt) bekämen auf anderen
+  // Geräten nur die Peer-ID als Namen — Namen aus dem Verlauf nachtragen.
+  let contacts = await store?.get?.('contacts', []);
+  let contactsChanged = false;
   const meta = await rawMessages()?.getMeta?.();
   for (const peerId of Object.keys(meta || {})) {
     if (!peerId || peerId === 'self') continue;
@@ -787,6 +799,22 @@ export async function fullUpload() {
         ts: Number(message.timestamp) || now,
       });
     }
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const next = upsertContactNameFromIncomingMessage(contacts, peerId, messages[i]);
+      if (!next.changed) continue;
+      contacts = next.contacts;
+      contactsChanged = true;
+      break;
+    }
+  }
+  if (contactsChanged) {
+    await store?.set?.('contacts', contacts);
+    emitApplied({ peers: [], storeKeys: ['contacts'] });
+  }
+  for (const key of SYNCED_STORE_KEYS) {
+    const value = await store?.get?.(key, null);
+    const diffs = diffStoreEntries(key, value, {});
+    for (const diff of diffs) changes.push({ ...diff, ts: now });
   }
   for (const change of changes) memoryOutbox.enqueue(change);
   schedulePersist();

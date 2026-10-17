@@ -1,3 +1,5 @@
+import { isPlaceholderDisplayName } from '../app/contactPatch.js';
+
 export const FILE_DATA_STRIP_BYTES = Math.floor(1.5 * 1024 * 1024);
 export const PUSH_BATCH = 100;
 export const PUSH_BODY_MAX_BYTES = 8 * 1024 * 1024;
@@ -154,6 +156,28 @@ export function diffStoreEntries(key, currentValue, snapshotMap) {
   return changes;
 }
 
+/**
+ * Kontakte werden als ganzer Eintrag synchronisiert. Andere Geräte legen aber
+ * oft nur Rumpf-Einträge an (z. B. `{ id, features }` aus einem Presence-Frame).
+ * Ein solcher Eintrag darf Name, Profilbild und Bio nicht löschen.
+ */
+export function mergeContactIdentity(existing, incoming) {
+  if (!existing || typeof existing !== 'object') return incoming;
+  const merged = { ...incoming };
+  const hasName = (value) => {
+    const name = typeof value === 'string' ? value.trim() : '';
+    return Boolean(name) && !isPlaceholderDisplayName(name) && name !== String(incoming?.id || '');
+  };
+  if (!hasName(merged.name) && hasName(existing.name)) merged.name = existing.name;
+  for (const field of ['profilePicture', 'bio']) {
+    const next = merged[field];
+    if ((next === undefined || next === null || next === '') && existing[field]) {
+      merged[field] = existing[field];
+    }
+  }
+  return merged;
+}
+
 export function applyStoreEntryToValue(key, currentValue, id, patch) {
   const entryId = String(id || '');
   if (!entryId) return currentValue;
@@ -167,8 +191,9 @@ export function applyStoreEntryToValue(key, currentValue, id, patch) {
       list.splice(idx, 1);
       return list;
     }
-    const nextItem = patch?.value;
+    let nextItem = patch?.value;
     if (!nextItem || typeof nextItem !== 'object') return list;
+    if (key === 'contacts' && idx >= 0) nextItem = mergeContactIdentity(list[idx], nextItem);
     if (idx >= 0) list[idx] = nextItem;
     else list.push(nextItem);
     return list;
